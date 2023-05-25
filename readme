@@ -1,0 +1,50 @@
+2013
+获取大页: 
+ofi_hugepage_enabled
+  ofi_get_hugepage_size
+  ofi_alloc_hugepage_buf
+  ofi_unmap_anon_pages
+
+check fork: ibv_is_fork_initialized
+
+注册内存:
+参考daos: C:\Users\s30893\project\stor\storage\daos\daos.drawio
+...
+na_ofi_initialize
+  na_ofi_class->send_pool = hg_mem_pool_create(pool_chunk_size ... na_ofi_mem_buf_register 注册初始内存池
+  na_ofi_class->recv_pool = hg_mem_pool_create -> hg_mem_pool_create(size_t chunk_size
+    struct hg_mem_pool_block *hg_mem_pool_block = hg_mem_pool_block_alloc register_func
+      int rc = register_func(mem_ptr, block_size, flags, &mr_handle, arg) -> na_ofi_mem_buf_register -> na_ofi_mem_buf_register(const void *buf
+        rc = fi_mr_reg(na_ofi_class->domain->fi_domain, buf, len, access,
+          .reg = vrb_mr_reg -> vrb_mr_reg(struct fid *fid, const void *buf, size_t len, uint64_t access -> vrb_mr_reg_iface
+          _domain->cache.add_region = vrb_mr_cache_add_region; -> int vrb_mr_reg_common -> md->mr = ibv_reg_mr(md->domain->pd, (void *) buf, len,
+          
+
+  
+
+
+立即数: wr.imm_data = htonl((uint32_t)data)
+
+
+
+rdma write, 单边写, 
+NA_Put
+na_ofi_put
+na_ofi_rma fi_writemsg = fi_rma_op   .writemsg =    -> include/rdma/fi_rma.h -> fi_writemsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uint64_t flags)
+ep->rma->writemsg(ep, msg, flags)
+.writemsg = vrb_msg_ep_rma_writemsg
+vrb_msg_ep_rma_writemsg -> prov/verbs/src/verbs_rma.c
+  struct ibv_send_wr wr
+  wr.opcode = IBV_WR_RDMA_WRITE | wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM 写|立即数写
+  vrb_send_iov(ep, &wr, msg->msg_iov, msg->desc -> ssize_t vrb_send_iov
+    wr->sg_list = alloca(sizeof(*wr->sg_list) * count)
+    wr->sg_list[i].addr = (uintptr_t) iov[i].iov_base
+    wr->sg_list[i].length = iov[i].iov_len;
+    wr->send_flags = IBV_SEND_INLINE ?IBV_SEND_FENCE
+    wr->sg_list[0]
+    wr->num_sge =
+    vrb_post_send(ep, wr, flags) -> prov/verbs/src/verbs_ep.c -> ssize_t vrb_post_send
+      ibv_post_send(ep->ibv_qp, wr, &bad_wr)
+
+所有标签(Flags), include/rdma/fabric.h -> #define FI_MSG			(1ULL << 1) ...
+
