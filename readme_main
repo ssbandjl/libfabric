@@ -3,5 +3,183 @@ git remote add upstream https://github.com/ofiwg/libfabric.git
 git fetch upstream
 git merge upstream/main
 
-fabtests 测试
+fabtests 测试, fabtests/README, fabtests/README.md
 使用 --with-libfabric=<directory> 选项告诉 Fabtests 在哪里可以找到已安装的 Libfabric 的头文件和库文件
+编译:
+./autogen.sh
+./configure --with-libfabric=/opt/libfabric --prefix=/opt/fabtests && make -j 32 && sudo make install   #or
+./configure --prefix=/opt/fabtests && make -j 32 && sudo make install
+./configure --with-libfabric=/home/xb/project/net/libfabric/libfabric/build/libfabric --prefix=/home/xb/project/net/libfabric/libfabric/build/fabtests --enable-debug && make -j 32 && sudo make install
+
+server
+#原生网卡名
+fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged -d mlx5_0 -v -I 2
+
+client
+fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged 175.16.53.73 -v -I 2
+
+server
+gdb --args ./build/fabtests/bin/fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged -d mlx5_0 -v -I 2
+fi_pingpong源码: util/pingpong.c
+main -> int main(int argc, char **argv)
+ct.hints = fi_allocinfo()
+ct.hints->ep_attr->type = FI_EP_DGRAM 数据报端点
+ofi_osd_init -> null
+getopt -> static void pp_parse_opts 解析参数
+  case 'e' Endpoint -> ct->hints->ep_attr->type = FI_EP_RDM
+  case 'p' Provider -> ct->hints->fabric_attr->prov_name = strdup(optarg) verbs;ofi_rxm
+  case 'm' ct->hints->caps &= ~FI_MSG -> ct->hints->caps |= FI_TAGGED 去掉和增加标记
+  case 'd' Domain -> ct->hints->domain_attr->name = strdup(optarg)
+  case 'I' Iterations 迭代/重复 -> ct->opts.options |= PP_OPT_ITER
+ct.opts.dst_addr -> 
+pp_banner_options -> static void pp_banner_options 打印横幅banner
+  opts.transfer_size 64
+  PP_DEBUG(" * PingPong options:\n")
+switch (ct.hints->ep_attr->type)
+
+pp_free_res
+
+
+
+端点类型:
+enum fi_ep_type {
+	FI_EP_UNSPEC,
+	FI_EP_MSG,
+	FI_EP_DGRAM,
+	FI_EP_RDM,
+	FI_EP_SOCK_STREAM,
+	FI_EP_SOCK_DGRAM,
+};
+
+
+
+宏
+int DEFAULT_SYMVER_PRE(fi_getinfo)
+
+
+
+dos2unix autogen.sh
+./autogen.sh
+./configure --prefix="" --disable-efa --disable-psm3 --without-gdrcopy --enable-debug --disable-psm2 --disable-psm3
+make && make install
+
+
+fi_pingpong -p sockets
+fi_pingpong -p sockets "localhost" -v
+
+server:
+fi_pingpong -p sockets
+
+
+makeword是将两个byte型合并成一个word型，一个在高8位(b)，一个在低8位(a)
+MAKEWORD(2,2)就是调用2.2版
+
+client:
+fi_pingpong -p sockets "192.168.1.6" -v
+
+export PATH=/root/github/storage/daos/libfabric/util:$PATH
+util/pingpong.c
+
+server:
+main -> ofi_osd_init -> MAKEWORD -> WSAStartup -> pp_parse_opts 解析参数 -> pp_banner_options 打印横幅 -> FI_EP_RDM -> run_pingpong_rdm -> pp_init_fabric -> run_suite_pingpong -> pp_finalize
+
+pp_init_fabric -> 
+
+client:
+
+run_pingpong_rdm -> PP_POST -> 
+
+fi_pingpong.1.md
+
+WRITE:写
+vrb_msg_ep_rma_write -> IBV_WR_RDMA_WRITE -> ibv_post_send
+
+debug:
+FI_WARN(&core_prov, FI_LOG_CORE, "iov:%p\n", iov);
+
+
+tcpx_tx_queue_insert -> 
+
+fi_tsend -> rxm_ep_tsend -> rxm_get_conn -> rxm_send_common -> rxm_send_eager -> rxm_msg_tsend -> tcpx_tx_queue_insert -> rxm_cq_write 发完后写完成队列 -> ofi_cq_write
+
+
+断点: rxm_ep_tsend
+
+获取连接:
+rxm_get_conn
+  ofi_av_addr_context
+    ofi_av_get_addr
+      ofi_bufpool_get_ibuf
+  rxm_add_conn
+    ofi_idm_lookup
+    rxm_alloc_conn
+      rxm_av_alloc_conn
+        ofi_buf_alloc(av->conn_pool)
+          ofi_bufpool_grow
+  rxm_ep_do_progress
+  rxm_connect
+    rxm_send_connect 空闲状态则建立连接(RXM_CM_IDLE)
+      rxm_open_conn
+        fi_endpoint
+        fi_ep_bind
+        fi_enable
+        rxm_prepost_recv
+      rxm_init_connect_data 将被动端点做连接请求发送到服务器
+      fi_connect
+        tcpx_ep_connect
+          ofi_wait_add_fd epoll
+  rxm_conn_progress
+    fi_eq_read 循环读取,从事件队列读取事件
+    rxm_handle_event
+    rxm_handle_error
+
+
+rxm_ep_do_progress
+  do
+    fi_cq_read
+    handle_comp_error rxm_handle_comp_error
+      fi_cq_readerr
+      ofi_cq_write_error
+
+
+
+1. fi_tsend
+/lib/libfabric.so.1(+0xf8b83) [0x7fbe1c660b83]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0xf494) [0x7fbe1c744494]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0xf875) [0x7fbe1c744875]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0xee1a) [0x7fbe1c99fe1a]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Core_forward+0x140) [0x7fbe1c9a8550]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Forward+0xc8) [0x7fbe1c999f98]
+2.  na_ofi_progress
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0x139ac) [0x7fbe1c7489ac]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(NA_Progress+0x24b) [0x7fbe1c73d77b]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0xffbb) [0x7fbe1c9a0fbb]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0x12169) [0x7fbe1c9a3169]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Core_progress+0x10) [0x7fbe1c9a8920]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Progress+0x18) [0x7fbe1c99a378]
+
+
+recv_list
+
+
+HG_Progress -> NA_Progress -> na_ofi_progress -> ofi_cq_readfrom -> ofi_cq_progress -> rxm_ep_progress -> rxm_ep_do_progress -> rxm_handle_comp -> rxm_finish_eager_send -> rxm_cq_write_tx_comp -> rxm_cq_write -> print_stacktrace  -> HG -> na_ofi_cq_read
+
+server: NA_CB_RECV_UNEXPECTED CQ event 非预期接收
+
+
+地址向量:
+
+ip_av_insert_addr
+
+打印地址
+ofi_straddr_dbg(av->prov, FI_LOG_AV, "av_insert addr", addr)
+
+HASH_ADD(hh, av->hash, data, av->addrlen, entry)
+
+ofi_av_write_event
+
+fi_eq_write
+
+
+
+

@@ -87,3 +87,4 @@ fabtests/pytest/*/__pycache__
 prov/efa/docs/doxygen/html
 prov/efa/docs/doxygen/latex
 
+build/
