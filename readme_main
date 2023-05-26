@@ -35,11 +35,49 @@ ct.opts.dst_addr ->
 pp_banner_options -> static void pp_banner_options 打印横幅banner
   opts.transfer_size 64
   PP_DEBUG(" * PingPong options:\n")
-switch (ct.hints->ep_attr->type)
-
+switch (ct.hints->ep_attr->type) -> case FI_EP_RDM -> ret = run_pingpong_rdm(&ct) -> static int run_pingpong_rdm
+  pp_init_fabric -> static int pp_init_fabric
+    pp_ctrl_init -> static int pp_ctrl_init
+      default_ctrl = 47592 默认服务端口
+      pp_ctrl_init_server -> static int pp_ctrl_init_server
+        listenfd = ofi_socket(pp_ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0) -> static inline SOCKET ofi_socket(int domain, int type, int protocol) -> socket(domain, type, protocol)
+        setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR
+        struct sockaddr_in ctrl_addr = {0}
+        ctrl_addr.sin_port = htons(ct->opts.src_port) 47592
+        ctrl_addr.sin_addr.s_addr = htonl(INADDR_ANY)
+        ret = bind(listenfd
+        listen(listenfd, 10)
+        ct->ctrl_connfd = accept(listenfd, NULL, NULL) 等待客户端调用connect触发服务端accept
+        ofi_close_socket(listenfd)
+      setsockopt(ct->ctrl_connfd
+  run_suite_pingpong
+  pp_finalize
 pp_free_res
 
 
+client:
+gdb --args ./build/fabtests/bin/fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged 175.16.53.73 -v -I 2
+ct.hints = fi_allocinfo
+ct.opts.dst_addr 175.16.53.73
+run_pingpong_rdm -> static int run_pingpong_rdm
+pp_init_fabric -> pp_ctrl_init_client
+  connect(ct->ctrl_connfd, rp->ai_addr, (socklen_t) rp->ai_addrlen) 连接服务端, 服务端执行accept
+setsockopt(ct->ctrl_connfd
+pp_ctrl_init
+if (ct->opts.dst_addr)
+pp_recv_name
+pp_getinfo
+pp_open_fabric_res
+pp_alloc_active_res
+pp_init_ep
+pp_send_name
+pp_av_insert
+
+run_suite_pingpong
+pp_finalize
+
+编译:
+make util/fi_pingpong -> util/fi_pingpong$(EXEEXT)
 
 端点类型:
 enum fi_ep_type {
