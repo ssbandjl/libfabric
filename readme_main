@@ -1,0 +1,7 @@
+https://github.com/ssbandjl/libfabric.git
+git remote add upstream https://github.com/ofiwg/libfabric.git
+git fetch upstream
+git merge upstream/main
+
+fabtests 测试
+使用 --with-libfabric=<directory> 选项告诉 Fabtests 在哪里可以找到已安装的 Libfabric 的头文件和库文件
