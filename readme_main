@@ -290,3 +290,6 @@ vrb_msg_ep_get_qp_attr(ep, &attr);
   attr->cap.max_recv_sge = ep->info_attr.rx_iov_limit;
 vrb_create_dgram_ep
   ibv_create_qp
+
+
+测试安装成功: fi_info
