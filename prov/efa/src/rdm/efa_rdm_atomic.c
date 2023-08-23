@@ -37,7 +37,7 @@
 #include "efa_rdm_rma.h"
 #include "efa_cntr.h"
 #include "efa_rdm_atomic.h"
-#include "rxr_pkt_cmd.h"
+#include "efa_rdm_pke_cmd.h"
 
 static void efa_rdm_atomic_init_shm_msg(struct efa_rdm_ep *ep, struct fi_msg_atomic *shm_msg,
 				    const struct fi_msg_atomic *msg,
@@ -46,7 +46,7 @@ static void efa_rdm_atomic_init_shm_msg(struct efa_rdm_ep *ep, struct fi_msg_ato
 {
 	int i;
 
-	assert(msg->rma_iov_count <= RXR_IOV_LIMIT);
+	assert(msg->rma_iov_count <= EFA_RDM_IOV_LIMIT);
 	memcpy(shm_msg, msg, sizeof(*msg));
 	if (!(efa_rdm_ep_domain(ep)->shm_info->domain_attr->mr_mode & FI_MR_VIRT_ADDR)) {
 		memcpy(rma_iov, msg->rma_iov,
@@ -73,7 +73,7 @@ efa_rdm_atomic_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
 {
 	struct efa_rdm_ope *txe;
 	struct fi_msg msg;
-	struct iovec iov[RXR_IOV_LIMIT];
+	struct iovec iov[EFA_RDM_IOV_LIMIT];
 	size_t datatype_size;
 
 	datatype_size = ofi_datatype_size(msg_atomic->datatype);
@@ -128,15 +128,18 @@ ssize_t efa_rdm_atomic_generic_efa(struct efa_rdm_ep *efa_rdm_ep,
 	bool delivery_complete_requested;
 	ssize_t err;
 	static int req_pkt_type_list[] = {
-		[ofi_op_atomic] = RXR_WRITE_RTA_PKT,
-		[ofi_op_atomic_fetch] = RXR_FETCH_RTA_PKT,
-		[ofi_op_atomic_compare] = RXR_COMPARE_RTA_PKT
+		[ofi_op_atomic] = EFA_RDM_WRITE_RTA_PKT,
+		[ofi_op_atomic_fetch] = EFA_RDM_FETCH_RTA_PKT,
+		[ofi_op_atomic_compare] = EFA_RDM_COMPARE_RTA_PKT
 	};
+	struct util_srx_ctx *srx_ctx;
 
 	assert(msg->iov_count <= efa_rdm_ep->tx_iov_limit);
 	efa_perfset_start(efa_rdm_ep, perf_efa_tx);
 
-	ofi_mutex_lock(&efa_rdm_ep->base_ep.util_ep.lock);
+	srx_ctx = efa_rdm_ep_get_peer_srx_ctx(efa_rdm_ep);
+
+	ofi_genlock_lock(srx_ctx->lock);
 
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, msg->addr);
 	assert(peer);
@@ -170,7 +173,7 @@ ssize_t efa_rdm_atomic_generic_efa(struct efa_rdm_ep *efa_rdm_ep,
 		 * the information whether the peer
 		 * support it or not.
 		 */
-		err = rxr_pkt_trigger_handshake(efa_rdm_ep, txe->addr, peer);
+		err = efa_rdm_ep_trigger_handshake(efa_rdm_ep, txe->addr);
 		if (OFI_UNLIKELY(err)) {
 			efa_rdm_txe_release(txe);
 			goto out;
@@ -191,20 +194,14 @@ ssize_t efa_rdm_atomic_generic_efa(struct efa_rdm_ep *efa_rdm_ep,
 			    peer->next_msg_id++ : ++peer->next_msg_id;
 
 	if (delivery_complete_requested && op == ofi_op_atomic) {
-		err = rxr_pkt_post_req(efa_rdm_ep,
-				       txe,
-				       RXR_DC_WRITE_RTA_PKT,
-				       0);
+		err = efa_rdm_ope_post_send(txe, EFA_RDM_DC_WRITE_RTA_PKT);
 	} else {
 		/*
 		 * Fetch atomic and compare atomic
 		 * support DELIVERY_COMPLETE
 		 * by nature
 		 */
-		err = rxr_pkt_post_req(efa_rdm_ep,
-				       txe,
-				       req_pkt_type_list[op],
-				       0);
+		err = efa_rdm_ope_post_send(txe, req_pkt_type_list[op]);
 	}
 
 	if (OFI_UNLIKELY(err)) {
@@ -214,7 +211,7 @@ ssize_t efa_rdm_atomic_generic_efa(struct efa_rdm_ep *efa_rdm_ep,
 	}
 
 out:
-	ofi_mutex_unlock(&efa_rdm_ep->base_ep.util_ep.lock);
+	ofi_genlock_unlock(srx_ctx->lock);
 	efa_perfset_end(efa_rdm_ep, perf_efa_tx);
 	return err;
 }
@@ -277,8 +274,8 @@ efa_rdm_atomic_writemsg(struct fid_ep *ep,
 	struct fi_msg_atomic shm_msg;
 	struct efa_rdm_ep *efa_rdm_ep;
 	struct efa_rdm_peer *peer;
-	struct fi_rma_ioc rma_iov[RXR_IOV_LIMIT];
-	void *shm_desc[RXR_IOV_LIMIT];
+	struct fi_rma_ioc rma_iov[EFA_RDM_IOV_LIMIT];
+	void *shm_desc[EFA_RDM_IOV_LIMIT];
 	int err;
 
 	EFA_DBG(FI_LOG_EP_DATA,
@@ -354,8 +351,8 @@ efa_rdm_atomic_readwritemsg(struct fid_ep *ep,
 	struct efa_rdm_ep *efa_rdm_ep;
 	struct efa_rdm_peer *peer;
 	struct fi_msg_atomic shm_msg;
-	struct fi_rma_ioc shm_rma_iov[RXR_IOV_LIMIT];
-	void *shm_desc[RXR_IOV_LIMIT];
+	struct fi_rma_ioc shm_rma_iov[EFA_RDM_IOV_LIMIT];
+	void *shm_desc[EFA_RDM_IOV_LIMIT];
 	struct efa_rdm_atomic_ex atomic_ex;
 	size_t datatype_size;
 	int err;
@@ -449,8 +446,8 @@ efa_rdm_atomic_compwritemsg(struct fid_ep *ep,
 	struct efa_rdm_ep *efa_rdm_ep;
 	struct efa_rdm_peer *peer;
 	struct fi_msg_atomic shm_msg;
-	struct fi_rma_ioc shm_rma_iov[RXR_IOV_LIMIT];
-	void *shm_desc[RXR_IOV_LIMIT];
+	struct fi_rma_ioc shm_rma_iov[EFA_RDM_IOV_LIMIT];
+	void *shm_desc[EFA_RDM_IOV_LIMIT];
 	struct efa_rdm_atomic_ex atomic_ex;
 	size_t datatype_size;
 	int err;
@@ -574,9 +571,9 @@ int efa_rdm_atomic_query(struct fid_domain *domain,
 	efa_domain = container_of(domain, struct efa_domain,
 				  util_domain.domain_fid);
 
-	max_atomic_size = efa_domain->mtu_size - sizeof(struct rxr_rta_hdr)
+	max_atomic_size = efa_domain->mtu_size - sizeof(struct efa_rdm_rta_hdr)
 			  - efa_domain->addrlen
-			  - RXR_IOV_LIMIT * sizeof(struct fi_rma_iov);
+			  - EFA_RDM_IOV_LIMIT * sizeof(struct fi_rma_iov);
 
 	if (flags & FI_COMPARE_ATOMIC)
 		max_atomic_size /= 2;

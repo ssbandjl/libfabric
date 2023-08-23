@@ -74,23 +74,123 @@ static int efa_cntr_wait(struct fid_cntr *cntr_fid, uint64_t threshold, int time
 	return ret;
 }
 
+static uint64_t efa_cntr_read(struct fid_cntr *cntr_fid)
+{
+	struct util_srx_ctx *srx_ctx;
+	struct efa_cntr *efa_cntr;
+	uint64_t ret;
+
+	efa_cntr = container_of(cntr_fid, struct efa_cntr, util_cntr.cntr_fid);
+	srx_ctx = efa_cntr->util_cntr.domain->srx->ep_fid.fid.context;
+
+	ofi_genlock_lock(srx_ctx->lock);
+	if (efa_cntr->shm_cntr)
+		fi_cntr_read(efa_cntr->shm_cntr);
+	ret = ofi_cntr_read(cntr_fid);
+	ofi_genlock_unlock(srx_ctx->lock);
+
+	return ret;
+}
+
+static uint64_t efa_cntr_readerr(struct fid_cntr *cntr_fid)
+{
+	struct util_srx_ctx *srx_ctx;
+	struct efa_cntr *efa_cntr;
+	uint64_t ret;
+
+	efa_cntr = container_of(cntr_fid, struct efa_cntr, util_cntr.cntr_fid);
+	srx_ctx = efa_cntr->util_cntr.domain->srx->ep_fid.fid.context;
+
+	ofi_genlock_lock(srx_ctx->lock);
+	if (efa_cntr->shm_cntr)
+		fi_cntr_read(efa_cntr->shm_cntr);
+	ret = ofi_cntr_readerr(cntr_fid);
+	ofi_genlock_unlock(srx_ctx->lock);
+
+	return ret;
+}
+
+static struct fi_ops_cntr efa_cntr_ops = {
+	.size = sizeof(struct fi_ops_cntr),
+	.read = efa_cntr_read,
+	.readerr = efa_cntr_readerr,
+	.add = ofi_cntr_add,
+	.adderr = ofi_cntr_adderr,
+	.set = ofi_cntr_set,
+	.seterr = ofi_cntr_seterr,
+	.wait = efa_cntr_wait
+};
+
+static int efa_cntr_close(struct fid *fid)
+{
+	struct efa_cntr *cntr;
+	int ret, retv;
+
+	retv = 0;
+	cntr = container_of(fid, struct efa_cntr, util_cntr.cntr_fid.fid);
+
+	if (cntr->shm_cntr) {
+		ret = fi_close(&cntr->shm_cntr->fid);
+		if (ret) {
+			EFA_WARN(FI_LOG_CNTR, "Unable to close shm cntr: %s\n", fi_strerror(-ret));
+			retv = ret;
+		}
+	}
+
+	ret = ofi_cntr_cleanup(&cntr->util_cntr);
+	if (ret)
+		return ret;
+	free(cntr);
+	return retv;
+}
+
+static struct fi_ops efa_cntr_fi_ops = {
+	.size = sizeof(efa_cntr_fi_ops),
+	.close = efa_cntr_close,
+	.bind = fi_no_bind,
+	.control = fi_no_control,
+	.ops_open = fi_no_ops_open,
+};
+
 int efa_cntr_open(struct fid_domain *domain, struct fi_cntr_attr *attr,
 		  struct fid_cntr **cntr_fid, void *context)
 {
 	int ret;
-	struct util_cntr *cntr;
+	struct efa_cntr *cntr;
+	struct efa_domain *efa_domain;
+	struct fi_cntr_attr shm_cntr_attr = {0};
+	struct fi_peer_cntr_context peer_cntr_context = {0};
 
 	cntr = calloc(1, sizeof(*cntr));
 	if (!cntr)
 		return -FI_ENOMEM;
 
-	ret = ofi_cntr_init(&efa_prov, domain, attr, cntr,
+	efa_domain = container_of(domain, struct efa_domain,
+				  util_domain.domain_fid);
+
+	ret = ofi_cntr_init(&efa_prov, domain, attr, &cntr->util_cntr,
 			    &ofi_cntr_progress, context);
 	if (ret)
 		goto free;
 
-	*cntr_fid = &cntr->cntr_fid;
-	cntr->cntr_fid.ops->wait = efa_cntr_wait;
+	*cntr_fid = &cntr->util_cntr.cntr_fid;
+	cntr->util_cntr.cntr_fid.ops = &efa_cntr_ops;
+	cntr->util_cntr.cntr_fid.fid.ops = &efa_cntr_fi_ops;
+
+	/* open shm cntr as peer cntr */
+	if (efa_domain->shm_domain) {
+		memcpy(&shm_cntr_attr, attr, sizeof(*attr));
+		shm_cntr_attr.flags |= FI_PEER;
+		peer_cntr_context.size = sizeof(peer_cntr_context);
+		peer_cntr_context.cntr = cntr->util_cntr.peer_cntr;
+		ret = fi_cntr_open(efa_domain->shm_domain, &shm_cntr_attr,
+				   &cntr->shm_cntr, &peer_cntr_context);
+		if (ret) {
+			EFA_WARN(FI_LOG_CNTR, "Unable to open shm cntr, err: %s\n", fi_strerror(-ret));
+			goto free;
+		}
+	}
+
 	return FI_SUCCESS;
 
 free:
@@ -106,11 +206,11 @@ void efa_cntr_report_tx_completion(struct util_ep *ep, uint64_t flags)
 	assert(flags == FI_SEND || flags == FI_WRITE || flags == FI_READ);
 
 	if (flags == FI_SEND)
-		cntr = ep->tx_cntr;
+		cntr = ep->cntrs[CNTR_TX];
 	else if (flags == FI_WRITE)
-		cntr = ep->wr_cntr;
+		cntr = ep->cntrs[CNTR_WR];
 	else if (flags == FI_READ)
-		cntr = ep->rd_cntr;
+		cntr = ep->cntrs[CNTR_RD];
 	else
 		cntr = NULL;
 
@@ -126,11 +226,11 @@ void efa_cntr_report_rx_completion(struct util_ep *ep, uint64_t flags)
 	assert(flags == FI_RECV || flags == FI_REMOTE_WRITE || flags == FI_REMOTE_READ);
 
 	if (flags == FI_RECV)
-		cntr = ep->rx_cntr;
+		cntr = ep->cntrs[CNTR_RX];
 	else if (flags == FI_REMOTE_READ)
-		cntr = ep->rem_rd_cntr;
+		cntr = ep->cntrs[CNTR_REM_RD];
 	else if (flags == FI_REMOTE_WRITE)
-		cntr = ep->rem_wr_cntr;
+		cntr = ep->cntrs[CNTR_REM_WR];
 	else
 		cntr = NULL;
 
@@ -146,17 +246,17 @@ void efa_cntr_report_error(struct util_ep *ep, uint64_t flags)
 	struct util_cntr *cntr;
 
 	if (flags == FI_WRITE || flags == FI_ATOMIC)
-		cntr = ep->wr_cntr;
+		cntr = ep->cntrs[CNTR_WR];
 	else if (flags == FI_READ)
-		cntr = ep->rd_cntr;
+		cntr = ep->cntrs[CNTR_RD];
 	else if (flags == FI_SEND)
-		cntr = ep->tx_cntr;
+		cntr = ep->cntrs[CNTR_TX];
 	else if (flags == FI_RECV)
-		cntr = ep->rx_cntr;
+		cntr = ep->cntrs[CNTR_RX];
 	else if (flags == FI_REMOTE_READ)
-		cntr = ep->rem_rd_cntr;
+		cntr = ep->cntrs[CNTR_REM_RD];
 	else if (flags == FI_REMOTE_WRITE)
-		cntr = ep->rem_wr_cntr;
+		cntr = ep->cntrs[CNTR_REM_WR];
 	else
 		cntr = NULL;
 

@@ -112,7 +112,7 @@ static int alloc_multi_mr_res()
 	return 0;
 }
 
-static int init_multi_mr_res()
+static int init_multi_mr_res(void)
 {
 	int ret = 0, i;
 
@@ -321,6 +321,7 @@ int main(int argc, char **argv)
 	hints->caps = FI_RMA | FI_RMA_EVENT | FI_MSG;
 	hints->mode = FI_CONTEXT;
 	hints->domain_attr->mr_mode = opts.mr_mode;
+	hints->addr_format = opts.address_format;
 
 	ret = run_test();
 

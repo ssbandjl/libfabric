@@ -121,7 +121,7 @@ xnet_get_save_rx(struct xnet_ep *ep, uint64_t tag)
 		return NULL;
 
 	rx_entry->saving_ep = ep;
-	rx_entry->cntr = ep->util_ep.rx_cntr;
+	rx_entry->cntr = ep->util_ep.cntrs[CNTR_RX];
 	rx_entry->cq = xnet_ep_tx_cq(ep);
 	rx_entry->tag = tag;
 	rx_entry->ignore = 0;
@@ -151,6 +151,36 @@ xnet_get_save_rx(struct xnet_ep *ep, uint64_t tag)
 free_xfer:
 	xnet_free_xfer(progress, rx_entry);
 	return NULL;
+}
+
+static int xnet_handle_truncate(struct xnet_ep *ep)
+{
+	struct xnet_xfer_entry *rx_entry;
+	int ret;
+
+	FI_WARN(&xnet_prov, FI_LOG_EP_DATA, "msg recv truncated\n");
+	assert(ep->cur_rx.entry);
+	assert(ep->cur_rx.data_left);
+
+	rx_entry = ep->cur_rx.entry;
+	xnet_cntr_incerr(rx_entry);
+	/* TODO: need to report received message size =
+	 * base_hdr.size - base_hdr.hdr_size - data_left
+	 */
+	xnet_report_error(rx_entry, FI_ETRUNC);
+
+	/* Prepare to remove excess msg data from stream to continue */
+	ep->cur_rx.claim_ctx = (void *) (uintptr_t) -1;
+	rx_entry->cq_flags = 0;
+	rx_entry->ctrl_flags = XNET_CLAIM_RECV | XNET_INTERNAL_XFER;
+	ret = xnet_alloc_xfer_buf(rx_entry, ep->cur_rx.data_left);
+	if (ret) {
+		xnet_free_xfer(xnet_ep2_progress(ep), rx_entry);
+		xnet_reset_rx(ep);
+		return ret;
+	}
+
+	return 0;
 }
 
 void xnet_complete_saved(struct xnet_xfer_entry *saved_entry, void *msg_data)
@@ -190,10 +220,9 @@ void xnet_recv_saved(struct xnet_xfer_entry *saved_entry,
 		     struct xnet_xfer_entry *rx_entry)
 {
 	struct xnet_progress *progress;
-	size_t msg_len, done_len;
+	size_t msg_len, done_len, copy_len;
 	struct xnet_ep *ep;
 	void *buf2free, *msg_data;
-	int ret;
 
 	progress = xnet_cq2_progress(rx_entry->cq);
 	assert(xnet_progress_locked(progress));
@@ -234,6 +263,7 @@ void xnet_recv_saved(struct xnet_xfer_entry *saved_entry,
 	} else {
 		ep = saved_entry->saving_ep;
 		saved_entry->saving_ep = NULL;
+		assert(saved_entry == ep->cur_rx.entry);
 		FI_DBG(&xnet_prov, FI_LOG_EP_DATA, "saved msg still active "
 		       "needs %zu bytes\n", ep->cur_rx.data_left);
 
@@ -242,16 +272,15 @@ void xnet_recv_saved(struct xnet_xfer_entry *saved_entry,
 		done_len = msg_len - ep->cur_rx.data_left;
 		assert(msg_len && ep->cur_rx.data_left);
 
-		ret = ofi_truncate_iov(&saved_entry->iov[0],
-				       &saved_entry->iov_cnt, msg_len);
-		if (ret) {
-			/* truncation failure */
-			saved_entry->iov_cnt = 0;
-			xnet_complete_saved(saved_entry, msg_data);
+		(void) ofi_truncate_iov(&saved_entry->iov[0],
+				        &saved_entry->iov_cnt, msg_len);
+
+		copy_len = ofi_copy_iov_buf(saved_entry->iov,
+					    saved_entry->iov_cnt, 0, msg_data,
+					    done_len, OFI_COPY_BUF_TO_IOV);
+		if (copy_len < done_len) {
+			xnet_handle_truncate(ep);
 		} else {
-			(void) ofi_copy_iov_buf(saved_entry->iov,
-					saved_entry->iov_cnt, 0, msg_data,
-					done_len, OFI_COPY_BUF_TO_IOV);
 			ofi_consume_iov(&saved_entry->iov[0],
 					&saved_entry->iov_cnt, done_len);
 		}
@@ -356,36 +385,6 @@ static int xnet_send_msg(struct xnet_ep *ep)
 		return -FI_EAGAIN;
 	}
 	return FI_SUCCESS;
-}
-
-static int xnet_handle_truncate(struct xnet_ep *ep)
-{
-	struct xnet_xfer_entry *rx_entry;
-	int ret;
-
-	FI_WARN(&xnet_prov, FI_LOG_EP_DATA, "msg recv truncated\n");
-	assert(ep->cur_rx.entry);
-	assert(ep->cur_rx.data_left);
-
-	rx_entry = ep->cur_rx.entry;
-	xnet_cntr_incerr(rx_entry);
-	/* TODO: need to report received message size =
-	 * base_hdr.size - base_hdr.hdr_size - data_left
-	 */
-	xnet_report_error(rx_entry, FI_ETRUNC);
-
-	/* Prepare to remove excess msg data from stream to continue */
-	ep->cur_rx.claim_ctx = (void *) (uintptr_t) -1;
-	rx_entry->cq_flags = 0;
-	rx_entry->ctrl_flags = XNET_CLAIM_RECV | XNET_INTERNAL_XFER;
-	ret = xnet_alloc_xfer_buf(rx_entry, ep->cur_rx.data_left);
-	if (ret) {
-		xnet_free_xfer(xnet_ep2_progress(ep), rx_entry);
-		xnet_reset_rx(ep);
-		return ret;
-	}
-
-	return 0;
 }
 
 static int xnet_recv_msg_data(struct xnet_ep *ep)
@@ -672,7 +671,7 @@ int xnet_start_recv(struct xnet_ep *ep, struct xnet_xfer_entry *rx_entry)
 	if (ep->peer)
 		rx_entry->src_addr = ep->peer->fi_addr;
 	rx_entry->cq = xnet_ep_rx_cq(ep);
-	rx_entry->cntr = ep->util_ep.rx_cntr;
+	rx_entry->cntr = ep->util_ep.cntrs[CNTR_RX];
 
 	if (rx_entry->ctrl_flags & XNET_MULTI_RECV) {
 		assert(msg->hdr.base_hdr.op == ofi_op_msg);
@@ -828,7 +827,7 @@ static int xnet_op_write(struct xnet_ep *ep)
 		rma_iov = (struct ofi_rma_iov *) ((uint8_t *) &rx_entry->hdr +
 			  sizeof(rx_entry->hdr.base_hdr));
 	}
-	rx_entry->cntr = ep->util_ep.rem_wr_cntr;
+	rx_entry->cntr = ep->util_ep.cntrs[CNTR_REM_WR];
 	rx_entry->cq = xnet_ep_rx_cq(ep);
 
 	memcpy(&rx_entry->hdr, &ep->cur_rx.hdr,
@@ -1163,8 +1162,13 @@ static void xnet_uring_run_ep(struct xnet_ep *ep, struct ofi_sockctx *sockctx,
 
 static void xnet_uring_run_conn(struct xnet_conn_handle *conn, int res)
 {
-	conn->sock = res < 0 ? INVALID_SOCKET : res;
-	xnet_handle_conn(conn, res < 0);
+	if (res >= 0) {
+		conn->sock = res;
+		xnet_handle_conn(conn, false);
+	} else {
+		FI_WARN(&xnet_prov, FI_LOG_EP_CTRL, "accept socket error\n");
+		free(conn);
+	}
 }
 
 static void xnet_progress_cqe(struct xnet_progress *progress,
@@ -1433,6 +1437,17 @@ void xnet_progress_all(struct xnet_eq *eq)
 	xnet_progress(&eq->progress, false);
 }
 
+static void xnet_reset_wait(struct util_wait *wait)
+{
+	struct util_wait_fd *wait_fd;
+
+	if (!wait)
+		return;
+
+	wait_fd = container_of(wait, struct util_wait_fd, util_wait);
+	fd_signal_reset(&wait_fd->signal);
+}
+
 /* The epoll fd is updated dynamically for polling/pollout events on the
  * attached sockets as needed.  There's one possible issue around data
  * that's been buffered on the bsock byteq.  In that case, we have data
@@ -1448,7 +1463,58 @@ void xnet_progress_all(struct xnet_eq *eq)
  */
 int xnet_trywait(struct fid_fabric *fabric_fid, struct fid **fid, int count)
 {
-	return 0;
+	struct xnet_cq *cq;
+	struct xnet_eq *eq;
+	struct util_cntr *cntr;
+	struct util_wait *wait;
+	int ret = 0, i;
+
+	for (i = 0; i < count && !ret; i++) {
+		switch (fid[i]->fclass) {
+		case FI_CLASS_CQ:
+			cq = container_of(fid[i], struct xnet_cq,
+					  util_cq.cq_fid.fid);
+			ofi_genlock_lock(xnet_cq2_progress(cq)->active_lock);
+			if (ofi_cirque_isempty(cq->util_cq.cirq))
+				xnet_reset_wait(cq->util_cq.wait);
+			else
+				ret = -FI_EAGAIN;
+			ofi_genlock_unlock(xnet_cq2_progress(cq)->active_lock);
+			break;
+		case FI_CLASS_EQ:
+			eq = container_of(fid[i], struct xnet_eq,
+					  util_eq.eq_fid.fid);
+			ofi_mutex_lock(&eq->util_eq.lock);
+			if (!slist_empty(&eq->util_eq.list))
+				ret = -FI_EAGAIN;
+			ofi_mutex_unlock(&eq->util_eq.lock);
+			if (!ret)
+				xnet_reset_wait(eq->util_eq.wait);
+			break;
+		case FI_CLASS_CNTR:
+			/* The user must read the counter before and after
+			 * fi_trywait and compare the results to ensure that no
+			 * events were lost.
+			 */
+			cntr = container_of(fid[i], struct util_cntr,
+					    cntr_fid.fid);
+			ofi_genlock_lock(xnet_cntr2_progress(cntr)->active_lock);
+			xnet_reset_wait(cntr->wait);
+			ofi_genlock_unlock(xnet_cntr2_progress(cntr)->active_lock);
+			break;
+		case FI_CLASS_WAIT:
+			wait = container_of(fid[i], struct util_wait,
+					    wait_fid.fid);
+			ret = wait->wait_try(wait);
+			break;
+		default:
+			ret = -FI_ENOSYS;
+			break;
+		}
+
+	}
+
+	return ret;
 }
 
 /* We can't hold the progress lock around waiting, or we
@@ -1579,16 +1645,16 @@ static int xnet_init_locks(struct xnet_progress *progress, struct fi_info *info)
 	} else {
 		base_type = OFI_LOCK_MUTEX;
 		rdm_type = OFI_LOCK_NONE;
-		progress->active_lock = &progress->lock;
+		progress->active_lock = &progress->ep_lock;
 	}
 
-	ret = ofi_genlock_init(&progress->lock, base_type);
+	ret = ofi_genlock_init(&progress->ep_lock, base_type);
 	if (ret)
 		return ret;
 
 	ret = ofi_genlock_init(&progress->rdm_lock, rdm_type);
 	if (ret)
-		ofi_genlock_destroy(&progress->lock);
+		ofi_genlock_destroy(&progress->ep_lock);
 
 	return ret;
 }
@@ -1707,7 +1773,7 @@ err3:
 	ofi_dynpoll_close(&progress->epoll_fd);
 err2:
 	ofi_genlock_destroy(&progress->rdm_lock);
-	ofi_genlock_destroy(&progress->lock);
+	ofi_genlock_destroy(&progress->ep_lock);
 err1:
 	fd_signal_free(&progress->signal);
 	return ret;
@@ -1727,7 +1793,7 @@ void xnet_close_progress(struct xnet_progress *progress)
 	}
 	ofi_dynpoll_close(&progress->epoll_fd);
 	ofi_bufpool_destroy(progress->xfer_pool);
-	ofi_genlock_destroy(&progress->lock);
+	ofi_genlock_destroy(&progress->ep_lock);
 	ofi_genlock_destroy(&progress->rdm_lock);
 	fd_signal_free(&progress->signal);
 }

@@ -35,8 +35,13 @@
 #include <config.h>
 #endif /* HAVE_CONFIG_H */
 
-#ifndef _RXR_CNTR_H_
-#define _RXR_CNTR_H_
+#ifndef _EFA_CNTR_H_
+#define _EFA_CNTR_H_
+
+struct efa_cntr {
+	struct util_cntr util_cntr;
+	struct fid_cntr *shm_cntr;
+};
 
 int efa_cntr_open(struct fid_domain *domain, struct fi_cntr_attr *attr,
 		  struct fid_cntr **cntr_fid, void *context);

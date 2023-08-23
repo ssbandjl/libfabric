@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 Intel Corporation, Inc.  All rights reserved.
+ * Copyright (c) Intel Corporation, Inc.  All rights reserved.
  * Copyright (c) 2019 System Fabric Works, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
@@ -44,7 +44,7 @@ void vrb_add_credits(struct fid_ep *ep_fid, uint64_t credits)
 
 	ep = container_of(ep_fid, struct vrb_ep, util_ep.ep_fid);
 
-	ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 	/*
 	 * 'saved_peer_rq_credits' is only for the credit update coming before
 	 * flow_ctrl_ops->enable() is called, at which point 'peer_rq_credits'
@@ -54,7 +54,7 @@ void vrb_add_credits(struct fid_ep *ep_fid, uint64_t credits)
 		ep->saved_peer_rq_credits += credits;
 	else
 		ep->peer_rq_credits += credits;
-	ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 }
 
 ssize_t vrb_post_recv(struct vrb_ep *ep, struct ibv_recv_wr *wr)
@@ -64,7 +64,7 @@ ssize_t vrb_post_recv(struct vrb_ep *ep, struct ibv_recv_wr *wr)
 	uint64_t credits_to_give;
 	int ret, err;
 
-	ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 	ctx = vrb_alloc_ctx(vrb_ep2_progress(ep));
 	if (!ctx) {
 		ret = -FI_EAGAIN;
@@ -100,39 +100,35 @@ ssize_t vrb_post_recv(struct vrb_ep *ep, struct ibv_recv_wr *wr)
 		 * avoid acquiring the lock.  This requires changing rxm's
 		 * deferred tx queue.
 		 */
-		ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 
 		err = vrb_ep2_domain(ep)->send_credits(&ep->util_ep.ep_fid,
 						       credits_to_give);
-		ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 		if (err)
 			ep->rq_credits_avail += credits_to_give;
 	}
 
 unlock:
-	ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 	return ret;
 }
 
-void vrb_shutdown_qp_in_err(struct vrb_ep *ep)
+void vrb_shutdown_ep(struct vrb_ep *ep)
 {
-	struct ibv_qp_attr attr;
-	struct ibv_qp_init_attr init_attr;
 	struct fi_eq_cm_entry entry;
 
-	if (!ep || !ep->ibv_qp || ep->ibv_qp->state == IBV_QPS_UNKNOWN || !ep->eq)
+	if (!ep)
 		return;
 
-	memset(&attr, 0, sizeof(attr));
-	memset(&init_attr, 0, sizeof(init_attr));
-	ibv_query_qp(ep->ibv_qp, &attr, IBV_QP_STATE, &init_attr);
-	if (attr.cur_qp_state != IBV_QPS_ERR)
+	ofi_genlock_held(vrb_ep2_progress(ep)->active_lock);
+	if (ep->state != VRB_CONNECTED || !ep->eq)
 		return;
 
+	ep->state = VRB_DISCONNECTED;
 	memset(&entry, 0, sizeof(entry));
 	entry.fid = &ep->util_ep.ep_fid.fid;
-	if (vrb_eq_write_event(ep->eq, FI_SHUTDOWN, &entry, sizeof(entry)) > 0)
-		ep->ibv_qp->state = IBV_QPS_UNKNOWN;
+	(void) vrb_eq_write_event(ep->eq, FI_SHUTDOWN, &entry, sizeof(entry));
 }
 
 ssize_t vrb_post_send(struct vrb_ep *ep, struct ibv_send_wr *wr, uint64_t flags)
@@ -140,11 +136,10 @@ ssize_t vrb_post_send(struct vrb_ep *ep, struct ibv_send_wr *wr, uint64_t flags)
 	struct vrb_context *ctx;
 	struct ibv_send_wr *bad_wr;
 	struct vrb_cq *cq;
-	struct ibv_wc wc;
 	size_t credits_to_give = 0;
 	int ret, err;
 
-	ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 	ctx = vrb_alloc_ctx(vrb_ep2_progress(ep));
 	if (!ctx) {
 		ret = -FI_EAGAIN;
@@ -153,9 +148,7 @@ ssize_t vrb_post_send(struct vrb_ep *ep, struct ibv_send_wr *wr, uint64_t flags)
 
 	if (!ep->sq_credits || !ep->peer_rq_credits) {
 		cq = container_of(ep->util_ep.rx_cq, struct vrb_cq, util_cq);
-		ret = vrb_poll_cq(cq, &wc);
-		if (ret > 0)
-			vrb_save_wc(cq, &wc);
+		vrb_flush_cq(cq);
 
 		if (!ep->sq_credits || !ep->peer_rq_credits)
 			goto freectx;
@@ -186,7 +179,7 @@ ssize_t vrb_post_send(struct vrb_ep *ep, struct ibv_send_wr *wr, uint64_t flags)
 	slist_insert_tail(&ctx->entry, &ep->sq_list);
 
 unlock:
-	ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 	return ret;
 
 credits:
@@ -207,18 +200,18 @@ credits:
 		 * avoid acquiring the lock.  This requires changing rxm's
 		 * deferred tx queue.
 		 */
-		ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 
 		err = vrb_ep2_domain(ep)->send_credits(&ep->util_ep.ep_fid,
 						       credits_to_give);
-		ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 		if (err)
 			ep->rq_credits_avail += credits_to_give;
 	}
 
 freectx:
 	vrb_free_ctx(vrb_ep2_progress(ep), ctx);
-	ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 	return -FI_EAGAIN;
 }
 
@@ -486,7 +479,7 @@ static void vrb_flush_sq(struct vrb_ep *ep)
 		vrb_free_ctx(vrb_ep2_progress(ep), ctx);
 
 		if (wc.wr_id != VERBS_NO_COMP_FLAG)
-			vrb_save_wc(cq, &wc);
+			vrb_report_wc(cq, &wc);
 	}
 }
 
@@ -514,7 +507,7 @@ static void vrb_flush_rq(struct vrb_ep *ep)
 		vrb_free_ctx(vrb_ep2_progress(ep), ctx);
 
 		if (wc.wr_id != VERBS_NO_COMP_FLAG)
-			vrb_save_wc(cq, &wc);
+			vrb_report_wc(cq, &wc);
 	}
 }
 
@@ -543,7 +536,7 @@ static void vrb_ep_xrc_close(struct vrb_ep *ep)
 	struct vrb_xrc_ep *xrc_ep = container_of(ep, struct vrb_xrc_ep,
 						 base_ep);
 
-	assert(ofi_mutex_held(&ep->eq->lock));
+	assert(ofi_mutex_held(&ep->eq->event_lock));
 	if (xrc_ep->conn_setup)
 		vrb_free_xrc_conn_setup(xrc_ep, 0);
 
@@ -563,7 +556,7 @@ static int vrb_ep_close(fid_t fid)
 	switch (ep->util_ep.type) {
 	case FI_EP_MSG:
 		if (ep->eq) {
-			ofi_mutex_lock(&ep->eq->lock);
+			ofi_mutex_lock(&ep->eq->event_lock);
 			if (ep->eq->err.err && ep->eq->err.fid == fid) {
 				if (ep->eq->err.err_data) {
 					free(ep->eq->err.err_data);
@@ -582,13 +575,13 @@ static int vrb_ep_close(fid_t fid)
 			rdma_destroy_ep(ep->id);
 
 		if (ep->eq)
-			ofi_mutex_unlock(&ep->eq->lock);
+			ofi_mutex_unlock(&ep->eq->event_lock);
 
-		ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 		vrb_cleanup_cq(ep);
 		vrb_flush_sq(ep);
 		vrb_flush_rq(ep);
-		ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 		break;
 	case FI_EP_DGRAM:
 		fab = container_of(&ep->util_ep.domain->fabric->fabric_fid,
@@ -603,11 +596,11 @@ static int vrb_ep_close(fid_t fid)
 			}
 		}
 
-		ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 		vrb_cleanup_cq(ep);
 		vrb_flush_sq(ep);
 		vrb_flush_rq(ep);
-		ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+		ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 		break;
 	default:
 		VRB_WARN(FI_LOG_DOMAIN, "Unknown EP type\n");
@@ -660,12 +653,12 @@ static int vrb_ep_bind(struct fid *fid, struct fid *bfid, uint64_t flags)
 		ep->eq = container_of(bfid, struct vrb_eq, eq_fid.fid);
 
 		/* Make sure EQ channel is not polled during migrate */
-		ofi_mutex_lock(&ep->eq->lock);
+		ofi_mutex_lock(&ep->eq->event_lock);
 		if (vrb_is_xrc_ep(ep))
 			ret = vrb_ep_xrc_set_tgt_chan(ep);
 		else
 			ret = rdma_migrate_id(ep->id, ep->eq->channel);
-		ofi_mutex_unlock(&ep->eq->lock);
+		ofi_mutex_unlock(&ep->eq->event_lock);
 		if (ret) {
 			VRB_WARN_ERRNO(FI_LOG_EP_CTRL, "rdma_migrate_id");
 			ret = -errno;
@@ -856,10 +849,10 @@ static int vrb_ep_enable_xrc(struct vrb_ep *ep)
 	}
 	/* The RX CQ maintains a list of all the XRC SRQs that were created
 	 * using it as the CQ */
-	ofi_genlock_lock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 	dlist_insert_tail(&srx->xrc.srq_entry, &cq->xrc.srq_list);
 	srx->xrc.cq = cq;
-	ofi_genlock_unlock(&vrb_ep2_progress(ep)->lock);
+	ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 
 	ibv_get_srq_num(srx->srq, &xrc_ep->srqn);
 
@@ -1236,10 +1229,13 @@ int vrb_open_ep(struct fid_domain *domain, struct fi_info *info,
 				 * it outside of ep operations to avoid possible use-after-
 				 * free bugs in case the ep is closed
 				 */
+				ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
+				ep->state = VRB_REQ_RCVD;
 				ep->id = connreq->id;
 				connreq->id = NULL;
 				ep->ibv_qp = ep->id->qp;
 				ep->id->context = &ep->util_ep.ep_fid.fid;
+				ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
 			}
 		} else if (info->handle->fclass == FI_CLASS_PEP) {
 			pep = container_of(info->handle, struct vrb_pep, pep_fid.fid);

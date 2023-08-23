@@ -42,15 +42,14 @@
 #include "efa_cq.h"
 #include "efa_rdm_msg.h"
 #include "efa_rdm_rma.h"
-#include "rxr_pkt_cmd.h"
-#include "rxr_pkt_type_base.h"
 #include "efa_rdm_atomic.h"
+#include "efa_rdm_pke_cmd.h"
 #include <infiniband/verbs.h>
-#include "rxr_pkt_pool.h"
-#include "rxr_tp.h"
+#include "efa_rdm_tracepoint.h"
 #include "efa_cntr.h"
 #include "efa_rdm_srx.h"
 #include "efa_rdm_cq.h"
+#include "efa_rdm_pke_nonreq.h"
 
 struct efa_ep_addr *efa_rdm_ep_raw_addr(struct efa_rdm_ep *ep)
 {
@@ -184,15 +183,8 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_rxe(struct efa_rdm_ep *ep, fi_addr_t addr, 
 	rxe->cuda_copy_method = EFA_RDM_CUDA_COPY_UNSPEC;
 	rxe->efa_outstanding_tx_ops = 0;
 	rxe->op = op;
+	rxe->peer_rxe = NULL;
 
-	rxe->peer_rxe.addr = addr;
-	/* This field points to the fid_peer_srx struct that's part of the peer API
-	*  We always set it to the EFA provider's SRX here. For SHM messages, we will set
-	*  this to SHM provider's SRX in the get_msg/get_tag function call
-	*/
-	rxe->peer_rxe.srx = &ep->peer_srx;
-
-	dlist_init(&rxe->entry);
 	switch (op) {
 	case ofi_op_tagged:
 		rxe->cq_entry.flags = (FI_RECV | FI_MSG | FI_TAGGED);
@@ -231,15 +223,15 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_rxe(struct efa_rdm_ep *ep, fi_addr_t addr, 
  * @param[in]	rxe	rxe that contain user buffer information
  * @param[in]	flags		user supplied flags passed to fi_recv
  */
-int efa_rdm_ep_post_user_recv_buf(struct efa_rdm_ep *ep, struct efa_rdm_ope *rxe, uint64_t flags)
+int efa_rdm_ep_post_user_recv_buf(struct efa_rdm_ep *ep, struct efa_rdm_ope *rxe, size_t flags)
 {
-	struct rxr_pkt_entry *pkt_entry;
+	struct efa_rdm_pke *pkt_entry;
 	struct efa_mr *mr;
 	int err;
 
 	assert(rxe->iov_count == 1);
 	assert(rxe->iov[0].iov_len >= ep->msg_prefix_size);
-	pkt_entry = (struct rxr_pkt_entry *)rxe->iov[0].iov_base;
+	pkt_entry = (struct efa_rdm_pke *)rxe->iov[0].iov_base;
 	assert(pkt_entry);
 
 	/*
@@ -251,24 +243,24 @@ int efa_rdm_ep_post_user_recv_buf(struct efa_rdm_ep *ep, struct efa_rdm_ope *rxe
 	dlist_init(&pkt_entry->entry);
 	mr = (struct efa_mr *)rxe->desc[0];
 	pkt_entry->mr = &mr->mr_fid;
-	pkt_entry->alloc_type = RXR_PKT_FROM_USER_BUFFER;
-	pkt_entry->flags = RXR_PKT_ENTRY_IN_USE;
+	pkt_entry->alloc_type = EFA_RDM_PKE_FROM_USER_BUFFER;
+	pkt_entry->flags = EFA_RDM_PKE_IN_USE;
 	pkt_entry->next = NULL;
 	/*
 	 * The actual receiving buffer size (pkt_size) is
-	 *    rxe->total_len - sizeof(struct rxr_pkt_entry)
+	 *    rxe->total_len - sizeof(struct efa_rdm_pke)
 	 * because the first part of user buffer was used to
 	 * construct pkt_entry. The actual receiving buffer
 	 * posted to device starts from pkt_entry->wiredata.
 	 */
-	pkt_entry->pkt_size = rxe->iov[0].iov_len - sizeof(struct rxr_pkt_entry);
+	pkt_entry->pkt_size = rxe->iov[0].iov_len - sizeof(struct efa_rdm_pke);
 
 	pkt_entry->ope = rxe;
 	rxe->state = EFA_RDM_RXE_MATCHED;
 
-	err = rxr_pkt_entry_recv(ep, pkt_entry, rxe->desc, flags);
+	err = efa_rdm_pke_recvv(&pkt_entry, 1);
 	if (OFI_UNLIKELY(err)) {
-		rxr_pkt_entry_release_rx(ep, pkt_entry);
+		efa_rdm_pke_release_rx(pkt_entry);
 		EFA_WARN(FI_LOG_EP_CTRL,
 			"failed to post user supplied buffer %d (%s)\n", -err,
 			fi_strerror(-err));
@@ -306,71 +298,6 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
 	return txe;
 }
 
-/*
- * For a given peer, trigger a handshake packet and determine if both peers
- * support rdma read.
- *
- * @param[in,out]	ep	efa_rdm_ep
- * @param[in]		addr	remote address
- * @param[in,out]	peer	remote peer
- * @return 		1 if supported, 0 if not, negative errno on error
- */
-int efa_rdm_ep_determine_rdma_read_support(struct efa_rdm_ep *ep, fi_addr_t addr,
-				       struct efa_rdm_peer *peer)
-{
-	int ret;
-
-	if (!peer->is_local) {
-		ret = rxr_pkt_trigger_handshake(ep, addr, peer);
-		if (OFI_UNLIKELY(ret))
-			return ret;
-
-		if (!(peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED))
-			return -FI_EAGAIN;
-	}
-
-	if (!efa_both_support_rdma_read(ep, peer))
-		return 0;
-
-	return 1;
-}
-
-/**
- * @brief determine if both peers support rdma write.
- *
- * If no prior communication with the given peer, and we support RDMA WRITE
- * locally, then trigger a handshake packet and determine if both peers
- * support rdma write.
- *
- * @param[in,out]	ep	efa_rdm_ep
- * @param[in]		addr	remote address
- * @param[in,out]	peer	remote peer
- * @return 		1 if supported, 0 if not, negative errno on error
- */
-int efa_rdm_ep_determine_rdma_write_support(struct efa_rdm_ep *ep, fi_addr_t addr,
-					struct efa_rdm_peer *peer)
-{
-	int ret;
-
-	/* no need to trigger handshake if we don't support RDMA WRITE locally */
-	if (!efa_rdm_ep_support_rdma_write(ep))
-		return false;
-
-	if (!peer->is_local) {
-		ret = rxr_pkt_trigger_handshake(ep, addr, peer);
-		if (OFI_UNLIKELY(ret))
-			return ret;
-
-		if (!(peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED))
-			return -FI_EAGAIN;
-	}
-
-	if (!efa_both_support_rdma_write(ep, peer))
-		return 0;
-
-	return 1;
-}
-
 /**
  * @brief record the event that a TX op has been submitted
  *
@@ -395,7 +322,7 @@ int efa_rdm_ep_determine_rdma_write_support(struct efa_rdm_ep *ep, fi_addr_t add
  * @param[in]		pkt_entry	TX pkt_entry, which contains
  * 					the info of the TX op.
  */
-void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct rxr_pkt_entry *pkt_entry)
+void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_ope *ope;
@@ -410,7 +337,7 @@ void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct rxr_pkt_ent
 		dlist_insert_tail(&pkt_entry->entry,
 				  &peer->outstanding_tx_pkts);
 
-	assert(pkt_entry->alloc_type == RXR_PKT_FROM_EFA_TX_POOL);
+	assert(pkt_entry->alloc_type == EFA_RDM_PKE_FROM_EFA_TX_POOL);
 	ep->efa_outstanding_tx_ops++;
 	if (peer)
 		peer->efa_outstanding_tx_ops++;
@@ -437,7 +364,7 @@ void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct rxr_pkt_ent
  * Both send and read are considered TX operation.
  *
  * One may ask why this function is not integrated
- * into rxr_pkt_entry_relase_tx()?
+ * into efa_rdm_pke_relase_tx()?
  *
  * The reason is the action of decrease tx_op counter
  * is not tied to releasing a TX pkt_entry.
@@ -449,13 +376,13 @@ void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct rxr_pkt_ent
  *
  * Sometimes we need release TX pkt_entry without
  * decreasing the tx_op counter. For example, when
- * rxr_pkt_post() failed to post a pkt entry.
+ * efa_rdm_ope_post_send() failed to post a pkt entry.
  *
  * @param[in,out]	ep		endpoint
  * @param[in]		pkt_entry	TX pkt_entry, which contains
  * 					the info of the TX op
  */
-void efa_rdm_ep_record_tx_op_completed(struct efa_rdm_ep *ep, struct rxr_pkt_entry *pkt_entry)
+void efa_rdm_ep_record_tx_op_completed(struct efa_rdm_ep *ep, struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_rdm_ope *ope = NULL;
 	struct efa_rdm_peer *peer;
@@ -474,7 +401,7 @@ void efa_rdm_ep_record_tx_op_completed(struct efa_rdm_ep *ep, struct rxr_pkt_ent
 	if (peer)
 		dlist_remove(&pkt_entry->entry);
 
-	assert(pkt_entry->alloc_type == RXR_PKT_FROM_EFA_TX_POOL);
+	assert(pkt_entry->alloc_type == EFA_RDM_PKE_FROM_EFA_TX_POOL);
 	ep->efa_outstanding_tx_ops--;
 	if (peer)
 		peer->efa_outstanding_tx_ops--;
@@ -530,7 +457,7 @@ void efa_rdm_ep_record_tx_op_completed(struct efa_rdm_ep *ep, struct rxr_pkt_ent
  */
 void efa_rdm_ep_queue_rnr_pkt(struct efa_rdm_ep *ep,
 			  struct dlist_entry *list,
-			  struct rxr_pkt_entry *pkt_entry)
+			  struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_rdm_peer *peer;
 	static const int random_min_timeout = 40;
@@ -540,14 +467,14 @@ void efa_rdm_ep_queue_rnr_pkt(struct efa_rdm_ep *ep,
 	dlist_remove(&pkt_entry->dbg_entry);
 #endif
 	dlist_insert_tail(&pkt_entry->entry, list);
-
+	ep->efa_rnr_queued_pkt_cnt += 1;
 	peer = efa_rdm_ep_get_peer(ep, pkt_entry->addr);
 	assert(peer);
-	if (!(pkt_entry->flags & RXR_PKT_ENTRY_RNR_RETRANSMIT)) {
+	if (!(pkt_entry->flags & EFA_RDM_PKE_RNR_RETRANSMIT)) {
 		/* This is the first time this packet encountered RNR,
 		 * we are NOT going to put the peer in backoff mode just yet.
 		 */
-		pkt_entry->flags |= RXR_PKT_ENTRY_RNR_RETRANSMIT;
+		pkt_entry->flags |= EFA_RDM_PKE_RNR_RETRANSMIT;
 		peer->rnr_queued_pkt_cnt++;
 		return;
 	}
@@ -593,4 +520,156 @@ void efa_rdm_ep_queue_rnr_pkt(struct efa_rdm_ep *ep,
 		       pkt_entry->addr, peer->rnr_backoff_wait_time,
 		       peer->rnr_queued_pkt_cnt);
 	}
+}
+
+/**
+ * @brief trigger a peer to send a handshake packet
+ *
+ * This patch send a EAGER_RTW packet of 0 byte to a peer, which would
+ * cause the peer to send a handshake packet back to the endpoint.
+ *
+ * This function is used for any extra feature that does not have an
+ * alternative.
+ *
+ * We do not send eager rtm packets here because the receiver might require
+ * ordering and an extra eager rtm will interrupt the reorder
+ * process.
+ *
+ * @param[in]	ep	The endpoint on which the packet for triggering handshake will be sent.
+ * @param[in]	addr	The address of the peer.
+ *
+ * @returns
+ * return 0 for success.
+ * return negative libfabric error code for error. Possible errors include:
+ * -FI_EAGAIN	temporarily out of resource to send packet
+ */
+ssize_t efa_rdm_ep_trigger_handshake(struct efa_rdm_ep *ep,
+				     fi_addr_t addr)
+{
+	struct efa_rdm_peer *peer;
+	struct efa_rdm_ope *txe;
+	ssize_t err;
+
+	peer = efa_rdm_ep_get_peer(ep, addr);
+	assert(peer);
+
+	if ((peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED) ||
+	    (peer->flags & EFA_RDM_PEER_REQ_SENT))
+		return 0;
+
+	/* TODO: use efa_rdm_ep_alloc_txe to allocate txe */
+	txe = ofi_buf_alloc(ep->ope_pool);
+	if (OFI_UNLIKELY(!txe)) {
+		EFA_WARN(FI_LOG_EP_CTRL, "TX entries exhausted.\n");
+		return -FI_EAGAIN;
+	}
+
+	txe->ep = ep;
+	txe->total_len = 0;
+	txe->addr = addr;
+	txe->peer = efa_rdm_ep_get_peer(ep, txe->addr);
+	assert(txe->peer);
+	dlist_insert_tail(&txe->peer_entry, &txe->peer->txe_list);
+	txe->msg_id = -1;
+	txe->cq_entry.flags = FI_RMA | FI_WRITE;
+	txe->cq_entry.buf = NULL;
+	dlist_init(&txe->queued_pkts);
+
+	txe->type = EFA_RDM_TXE;
+	txe->op = ofi_op_write;
+	txe->state = EFA_RDM_TXE_REQ;
+
+	txe->bytes_acked = 0;
+	txe->bytes_sent = 0;
+	txe->window = 0;
+	txe->rma_iov_count = 0;
+	txe->iov_count = 0;
+	txe->fi_flags = EFA_RDM_TXE_NO_COMPLETION | EFA_RDM_TXE_NO_COUNTER;
+	txe->internal_flags = 0;
+
+	dlist_insert_tail(&txe->ep_entry, &ep->txe_list);
+
+	err = efa_rdm_ope_post_send(txe, EFA_RDM_EAGER_RTW_PKT);
+
+	if (OFI_UNLIKELY(err))
+		return err;
+
+	return 0;
+}
+
+/** @brief Post a handshake packet to a peer.
+ *
+ * @param ep The endpoint on which the handshake packet is sent out.
+ * @param peer The peer to which the handshake packet is posted.
+ * @return 0 on success, fi_errno on error.
+ */
+ssize_t efa_rdm_ep_post_handshake(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer)
+{
+	struct efa_rdm_pke *pkt_entry;
+	fi_addr_t addr;
+	ssize_t ret;
+
+	addr = peer->efa_fiaddr;
+	pkt_entry = efa_rdm_pke_alloc(ep, ep->efa_tx_pkt_pool, EFA_RDM_PKE_FROM_EFA_TX_POOL);
+	if (OFI_UNLIKELY(!pkt_entry))
+		return -FI_EAGAIN;
+
+	efa_rdm_pke_init_handshake(pkt_entry, addr);
+
+	ret = efa_rdm_pke_sendv(&pkt_entry, 1);
+	if (OFI_UNLIKELY(ret)) {
+		efa_rdm_pke_release_tx(pkt_entry);
+	}
+	return ret;
+}
+
+/** @brief Post a handshake packet to a peer.
+ *
+ * This function ensures an endpoint post one and only one handshake
+ * to a peer.
+ *
+ * For a peer that the endpoint has not attempted to send handshake,
+ * it will send a handshake packet.
+ *
+ * If the send succeeded, EFA_RDM_PEER_HANDSHAKE_SENT flag will be set to peer->flags.
+ *
+ * If the send encountered FI_EAGAIN failure, the peer will be added to
+ * efa_rdm_ep->handshake_queued_peer_list. The handshake will be resend later
+ * by the progress engine.
+ *
+ * If the send encountered other failure, an EQ entry will be written.
+ *
+ * To ensure only one handshake is send to a peer, the function will not send
+ * packet to a peer whose peer->flags has either EFA_RDM_PEER_HANDSHAKE_SENT or
+ * EFA_RDM_PEER_HANDSHAKE_QUEUED.
+ *
+ * @param[in]	ep	The endpoint on which the handshake packet is sent out.
+ * @param[in]	peer	The peer to which the handshake packet is posted.
+ * @return 	void.
+ */
+void efa_rdm_ep_post_handshake_or_queue(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer)
+{
+	ssize_t err;
+
+	if (peer->flags & (EFA_RDM_PEER_HANDSHAKE_SENT | EFA_RDM_PEER_HANDSHAKE_QUEUED))
+		return;
+
+	err = efa_rdm_ep_post_handshake(ep, peer);
+	if (OFI_UNLIKELY(err == -FI_EAGAIN)) {
+		/* add peer to handshake_queued_peer_list for retry later */
+		peer->flags |= EFA_RDM_PEER_HANDSHAKE_QUEUED;
+		dlist_insert_tail(&peer->handshake_queued_entry,
+				  &ep->handshake_queued_peer_list);
+		return;
+	}
+
+	if (OFI_UNLIKELY(err)) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			"Failed to post HANDSHAKE to peer %ld: %s\n",
+			peer->efa_fiaddr, fi_strerror(-err));
+		efa_base_ep_write_eq_error(&ep->base_ep, FI_EIO, FI_EFA_ERR_PEER_HANDSHAKE);
+		return;
+	}
+
+	peer->flags |= EFA_RDM_PEER_HANDSHAKE_SENT;
 }

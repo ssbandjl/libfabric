@@ -39,7 +39,7 @@
 
 #include "efa_rdm_msg.h"
 #include "efa_rdm_rma.h"
-#include "rxr_pkt_cmd.h"
+#include "efa_rdm_pke_cmd.h"
 #include "efa_cntr.h"
 
 int efa_rdm_rma_verified_copy_iov(struct efa_rdm_ep *ep, struct efa_rma_iov *rma,
@@ -117,13 +117,13 @@ ssize_t efa_rdm_rma_post_efa_emulated_read(struct efa_rdm_ep *ep, struct efa_rdm
 	ep->pending_recv_counter++;
 #endif
 
-	if (txe->total_len < ep->mtu_size - sizeof(struct rxr_readrsp_hdr)) {
-		err = rxr_pkt_post_req(ep, txe, RXR_SHORT_RTR_PKT, 0);
+	if (txe->total_len < ep->mtu_size - sizeof(struct efa_rdm_readrsp_hdr)) {
+		err = efa_rdm_ope_post_send(txe, EFA_RDM_SHORT_RTR_PKT);
 	} else {
 		assert(efa_env.tx_min_credits > 0);
 		txe->window = MIN(txe->total_len,
 				       efa_env.tx_min_credits * ep->max_data_payload_size);
-		err = rxr_pkt_post_req(ep, txe, RXR_LONGCTS_RTR_PKT, 0);
+		err = efa_rdm_ope_post_send(txe, EFA_RDM_LONGCTS_RTR_PKT);
 	}
 
 	if (OFI_UNLIKELY(err)) {
@@ -144,9 +144,10 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 	struct efa_rdm_ope *txe = NULL;
 	fi_addr_t tmp_addr;
 	struct fi_msg_rma *msg_clone;
-	bool use_lower_ep_read;
-	void *shm_desc[RXR_IOV_LIMIT];
+	bool use_device_read;
+	void *shm_desc[EFA_RDM_IOV_LIMIT];
 	void **tmp_desc;
+	struct util_srx_ctx *srx_ctx;
 
 	EFA_DBG(FI_LOG_EP_DATA,
 	       "read iov_len: %lu flags: %lx\n",
@@ -154,6 +155,7 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 	       flags);
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	srx_ctx = efa_rdm_ep_get_peer_srx_ctx(efa_rdm_ep);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -161,7 +163,7 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 	assert(msg->iov_count <= efa_rdm_ep->tx_iov_limit);
 
 	efa_perfset_start(efa_rdm_ep, perf_efa_tx);
-	ofi_mutex_lock(&efa_rdm_ep->base_ep.util_ep.lock);
+	ofi_genlock_lock(srx_ctx->lock);
 
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, msg->addr);
 	assert(peer);
@@ -195,24 +197,25 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 		goto out;
 	}
 
-	use_lower_ep_read = false;
+	/*
+	 * A handshake is required to choose the correct protocol (whether to use device read).
+	 */
+	if (!(peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED)) {
+		err = efa_rdm_ep_trigger_handshake(efa_rdm_ep, txe->addr);
+		err = err ? err : -FI_EAGAIN;
+		goto out;
+	}
+
+	use_device_read = false;
 	if (efa_both_support_rdma_read(efa_rdm_ep, peer)) {
 		/* efa_both_support_rdma_read also check domain.use_device_rdma,
 		 * so we do not check it here
 		 */
-		use_lower_ep_read = true;
+		use_device_read = true;
 	} else if (efa_mr_is_neuron(txe->desc[0])) {
-		err = efa_rdm_ep_determine_rdma_read_support(efa_rdm_ep, txe->addr, peer);
-
-		if (err < 0)
-			goto out;
-
-		if (err != 1) {
-			err = -FI_EOPNOTSUPP;
-			goto out;
-		}
-
-		use_lower_ep_read = true;
+		EFA_WARN(FI_LOG_EP_CTRL, "rdma read is required to post read for AWS trainium memory\n");
+		err = -FI_EOPNOTSUPP;
+		goto out;
 	}
 
 	/*
@@ -220,7 +223,7 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 	 * gave us a valid MR we should just honor the request even if p2p is
 	 * disabled.
 	 */
-	if (use_lower_ep_read) {
+	if (use_device_read) {
 		err = efa_rdm_ope_prepare_to_post_read(txe);
 		if (err)
 			goto out;
@@ -242,7 +245,7 @@ out:
 	if (OFI_UNLIKELY(err && txe))
 		efa_rdm_txe_release(txe);
 
-	ofi_mutex_unlock(&efa_rdm_ep->base_ep.util_ep.lock);
+	ofi_genlock_unlock(srx_ctx->lock);
 	efa_perfset_end(efa_rdm_ep, perf_efa_tx);
 	return err;
 }
@@ -255,7 +258,7 @@ ssize_t efa_rdm_rma_readv(struct fid_ep *ep, const struct iovec *iov, void **des
 	struct fi_msg_rma msg;
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_ep *efa_rdm_ep;
-	void *shm_desc[RXR_IOV_LIMIT] = {NULL};
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
@@ -295,7 +298,7 @@ ssize_t efa_rdm_rma_read(struct fid_ep *ep, void *buf, size_t len, void *desc,
 	struct iovec iov;
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_ep *efa_rdm_ep;
-	void *shm_desc[RXR_IOV_LIMIT] = {NULL};
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
@@ -351,8 +354,9 @@ bool efa_rdm_rma_should_write_using_rdma(struct efa_rdm_ep *ep, struct efa_rdm_o
 		return false;
 
 	/* Check for hardware support of RDMA write.
-	   This will incur a handshake for new peers. */
-	return efa_rdm_ep_determine_rdma_write_support(ep, txe->addr, peer);
+	   A handshake should have been made before the check. */
+	assert(peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED);
+	return efa_both_support_rdma_write(ep, peer);
 }
 
 /**
@@ -372,6 +376,14 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 
 	peer = efa_rdm_ep_get_peer(ep, txe->addr);
 	assert(peer);
+
+	/*
+	 * A handshake is required to choose the correct protocol (whether to use device write/read).
+	 */
+	if (!(peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED)) {
+		err = efa_rdm_ep_trigger_handshake(ep, txe->addr);
+		return err ? err : -FI_EAGAIN;
+	}
 
 	if (efa_rdm_rma_should_write_using_rdma(ep, txe, peer)) {
 		efa_rdm_ope_prepare_to_post_write(txe);
@@ -395,7 +407,7 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 		 * the information whether the peer
 		 * support it or not.
 		 */
-		err = rxr_pkt_trigger_handshake(ep, txe->addr, peer);
+		err = efa_rdm_ep_trigger_handshake(ep, txe->addr);
 		if (OFI_UNLIKELY(err))
 			return err;
 
@@ -404,19 +416,17 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 		else if (!efa_rdm_peer_support_delivery_complete(peer))
 			return -FI_EOPNOTSUPP;
 
-		max_eager_rtw_data_size = efa_rdm_txe_max_req_data_capacity(ep, txe, RXR_DC_EAGER_RTW_PKT);
+		max_eager_rtw_data_size = efa_rdm_txe_max_req_data_capacity(ep, txe, EFA_RDM_DC_EAGER_RTW_PKT);
 	} else {
-		max_eager_rtw_data_size = efa_rdm_txe_max_req_data_capacity(ep, txe, RXR_EAGER_RTW_PKT);
+		max_eager_rtw_data_size = efa_rdm_txe_max_req_data_capacity(ep, txe, EFA_RDM_EAGER_RTW_PKT);
 	}
-
-	/* Inter instance */
 
 	iface = txe->desc[0] ? ((struct efa_mr*) txe->desc[0])->peer.iface : FI_HMEM_SYSTEM;
 
 	if (txe->total_len >= efa_rdm_ep_domain(ep)->hmem_info[iface].min_read_write_size &&
-		efa_rdm_ep_determine_rdma_read_support(ep, txe->addr, peer) &&
+		efa_both_support_rdma_read(ep, peer) &&
 		(txe->desc[0] || efa_is_cache_available(efa_rdm_ep_domain(ep)))) {
-		err = rxr_pkt_post_req(ep, txe, RXR_LONGREAD_RTW_PKT, 0);
+		err = efa_rdm_ope_post_send(txe, EFA_RDM_LONGREAD_RTA_RTW_PKT);
 		if (err != -FI_ENOMEM)
 			return err;
 		/*
@@ -426,12 +436,12 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 	}
 
 	if (txe->total_len <= max_eager_rtw_data_size) {
-		ctrl_type = delivery_complete_requested ? RXR_DC_EAGER_RTW_PKT : RXR_EAGER_RTW_PKT;
-		return rxr_pkt_post_req(ep, txe, ctrl_type, 0);
+		ctrl_type = delivery_complete_requested ? EFA_RDM_DC_EAGER_RTW_PKT : EFA_RDM_EAGER_RTW_PKT;
+		return efa_rdm_ope_post_send(txe, ctrl_type);
 	}
 
-	ctrl_type = delivery_complete_requested ? RXR_DC_LONGCTS_RTW_PKT : RXR_LONGCTS_RTW_PKT;
-	return rxr_pkt_post_req(ep, txe, ctrl_type, 0);
+	ctrl_type = delivery_complete_requested ? EFA_RDM_DC_LONGCTS_RTW_PKT : EFA_RDM_LONGCTS_RTW_PKT;
+	return efa_rdm_ope_post_send(txe, ctrl_type);
 }
 
 ssize_t efa_rdm_rma_writemsg(struct fid_ep *ep,
@@ -444,8 +454,9 @@ ssize_t efa_rdm_rma_writemsg(struct fid_ep *ep,
 	struct efa_rdm_ope *txe;
 	fi_addr_t tmp_addr;
 	struct fi_msg_rma *msg_clone;
-	void *shm_desc[RXR_IOV_LIMIT];
+	void *shm_desc[EFA_RDM_IOV_LIMIT];
 	void **tmp_desc;
+	struct util_srx_ctx *srx_ctx;
 
 	EFA_DBG(FI_LOG_EP_DATA,
 	       "write iov_len %lu flags: %lx\n",
@@ -453,6 +464,7 @@ ssize_t efa_rdm_rma_writemsg(struct fid_ep *ep,
 	       flags);
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	srx_ctx = efa_rdm_ep_get_peer_srx_ctx(efa_rdm_ep);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -460,7 +472,7 @@ ssize_t efa_rdm_rma_writemsg(struct fid_ep *ep,
 	assert(msg->iov_count <= efa_rdm_ep->tx_iov_limit);
 
 	efa_perfset_start(efa_rdm_ep, perf_efa_tx);
-	ofi_mutex_lock(&efa_rdm_ep->base_ep.util_ep.lock);
+	ofi_genlock_lock(srx_ctx->lock);
 
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, msg->addr);
 	assert(peer);
@@ -500,7 +512,7 @@ ssize_t efa_rdm_rma_writemsg(struct fid_ep *ep,
 		efa_rdm_txe_release(txe);
 	}
 out:
-	ofi_mutex_unlock(&efa_rdm_ep->base_ep.util_ep.lock);
+	ofi_genlock_unlock(srx_ctx->lock);
 	efa_perfset_end(efa_rdm_ep, perf_efa_tx);
 	return err;
 }
@@ -514,7 +526,7 @@ ssize_t efa_rdm_rma_writev(struct fid_ep *ep, const struct iovec *iov, void **de
 
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_ep *efa_rdm_ep;
-	void *shm_desc[RXR_IOV_LIMIT] = {NULL};
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
@@ -553,7 +565,7 @@ ssize_t efa_rdm_rma_write(struct fid_ep *ep, const void *buf, size_t len, void *
 	struct iovec iov;
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_ep *efa_rdm_ep;
-	void *shm_desc[RXR_IOV_LIMIT] = {NULL};
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
@@ -583,7 +595,7 @@ ssize_t efa_rdm_rma_writedata(struct fid_ep *ep, const void *buf, size_t len,
 	struct fi_msg_rma msg;
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_ep *efa_rdm_ep;
-	void *shm_desc[RXR_IOV_LIMIT] = {NULL};
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);

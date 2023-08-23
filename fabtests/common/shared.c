@@ -62,7 +62,8 @@ struct fid_poll *pollset;
 struct fid_pep *pep;
 struct fid_ep *ep, *alias_ep;
 struct fid_cq *txcq, *rxcq;
-struct fid_cntr *txcntr, *rxcntr;
+struct fid_cntr *txcntr, *rxcntr, *rma_cntr;
+
 struct fid_ep *srx;
 struct fid_stx *stx;
 struct fid_mr *mr;
@@ -92,7 +93,8 @@ char *buf = NULL, *tx_buf, *rx_buf;
 void *tx_msg_buf = NULL;
 
 char **tx_mr_bufs = NULL, **rx_mr_bufs = NULL;
-size_t buf_size, tx_size, rx_size, tx_mr_size, rx_mr_size;
+size_t buf_size, tx_buf_size, rx_buf_size;
+size_t tx_size, rx_size, tx_mr_size, rx_mr_size;
 int rx_fd = -1, tx_fd = -1;
 char default_port[8] = "9228";
 static char default_oob_port[8] = "3000";
@@ -400,6 +402,14 @@ void ft_fill_mr_attr(struct iovec *iov, int iov_count, uint64_t access,
 	}
 }
 
+bool ft_need_mr_reg(struct fi_info *fi)
+{
+	return (fi->caps & (FI_RMA | FI_ATOMIC)) ||
+	       (fi->domain_attr->mr_mode & FI_MR_LOCAL) ||
+	       ((fi->domain_attr->mr_mode & FI_MR_HMEM) &&
+		(opts.options & FT_OPT_USE_DEVICE));
+}
+
 int ft_reg_mr(struct fi_info *fi, void *buf, size_t size, uint64_t access,
 	      uint64_t key, enum fi_hmem_iface iface, uint64_t device,
 	      struct fid_mr **mr, void **desc)
@@ -409,11 +419,7 @@ int ft_reg_mr(struct fi_info *fi, void *buf, size_t size, uint64_t access,
 	int ret;
 	uint64_t flags;
 
-	if (((!(fi->domain_attr->mr_mode & FI_MR_LOCAL) &&
-	      !(opts.options & FT_OPT_USE_DEVICE)) ||
-	     (!(fi->domain_attr->mr_mode & FI_MR_HMEM) &&
-	      opts.options & FT_OPT_USE_DEVICE)) &&
-	    !(fi->caps & (FI_RMA | FI_ATOMIC)))
+	if (!ft_need_mr_reg(fi))
 		return 0;
 
 	iov.iov_base = buf;
@@ -513,7 +519,7 @@ int ft_alloc_msgs(void)
 {
 	int ret;
 	int rma_resv_bytes;
-	long alignment = 1;
+	long alignment = 64;
 	size_t max_msg_size;
 
 	if (buf)
@@ -526,13 +532,14 @@ int ft_alloc_msgs(void)
 		ft_set_tx_rx_sizes(&tx_mr_size, &rx_mr_size);
 		rx_size = FT_MAX_CTRL_MSG + ft_rx_prefix_size();
 		tx_size = FT_MAX_CTRL_MSG + ft_tx_prefix_size();
-		buf_size = rx_size + tx_size;
+		rx_buf_size = rx_size;
+		tx_buf_size = tx_size;
 	} else {
 		ft_set_tx_rx_sizes(&tx_size, &rx_size);
 		tx_mr_size = 0;
 		rx_mr_size = 0;
-		buf_size = MAX(tx_size, FT_MAX_CTRL_MSG) * opts.window_size +
-			   MAX(rx_size, FT_MAX_CTRL_MSG) * opts.window_size;
+		rx_buf_size = MAX(rx_size, FT_MAX_CTRL_MSG) * opts.window_size;
+		tx_buf_size = MAX(tx_size, FT_MAX_CTRL_MSG) * opts.window_size;
 	}
 
 	/* Allow enough space for RMA to operate in a distinct memory
@@ -540,14 +547,20 @@ int ft_alloc_msgs(void)
 	 */
 	rma_resv_bytes = FT_RMA_SYNC_MSG_BYTES +
 			 MAX( ft_tx_prefix_size(), ft_rx_prefix_size() );
-	buf_size += rma_resv_bytes*2;
+	tx_buf_size += rma_resv_bytes;
+	rx_buf_size += rma_resv_bytes;
 
 	if (opts.options & FT_OPT_ALIGN && !(opts.options & FT_OPT_USE_DEVICE)) {
 		alignment = sysconf(_SC_PAGESIZE);
 		if (alignment < 0)
 			return -errno;
-		buf_size += alignment;
+	}
 
+	rx_buf_size = ft_get_aligned_size(rx_buf_size, alignment);
+	tx_buf_size = ft_get_aligned_size(tx_buf_size, alignment);
+
+	buf_size = rx_buf_size + tx_buf_size;
+	if (opts.options & FT_OPT_ALIGN && !(opts.options & FT_OPT_USE_DEVICE)) {
 		ret = posix_memalign((void **) &buf, (size_t) alignment,
 				buf_size);
 		if (ret) {
@@ -555,7 +568,12 @@ int ft_alloc_msgs(void)
 			return ret;
 		}
 	} else {
-		ret = ft_hmem_alloc(opts.iface, opts.device, (void **) &buf, buf_size);
+		/* allocate extra "alignment" bytes, to handle the case
+		 * "buf" returned by ft_hmem_alloc() is not aligned.
+		 */
+		buf_size += alignment;
+		ret = ft_hmem_alloc(opts.iface, opts.device, (void **) &buf,
+				    buf_size);
 		if (ret)
 			return ret;
 
@@ -578,23 +596,19 @@ int ft_alloc_msgs(void)
 		if (ret)
 			return ret;
 	}
+
 	ret = ft_hmem_memset(opts.iface, opts.device, (void *) buf, 0, buf_size);
 	if (ret)
 		return ret;
-	rx_buf = buf;
 
-	if (opts.options & FT_OPT_ALLOC_MULT_MR)
-		tx_buf = (char *) buf + MAX(rx_size, FT_MAX_CTRL_MSG);
-	else
-		tx_buf = (char *) buf +
-			 MAX(rx_size, FT_MAX_CTRL_MSG) * opts.window_size +
-			 rma_resv_bytes;
-
+	rx_buf = (char *)ft_get_aligned_addr(buf, alignment);
+	tx_buf = rx_buf + rx_buf_size;
 	remote_cq_data = ft_init_cq_data(fi);
 
 	mr = &no_mr;
 	if (!ft_mr_alloc_func && !ft_check_opts(FT_OPT_SKIP_REG_MR)) {
-		ret = ft_reg_mr(fi, buf, buf_size, ft_info_to_mr_access(fi),
+		ret = ft_reg_mr(fi, rx_buf, rx_buf_size + tx_buf_size,
+				ft_info_to_mr_access(fi),
 				FT_MR_KEY, opts.iface, opts.device, &mr,
 				&mr_desc);
 		if (ret)
@@ -678,7 +692,8 @@ int ft_open_fabric_res(void)
 
 int ft_alloc_ep_res(struct fi_info *fi, struct fid_cq **new_txcq,
 		    struct fid_cq **new_rxcq, struct fid_cntr **new_txcntr,
-		    struct fid_cntr **new_rxcntr)
+		    struct fid_cntr **new_rxcntr,
+		    struct fid_cntr **new_rma_cntr)
 {
 	int ret;
 
@@ -753,6 +768,14 @@ int ft_alloc_ep_res(struct fi_info *fi, struct fid_cq **new_txcq,
 			FT_PRINTERR("fi_cntr_open", ret);
 			return ret;
 		}
+
+		if (fi->caps & FI_RMA) {
+			ret = ft_cntr_open(new_rma_cntr);
+			if (ret) {
+				FT_PRINTERR("fi_cntr_open", ret);
+				return ret;
+			}
+		}
 	}
 
 	if (!av && (fi->ep_attr->type == FI_EP_RDM || fi->ep_attr->type == FI_EP_DGRAM)) {
@@ -775,7 +798,7 @@ int ft_alloc_ep_res(struct fi_info *fi, struct fid_cq **new_txcq,
 int ft_alloc_active_res(struct fi_info *fi)
 {
 	int ret;
-	ret = ft_alloc_ep_res(fi, &txcq, &rxcq, &txcntr, &rxcntr);
+	ret = ft_alloc_ep_res(fi, &txcq, &rxcq, &txcntr, &rxcntr, &rma_cntr);
 	if (ret)
 		return ret;
 
@@ -827,6 +850,7 @@ int ft_init_oob(void)
 {
 	struct addrinfo *ai = NULL;
 	int ret;
+	char *addr = opts.oob_addr;
 
 	if (!(opts.options & FT_OPT_OOB_CTRL) || oob_sock != -1)
 		return 0;
@@ -835,7 +859,10 @@ int ft_init_oob(void)
 		opts.oob_port = default_oob_port;
 
 	if (!opts.dst_addr) {
-		ret = ft_sock_listen(opts.src_addr, opts.oob_port);
+		if (!addr)
+			addr = opts.src_addr;
+
+		ret = ft_sock_listen(addr, opts.oob_port);
 		if (ret)
 			return ret;
 
@@ -848,7 +875,10 @@ int ft_init_oob(void)
 
 		ft_close_fd(listen_sock);
 	} else {
-		ret = getaddrinfo(opts.dst_addr, opts.oob_port, NULL, &ai);
+		if (!addr)
+			addr = opts.dst_addr;
+
+		ret = getaddrinfo(addr, opts.oob_port, NULL, &ai);
 		if (ret) {
 			perror("getaddrinfo");
 			return ret;
@@ -1248,7 +1278,8 @@ int ft_init_alias_ep(uint64_t flags)
 
 int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *bind_av,
 		 struct fid_cq *bind_txcq, struct fid_cq *bind_rxcq,
-		 struct fid_cntr *bind_txcntr, struct fid_cntr *bind_rxcntr)
+		 struct fid_cntr *bind_txcntr, struct fid_cntr *bind_rxcntr,
+		 struct fid_cntr *bind_rma_cntr)
 {
 	uint64_t flags;
 	int ret;
@@ -1284,9 +1315,8 @@ int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *
 		flags = 0;
 	else
 		flags = FI_SEND;
-	if (hints->caps & (FI_WRITE | FI_READ))
-		flags |= hints->caps & (FI_WRITE | FI_READ);
-	else if (hints->caps & FI_RMA)
+
+	if (hints->caps & (FI_RMA | FI_ATOMICS))
 		flags |= FI_WRITE | FI_READ;
 	FT_EP_BIND(bind_ep, bind_txcntr, flags);
 
@@ -1294,11 +1324,13 @@ int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *
 		flags = 0;
 	else
 		flags = FI_RECV;
-	if (hints->caps & (FI_REMOTE_WRITE | FI_REMOTE_READ))
-		flags |= hints->caps & (FI_REMOTE_WRITE | FI_REMOTE_READ);
-	else if (hints->caps & FI_RMA)
-		flags |= FI_REMOTE_WRITE | FI_REMOTE_READ;
+
 	FT_EP_BIND(bind_ep, bind_rxcntr, flags);
+
+	if (hints->caps & (FI_RMA | FI_ATOMICS) && hints->caps & FI_RMA_EVENT) {
+		flags = fi->caps & (FI_REMOTE_WRITE | FI_REMOTE_READ);
+		FT_EP_BIND(bind_ep, bind_rma_cntr, flags);
+	}
 
 	ret = fi_enable(bind_ep);
 	if (ret) {
@@ -1313,7 +1345,7 @@ int ft_enable_ep_recv(void)
 {
 	int ret;
 
-	ret = ft_enable_ep(ep, eq, av, txcq, rxcq, txcntr, rxcntr);
+	ret = ft_enable_ep(ep, eq, av, txcq, rxcq, txcntr, rxcntr, rma_cntr);
 	if (ret)
 		return ret;
 
@@ -1672,6 +1704,7 @@ void ft_close_fids(void)
 	}
 	FT_CLOSE_FID(rxcntr);
 	FT_CLOSE_FID(txcntr);
+	FT_CLOSE_FID(rma_cntr);
 	FT_CLOSE_FID(pollset);
 	if (mr != &no_mr)
 		FT_CLOSE_FID(mr);
@@ -1775,7 +1808,7 @@ static int dupaddr(void **dst_addr, size_t *dst_addrlen,
 }
 
 static int getaddr(char *node, char *service,
-			struct fi_info *hints, uint64_t flags)
+		   struct fi_info *hints, uint64_t flags)
 {
 	int ret;
 	struct fi_info *fi;
@@ -1820,7 +1853,21 @@ int ft_read_addr_opts(char **node, char **service, struct fi_info *hints,
 {
 	int ret;
 
-	if (opts->dst_addr && (opts->src_addr || !opts->oob_port)){
+	if (opts->options & FT_OPT_ADDR_IS_OOB) {
+		*service = NULL;
+		*node = NULL;
+	} else if (opts->address_format == FI_ADDR_STR) {
+		/* We are likely dealing with a provider specific address format.
+		 * I.e. NOT an IP address or host name
+		 */
+		*service = NULL;
+		if (opts->dst_addr) {
+			*node = opts->dst_addr;
+		} else {
+			*node = opts->src_addr;
+			*flags = FI_SOURCE;
+		}
+	} else if (opts->dst_addr) {
 		if (!opts->dst_port)
 			opts->dst_port = default_port;
 
@@ -2048,20 +2095,26 @@ ssize_t ft_tx(struct fid_ep *ep, fi_addr_t fi_addr, size_t size, void *ctx)
 	return ret;
 }
 
-ssize_t ft_post_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size)
+ssize_t ft_post_inject_buf(struct fid_ep *ep, fi_addr_t fi_addr, size_t size,
+			   void *op_buf, uint64_t op_tag)
 {
 	if (hints->caps & FI_TAGGED) {
 		FT_POST(fi_tinject, ft_progress, txcq, tx_seq, &tx_cq_cntr,
-			"inject", ep, tx_buf, size + ft_tx_prefix_size(),
-			fi_addr, tx_seq);
+			"inject", ep, op_buf, size + ft_tx_prefix_size(),
+			fi_addr, op_tag);
 	} else {
 		FT_POST(fi_inject, ft_progress, txcq, tx_seq, &tx_cq_cntr,
-			"inject", ep, tx_buf, size + ft_tx_prefix_size(),
+			"inject", ep, op_buf, size + ft_tx_prefix_size(),
 			fi_addr);
 	}
 
 	tx_cq_cntr++;
 	return 0;
+}
+
+ssize_t ft_post_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size)
+{
+	return ft_post_inject_buf(ep, fi_addr, size, tx_buf, tx_seq);
 }
 
 ssize_t ft_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size)
@@ -2083,16 +2136,18 @@ ssize_t ft_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size)
 
 static size_t ft_remote_write_offset(const char *buf)
 {
-	assert(buf >= tx_buf && buf < (tx_buf + buf_size / 2));
-	/* rx_buf area is the first half of the remote region */
+	assert(buf >= tx_buf && buf < (tx_buf + tx_buf_size));
+	/* rx_buf area is at the beginning of the remote region */
 	return buf - tx_buf;
 }
 
 static size_t ft_remote_read_offset(const char *buf)
 {
-	assert(buf >= rx_buf && buf < (rx_buf + buf_size / 2));
-	/* tx_buf area is the latter half of the remote region */
-	return buf - rx_buf + buf_size / 2;
+	assert(buf >= rx_buf && buf < (rx_buf + rx_buf_size));
+	/* We want to read from remote peer's tx_buf area,
+	 * which immediately follow the rx_buf, hence add rx_buf_size
+	 */
+	return buf - rx_buf + rx_buf_size;
 }
 
 ssize_t ft_post_rma(enum ft_rma_opcodes op, char *buf, size_t size,
@@ -2494,7 +2549,7 @@ static int ft_wait_for_cntr(struct fid_cntr *cntr, uint64_t total, int timeout)
 	return 0;
 }
 
-static int ft_get_cntr_comp(struct fid_cntr *cntr, uint64_t total, int timeout)
+int ft_get_cntr_comp(struct fid_cntr *cntr, uint64_t total, int timeout)
 {
 	int ret = 0;
 
@@ -2988,6 +3043,7 @@ void ft_addr_usage()
 	FT_PRINT_OPTS_USAGE("-E[=<oob_port>]", "enable out-of-band address exchange only "
 			"over the, optional, port");
 	FT_PRINT_OPTS_USAGE("-C <number>", "simultaneous connections to server");
+	FT_PRINT_OPTS_USAGE("-O <addr>", "use the provided addr for out of band");
 	FT_PRINT_OPTS_USAGE("-F <addr_format>", "Address format (default:FI_FORMAT_UNSPEC)");
 }
 
@@ -3158,9 +3214,13 @@ void ft_parse_addr_opts(int op, char *optarg, struct ft_opts *opts)
 			opts->oob_port = optarg + 1;
 		else
 			opts->oob_port = default_oob_port;
+		if (!opts->oob_addr)
+			opts->options |= FT_OPT_ADDR_IS_OOB;
 		break;
 	case 'F':
-		if (!strncasecmp("fi_sockaddr_in6", optarg, 15))
+		if (!strncasecmp("fi_addr_str", optarg, 11))
+			opts->address_format = FI_ADDR_STR;
+		else if (!strncasecmp("fi_sockaddr_in6", optarg, 15))
 			opts->address_format = FI_SOCKADDR_IN6;
 		else if (!strncasecmp("fi_sockaddr_in", optarg, 14))
 			opts->address_format = FI_SOCKADDR_IN;
@@ -3172,6 +3232,11 @@ void ft_parse_addr_opts(int op, char *optarg, struct ft_opts *opts)
 	case 'C':
 		opts->options |= FT_OPT_SERVER_PERSIST;
 		opts->num_connections = atoi(optarg);
+		break;
+	case 'O':
+		opts->oob_addr = optarg;
+		opts->options &= ~FT_OPT_ADDR_IS_OOB;
+		break;
 	default:
 		/* let getopt handle unknown opts*/
 		break;
@@ -3209,7 +3274,7 @@ void ft_parse_opts_range(char* optarg)
 	size_t start, inc, end;
 	int i, ret;
 
-	ret = sscanf(optarg, "r:%ld,%ld,%ld", &start, &inc, &end);
+	ret = sscanf(optarg, "r:%zd,%zd,%zd", &start, &inc, &end);
 	if (ret != 3) {
 		perror("sscanf");
 		exit(EXIT_FAILURE);
@@ -3247,8 +3312,7 @@ void ft_parse_opts_list(char* optarg)
 	token = strtok(optarg, ",");
 	test_cnt = 0;
 	while (token != NULL) {
-		user_test_sizes[i].enable_flags = 0;
-		ret = sscanf(token, "%lu", &user_test_sizes[test_cnt].size);
+		ret = sscanf(token, "%zu", &user_test_sizes[test_cnt].size);
 		if (ret != 1) {
 			fprintf(stderr, "Cannot parse integer \"%s\" in list.\n",token);
 			exit(EXIT_FAILURE);
@@ -3766,6 +3830,7 @@ void ft_free_string_array(char **s)
 	free(s);
 }
 
+#ifndef __APPLE__
 static const char *nexttoken(const char *str,  int chr)
 {
 	if (str)
@@ -3819,6 +3884,12 @@ static int ft_pin_core(const char *core_list)
 
 	return sched_setaffinity(0, sizeof(mask), &mask);
 }
+#else
+static int ft_pin_core(const char *core_list)
+{
+    return EXIT_FAILURE;
+}
+#endif
 
 static int ft_parse_pin_core_opt(char *optarg)
 {

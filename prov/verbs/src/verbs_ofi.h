@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 Intel Corporation, Inc.  All rights reserved.
+ * Copyright (c) Intel Corporation, Inc.  All rights reserved.
  * Copyright (c) 2016 Cisco Systems, Inc. All rights reserved.
  * Copyright (c) 2018-2019 Cray Inc. All rights reserved.
  * Copyright (c) 2018-2019 System Fabric Works, Inc. All rights reserved.
@@ -258,7 +258,7 @@ int vrb_fabric(struct fi_fabric_attr *attr, struct fid_fabric **fabric,
 int vrb_find_fabric(const struct fi_fabric_attr *attr);
 
 struct vrb_progress {
-	struct ofi_genlock	lock;
+	struct ofi_genlock	ep_lock;
 	struct ofi_genlock	*active_lock;
 
 	struct ofi_bufpool	*ctx_pool;
@@ -297,6 +297,7 @@ struct vrb_eq {
 	struct fid_eq		eq_fid;
 	struct vrb_fabric	*fab;
 	ofi_mutex_t		lock;
+	ofi_mutex_t		event_lock;
 	struct dlistfd_head	list_head;
 	struct rdma_event_channel *channel;
 	uint64_t		flags;
@@ -406,7 +407,6 @@ struct vrb_domain {
 };
 
 struct vrb_cq;
-typedef void (*vrb_cq_read_entry)(struct ibv_wc *wc, void *buf);
 
 struct vrb_wc_entry {
 	struct slist_entry	entry;
@@ -425,10 +425,7 @@ struct vrb_cq {
 	enum fi_cq_wait_cond	wait_cond;
 	struct ibv_wc		wc;
 	struct fd_signal	signal;
-	vrb_cq_read_entry	read_entry;
-	struct slist		saved_wc_list;
 	ofi_atomic32_t		nevents;
-	struct ofi_bufpool	*wce_pool;
 
 	struct {
 		/* The list of XRC SRQ contexts associated with this CQ */
@@ -575,6 +572,16 @@ struct vrb_xrc_ep_conn_setup {
 	uint8_t				pending_param[VRB_CM_DATA_SIZE];
 };
 
+enum vrb_ep_state {
+	VRB_IDLE,
+	VRB_RESOLVE_ROUTE,
+	VRB_CONNECTING,
+	VRB_REQ_RCVD,
+	VRB_ACCEPTING,
+	VRB_CONNECTED,
+	VRB_DISCONNECTED,
+};
+
 struct vrb_ep {
 	struct util_ep			util_ep;
 	struct ibv_qp			*ibv_qp;
@@ -589,6 +596,7 @@ struct vrb_ep {
 	int64_t				rq_credits_avail;
 	int64_t				threshold;
 
+	enum vrb_ep_state		state;
 	union {
 		struct rdma_cm_id	*id;
 		struct {
@@ -770,9 +778,6 @@ struct vrb_cm_data_hdr {
 int vrb_eq_add_sidr_conn(struct vrb_xrc_ep *ep,
 			    void *param_data, size_t param_len);
 void vrb_eq_remove_sidr_conn(struct vrb_xrc_ep *ep);
-struct vrb_xrc_ep *vrb_eq_get_sidr_conn(struct vrb_eq *eq,
-					      struct sockaddr *peer,
-					      uint16_t pep_port, bool recip);
 
 void vrb_msg_ep_get_qp_attr(struct vrb_ep *ep,
 			       struct ibv_qp_init_attr *attr);
@@ -783,8 +788,6 @@ void vrb_next_xrc_conn_state(struct vrb_xrc_ep *ep);
 void vrb_prev_xrc_conn_state(struct vrb_xrc_ep *ep);
 void vrb_eq_set_xrc_conn_tag(struct vrb_xrc_ep *ep);
 void vrb_eq_clear_xrc_conn_tag(struct vrb_xrc_ep *ep);
-struct vrb_xrc_ep *vrb_eq_xrc_conn_tag2ep(struct vrb_eq *eq,
-						uint32_t conn_tag);
 void vrb_set_xrc_cm_data(struct vrb_xrc_cm_data *local, int reciprocal,
 			    uint32_t conn_tag, uint16_t port, uint32_t tgt_qpn,
 			    uint32_t srqn);
@@ -908,7 +911,8 @@ static inline ssize_t vrb_convert_ret(int ret)
 
 
 int vrb_poll_cq(struct vrb_cq *cq, struct ibv_wc *wc);
-int vrb_save_wc(struct vrb_cq *cq, struct ibv_wc *wc);
+void vrb_report_wc(struct vrb_cq *cq, struct ibv_wc *wc);
+void vrb_flush_cq(struct vrb_cq *cq);
 
 #define vrb_init_sge(buf, len, desc) (struct ibv_sge)	\
 	{ .addr = (uintptr_t) buf,			\
@@ -929,7 +933,7 @@ do {								\
 	( wr->opcode == IBV_WR_SEND || wr->opcode == IBV_WR_SEND_WITH_IMM	\
 	|| wr->opcode == IBV_WR_RDMA_WRITE_WITH_IMM )
 
-void vrb_shutdown_qp_in_err(struct vrb_ep *ep);
+void vrb_shutdown_ep(struct vrb_ep *ep);
 ssize_t vrb_post_send(struct vrb_ep *ep, struct ibv_send_wr *wr, uint64_t flags);
 ssize_t vrb_post_recv(struct vrb_ep *ep, struct ibv_recv_wr *wr);
 

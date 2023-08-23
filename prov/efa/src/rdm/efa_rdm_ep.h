@@ -35,9 +35,12 @@
 #define _EFA_RDM_EP_H
 
 #include <ctype.h>
+#include "efa.h"
 #include "efa_tp.h"
+#include "efa_base_ep.h"
+#include "efa_rdm_rxe_map.h"
 
-#define RXR_ERROR_MSG_BUFFER_LENGTH 1024
+#define EFA_RDM_ERROR_MSG_BUFFER_LENGTH 1024
 
 enum ibv_cq_ex_type {
 	IBV_CQ,
@@ -51,14 +54,20 @@ enum ibv_cq_ex_type {
  * do them at the same time can avoid memory barriers between
  * copies, and improve performance.
  */
-struct rxr_queued_copy {
-	struct rxr_pkt_entry *pkt_entry;
+struct efa_rdm_ep_queued_copy {
+	struct efa_rdm_pke *pkt_entry;
 	char *data;
 	size_t data_size;
 	size_t data_offset;
 };
 
-#define RXR_EP_MAX_QUEUED_COPY (8)
+#define EFA_RDM_MAX_QUEUED_COPY (8)
+/** @brief max number of concurrent send reuqests allowed by EFA device
+ *
+ * The value was from EFA device's attribute (device->efa_attr.max_sq_wr)
+ */
+#define EFA_RDM_EP_MAX_WR_PER_IBV_POST_SEND (4096)
+#define EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV (8192)
 
 struct efa_rdm_ep {
 	struct efa_base_ep base_ep;
@@ -69,7 +78,7 @@ struct efa_rdm_ep {
 	uint64_t host_id;
 
 	/* per-version extra feature/request flag */
-	uint64_t extra_info[RXR_MAX_NUM_EXINFO];
+	uint64_t extra_info[EFA_RDM_MAX_NUM_EXINFO];
 
 	struct ibv_cq_ex *ibv_cq_ex;
 
@@ -80,7 +89,7 @@ struct efa_rdm_ep {
 	struct fid_ep *shm_ep;
 
 	/*
-	 * RxR rx/tx queue sizes. These may be different from the core
+	 * EFA RDM endpoint rx/tx queue sizes. These may be different from the core
 	 * provider's rx/tx size and will either limit the number of possible
 	 * receives/sends or allow queueing.
 	 */
@@ -100,6 +109,7 @@ struct efa_rdm_ep {
 	/* rx/tx queue size of core provider */
 	size_t efa_max_outstanding_rx_ops;
 	size_t efa_max_outstanding_tx_ops;
+	size_t efa_rnr_queued_pkt_cnt;
 	size_t max_data_payload_size;
 
 	/* Resource management flag */
@@ -114,7 +124,7 @@ struct efa_rdm_ep {
 	/* Applicaiton's message prefix size. */
 	size_t msg_prefix_size;
 
-	/* RxR protocol's max header size */
+	/* EFA RDM protocol's max header size */
 	size_t max_proto_hdr_size;
 
 	/* tx iov limit of EFA device */
@@ -124,37 +134,29 @@ struct efa_rdm_ep {
 	size_t min_multi_recv_size;
 
 	/* buffer pool for send & recv */
-	struct rxr_pkt_pool *efa_tx_pkt_pool;
-	struct rxr_pkt_pool *efa_rx_pkt_pool;
+	struct ofi_bufpool *efa_tx_pkt_pool;
+	struct ofi_bufpool *efa_rx_pkt_pool;
 
 	/* staging area for unexpected and out-of-order packets */
-	struct rxr_pkt_pool *rx_unexp_pkt_pool;
-	struct rxr_pkt_pool *rx_ooo_pkt_pool;
+	struct ofi_bufpool *rx_unexp_pkt_pool;
+	struct ofi_bufpool *rx_ooo_pkt_pool;
 
 	/* staging area for read copy */
-	struct rxr_pkt_pool *rx_readcopy_pkt_pool;
+	struct ofi_bufpool *rx_readcopy_pkt_pool;
 	int rx_readcopy_pkt_pool_used;
 	int rx_readcopy_pkt_pool_max_used;
 
-	/* datastructure to maintain rxr send/recv states */
+	/* datastructure to maintain send/recv states */
 	struct ofi_bufpool *ope_pool;
 	/* data structure to maintain pkt rx map */
 	struct ofi_bufpool *map_entry_pool;
-	/* rxr medium message pkt_entry to rxe map */
-	struct rxr_pkt_rx_map *pkt_rx_map;
+	/** a map between sender address + msg_id to RX entry */
+	struct efa_rdm_rxe_map rxe_map;
 	/*
 	 * buffer pool for atomic response data, used by
 	 * emulated fetch and compare atomic.
 	 */
 	struct ofi_bufpool *rx_atomrsp_pool;
-	/* rx_entries with recv buf */
-	struct dlist_entry rx_list;
-	/* rx_entries without recv buf (unexpected message) */
-	struct dlist_entry rx_unexp_list;
-	/* rx_entries with tagged recv buf */
-	struct dlist_entry rx_tagged_list;
-	/* rx_entries without tagged recv buf (unexpected message) */
-	struct dlist_entry rx_unexp_tagged_list;
 	/* list of pre-posted recv buffers */
 	struct dlist_entry rx_posted_buf_list;
 	/* op entries with queued rnr packets */
@@ -208,12 +210,12 @@ struct efa_rdm_ep {
 	/* number of outstanding tx ops on efa device */
 	size_t efa_outstanding_tx_ops;
 
-	struct rxr_queued_copy queued_copy_vec[RXR_EP_MAX_QUEUED_COPY];
+	struct efa_rdm_ep_queued_copy queued_copy_vec[EFA_RDM_MAX_QUEUED_COPY];
 	int queued_copy_num;
 	int blocking_copy_rxe_num; /* number of RX entries that are using gdrcopy/cudaMemcpy */
 
 	int	hmem_p2p_opt; /* what to do for hmem transfers */
-	struct fid_peer_srx peer_srx; /* support sharing receive context with peer providers */
+	struct fid_ep *peer_srx_ep; /* support sharing receive context with peer providers */
 	bool cuda_api_permitted; /**< whether end point is permitted to call CUDA API */
 
 	/* use_device_rdma:
@@ -229,13 +231,13 @@ struct efa_rdm_ep {
 	struct fi_info *user_info; /**< fi_info passed by user when calling fi_endpoint */
 	bool sendrecv_in_order_aligned_128_bytes; /**< whether to support in order send/recv of each aligned 128 bytes memory region */
 	bool write_in_order_aligned_128_bytes; /**< whether to support in order write of each aligned 128 bytes memory region */
-	char err_msg[RXR_ERROR_MSG_BUFFER_LENGTH]; /* A large enough buffer to store CQ/EQ error data used by e.g. fi_cq_readerr */
+	char err_msg[EFA_RDM_ERROR_MSG_BUFFER_LENGTH]; /* A large enough buffer to store CQ/EQ error data used by e.g. fi_cq_readerr */
 };
 
 int efa_rdm_ep_flush_queued_blocking_copy_to_hmem(struct efa_rdm_ep *ep);
 
-#define rxr_rx_flags(efa_rdm_ep) ((efa_rdm_ep)->base_ep.util_ep.rx_op_flags)
-#define rxr_tx_flags(efa_rdm_ep) ((efa_rdm_ep)->base_ep.util_ep.tx_op_flags)
+#define efa_rdm_rx_flags(efa_rdm_ep) ((efa_rdm_ep)->base_ep.util_ep.rx_op_flags)
+#define efa_rdm_tx_flags(efa_rdm_ep) ((efa_rdm_ep)->base_ep.util_ep.tx_op_flags)
 
 struct efa_ep_addr *efa_rdm_ep_raw_addr(struct efa_rdm_ep *ep);
 
@@ -258,21 +260,21 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
 struct efa_rdm_ope *efa_rdm_ep_alloc_rxe(struct efa_rdm_ep *ep,
 					   fi_addr_t addr, uint32_t op);
 
-void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct rxr_pkt_entry *pkt_entry);
+void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct efa_rdm_pke *pkt_entry);
 
-void efa_rdm_ep_record_tx_op_completed(struct efa_rdm_ep *ep, struct rxr_pkt_entry *pkt_entry);
+void efa_rdm_ep_record_tx_op_completed(struct efa_rdm_ep *ep, struct efa_rdm_pke *pkt_entry);
 
-static inline size_t rxr_get_rx_pool_chunk_cnt(struct efa_rdm_ep *ep)
+static inline size_t efa_rdm_ep_get_rx_pool_size(struct efa_rdm_ep *ep)
 {
 	return MIN(ep->efa_max_outstanding_rx_ops, ep->rx_size);
 }
 
-static inline size_t rxr_get_tx_pool_chunk_cnt(struct efa_rdm_ep *ep)
+static inline size_t efa_rdm_ep_get_tx_pool_size(struct efa_rdm_ep *ep)
 {
 	return MIN(ep->efa_max_outstanding_tx_ops, ep->tx_size);
 }
 
-static inline int rxr_need_sas_ordering(struct efa_rdm_ep *ep)
+static inline int efa_rdm_ep_need_sas(struct efa_rdm_ep *ep)
 {
 	return ep->msg_order & FI_ORDER_SAS;
 }
@@ -292,14 +294,12 @@ int efa_rdm_ep_post_user_recv_buf(struct efa_rdm_ep *ep, struct efa_rdm_ope *rxe
 
 struct efa_rdm_peer;
 
-int efa_rdm_ep_determine_rdma_read_support(struct efa_rdm_ep *ep, fi_addr_t addr,
-				       struct efa_rdm_peer *peer);
-int efa_rdm_ep_determine_rdma_write_support(struct efa_rdm_ep *ep, fi_addr_t addr,
-					struct efa_rdm_peer *peer);
-
 void efa_rdm_ep_queue_rnr_pkt(struct efa_rdm_ep *ep,
-			  struct dlist_entry *list,
-			  struct rxr_pkt_entry *pkt_entry);
+			      struct dlist_entry *list,
+			      struct efa_rdm_pke *pkt_entry);
+
+ssize_t efa_rdm_ep_send_queued_pkts(struct efa_rdm_ep *ep,
+				    struct dlist_entry *pkts);
 
 static inline
 struct efa_domain *efa_rdm_ep_domain(struct efa_rdm_ep *ep)
@@ -361,27 +361,6 @@ int efa_rdm_ep_use_p2p(struct efa_rdm_ep *efa_rdm_ep, struct efa_mr *efa_mr)
 	return 0;
 }
 
-static inline
-ssize_t efa_rdm_ep_post_flush(struct efa_rdm_ep *ep, struct ibv_send_wr **bad_wr)
-{
-	ssize_t ret;
-
-#if HAVE_LTTNG
-	struct ibv_send_wr *head = ep->base_ep.xmit_more_wr_head.next;
-
-	while (head) {
-		efa_tracepoint_wr_id_post_send((void *) head->wr_id);
-		head = head->next;
-	}
-#endif
-
-	ret = ibv_post_send(ep->base_ep.qp->ibv_qp, ep->base_ep.xmit_more_wr_head.next, bad_wr);
-	ep->base_ep.xmit_more_wr_head.next = NULL;
-	ep->base_ep.xmit_more_wr_tail = &ep->base_ep.xmit_more_wr_head;
-	return ret;
-}
-
-
 /*
  * @brief: check whether RDMA read is allowed and supported.
  *
@@ -438,5 +417,29 @@ static inline int efa_rdm_ep_cap_check_atomic(struct efa_rdm_ep *ep) {
 	EFA_WARN_ONCE(FI_LOG_EP_DATA, "Operation requires FI_ATOMIC capability, which was not requested.");
 	return -FI_EOPNOTSUPP;
 }
+
+/**
+ * @brief Get the peer_srx from ep
+ *
+ * @param ep efa rdm endpoint
+ * @return struct fid_peer_srx* a ptr to the peer srx
+ */
+static inline struct fid_peer_srx *efa_rdm_ep_get_peer_srx(struct efa_rdm_ep *ep)
+{
+	return container_of(ep->peer_srx_ep, struct fid_peer_srx, ep_fid);
+}
+
+static inline struct util_srx_ctx *efa_rdm_ep_get_peer_srx_ctx(struct efa_rdm_ep *ep)
+{
+	return (struct util_srx_ctx *) ep->peer_srx_ep->fid.context;
+}
+
+ssize_t efa_rdm_ep_trigger_handshake(struct efa_rdm_ep *ep,
+				     fi_addr_t addr);
+
+ssize_t efa_rdm_ep_post_handshake(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer);
+
+void efa_rdm_ep_post_handshake_or_queue(struct efa_rdm_ep *ep,
+				     struct efa_rdm_peer *peer);
 
 #endif

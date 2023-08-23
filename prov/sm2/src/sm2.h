@@ -67,6 +67,7 @@
 #include <ofi_rbuf.h>
 #include <ofi_signal.h>
 #include <ofi_util.h>
+#include <sys/uio.h>
 
 #include "sm2_coordination.h"
 
@@ -77,6 +78,9 @@
 #define SM2_VERSION		1
 #define SM2_IOV_LIMIT		4
 #define SM2_INJECT_SIZE		(SM2_XFER_ENTRY_SIZE - sizeof(struct sm2_xfer_hdr))
+
+#define SM2_ATOMIC_INJECT_SIZE	    (SM2_INJECT_SIZE - sizeof(struct sm2_atomic_hdr))
+#define SM2_ATOMIC_COMP_INJECT_SIZE (SM2_ATOMIC_INJECT_SIZE / 2)
 
 extern struct fi_provider sm2_prov;
 extern struct fi_info sm2_info;
@@ -95,7 +99,6 @@ enum {
  * 	next - fifo linked list next ptr
  * 		This is volatile for a reason, many things touch this
  * 		and we do not want compiler optimization here
- * 	ep - A pointer to receiver's ep (used on unexp msg path)
  * 	size - Holds total size of message
  * 	cq_data - user defined CQ data
  * 	tag - used for tagged messages
@@ -104,21 +107,20 @@ enum {
  * 	op_flags - flags associated with op,
  * 		   NOTE: Only grabbing the bottom 32 bits
  * 	proto - sm2 operation
+ * 	proto_flags - Flags used by the sm2 protocol
  * 	sender_gid - id of msg sender
  * 	user_data - the message
  */
 struct sm2_xfer_hdr {
-	union {
-		volatile long int next;
-		struct sm2_ep *ep;
-	};
+	volatile long int next;
 	uint64_t size;
 	uint64_t cq_data;
 	uint64_t tag;
 	uint64_t context;
 	uint32_t op;
 	uint32_t op_flags;
-	uint32_t proto;
+	uint16_t proto;
+	uint16_t proto_flags;
 	sm2_gid_t sender_gid;
 };
 
@@ -126,6 +128,30 @@ struct sm2_xfer_entry {
 	struct sm2_xfer_hdr hdr;
 	uint8_t user_data[SM2_INJECT_SIZE];
 } __attribute__((packed));
+
+struct sm2_atomic_hdr {
+	uint8_t datatype;
+	uint8_t atomic_op;
+	int rma_ioc_count;
+	struct fi_rma_ioc rma_ioc[SM2_IOV_LIMIT];
+	int result_iov_count;
+	struct iovec result_iov[SM2_IOV_LIMIT];
+};
+
+struct sm2_atomic_data {
+	union {
+		uint8_t data[SM2_ATOMIC_INJECT_SIZE];
+		struct {
+			uint8_t buf[SM2_ATOMIC_COMP_INJECT_SIZE];
+			uint8_t comp[SM2_ATOMIC_COMP_INJECT_SIZE];
+		};
+	};
+};
+
+struct sm2_atomic_entry {
+	struct sm2_atomic_hdr atomic_hdr;
+	struct sm2_atomic_data atomic_data;
+};
 
 struct sm2_ep_name {
 	char name[FI_NAME_MAX];
@@ -161,18 +187,6 @@ int sm2_eq_open(struct fid_fabric *fabric, struct fi_eq_attr *attr,
 int sm2_av_open(struct fid_domain *domain, struct fi_av_attr *attr,
 		struct fid_av **av, void *context);
 
-static inline int sm2_match_id(fi_addr_t addr, fi_addr_t match_addr)
-{
-	return (addr == FI_ADDR_UNSPEC) || (match_addr == FI_ADDR_UNSPEC) ||
-	       (addr == match_addr);
-}
-
-static inline int sm2_match_tag(uint64_t tag, uint64_t ignore,
-				uint64_t match_tag)
-{
-	return ((tag | ignore) == (match_tag | ignore));
-}
-
 static inline void sm2_generic_format(struct sm2_xfer_entry *xfer_entry,
 				      sm2_gid_t self_gid, uint32_t op,
 				      uint64_t tag, uint64_t cq_data,
@@ -181,6 +195,7 @@ static inline void sm2_generic_format(struct sm2_xfer_entry *xfer_entry,
 	xfer_entry->hdr.op = op;
 	/* We only care about lower 32 bits */
 	xfer_entry->hdr.op_flags = (uint32_t) op_flags;
+	xfer_entry->hdr.proto_flags = 0;
 	xfer_entry->hdr.tag = tag;
 	xfer_entry->hdr.sender_gid = self_gid;
 	xfer_entry->hdr.cq_data = cq_data;
@@ -198,64 +213,18 @@ struct sm2_domain {
 	struct fid_peer_srx *srx;
 };
 
-struct sm2_rx_entry {
-	struct fi_peer_rx_entry peer_entry;
-	struct iovec iov[SM2_IOV_LIMIT];
-	void *desc[SM2_IOV_LIMIT];
-	int64_t peer_id;
-	uint64_t ignore;
-	int multi_recv_ref;
-	uint64_t err;
-};
-
-struct sm2_queue {
-	struct dlist_entry list;
-	dlist_func_t *match_func;
-};
-
-OFI_DECLARE_FREESTACK(struct sm2_rx_entry, sm2_recv_fs);
-
-struct sm2_match_attr {
-	fi_addr_t id;
-	uint64_t tag;
-	uint64_t ignore;
-};
-
-struct sm2_srx_ctx {
-	struct fid_peer_srx peer_srx;
-	struct sm2_queue recv_queue;
-	struct sm2_queue trecv_queue;
-	bool dir_recv;
-	size_t min_multi_recv_size;
-	uint64_t rx_op_flags;
-	uint64_t rx_msg_flags;
-
-	struct util_cq *cq;
-	struct sm2_queue unexp_msg_queue;
-	struct sm2_queue unexp_tagged_queue;
-	struct sm2_recv_fs *recv_fs;
-
-	// TODO Determine if this spin lock is needed.
-	ofi_spin_t lock;
-};
-
-struct sm2_rx_entry *sm2_alloc_rx_entry(struct sm2_srx_ctx *srx);
-
 struct sm2_ep {
 	struct util_ep util_ep;
 	size_t rx_size;
 	size_t tx_size;
 	const char *name;
+	struct sm2_mmap *mmap;
+	struct sm2_region *self_region;
 	sm2_gid_t gid;
-	ofi_spin_t tx_lock;
 	struct fid_ep *srx;
+	struct ofi_bufpool *xfer_ctx_pool;
 	int ep_idx;
 };
-
-static inline struct sm2_srx_ctx *sm2_get_srx(struct sm2_ep *ep)
-{
-	return (struct sm2_srx_ctx *) ep->srx->fid.context;
-}
 
 static inline struct fid_peer_srx *sm2_get_peer_srx(struct sm2_ep *ep)
 {
@@ -309,41 +278,22 @@ int sm2_unexp_start(struct fi_peer_rx_entry *rx_entry);
 
 static inline struct sm2_region *sm2_peer_region(struct sm2_ep *ep, int id)
 {
-	struct sm2_av *av;
-
 	assert(id < SM2_MAX_UNIVERSE_SIZE);
-	av = container_of(ep->util_ep.av, struct sm2_av, util_av);
-
-	return sm2_mmap_ep_region(&av->mmap, id);
+	return sm2_mmap_ep_region(ep->mmap, id);
 }
-
-bool sm2_adjust_multi_recv(struct sm2_srx_ctx *srx,
-			   struct fi_peer_rx_entry *rx_entry, size_t len);
-void sm2_init_rx_entry(struct sm2_rx_entry *entry, const struct iovec *iov,
-		       void **desc, size_t count, fi_addr_t addr, void *context,
-		       uint64_t tag, uint64_t flags);
-struct sm2_rx_entry *sm2_get_recv_entry(struct sm2_srx_ctx *srx,
-					const struct iovec *iov, void **desc,
-					size_t count, fi_addr_t addr,
-					void *context, uint64_t tag,
-					uint64_t ignore, uint64_t flags);
 
 static inline size_t sm2_pop_xfer_entry(struct sm2_ep *ep,
 					struct sm2_xfer_entry **xfer_entry)
 {
-	struct sm2_av *av =
-		container_of(ep->util_ep.av, struct sm2_av, util_av);
-	struct sm2_mmap *map = &av->mmap;
-	struct sm2_region *self_region = sm2_mmap_ep_region(map, ep->gid);
+	if (smr_freestack_isempty(sm2_freestack(ep->self_region)))
+		return -FI_EAGAIN;
 
-	if (smr_freestack_isempty(sm2_freestack(self_region))) {
-		sm2_progress_recv(ep);
-		if (smr_freestack_isempty(sm2_freestack(self_region)))
-			return -FI_EAGAIN;
-	}
-
-	*xfer_entry = smr_freestack_pop(sm2_freestack(self_region));
+	*xfer_entry = smr_freestack_pop(sm2_freestack(ep->self_region));
 	return FI_SUCCESS;
 }
+
+int sm2_query_atomic(struct fid_domain *domain, enum fi_datatype datatype,
+		     enum fi_op op, struct fi_atomic_attr *attr,
+		     uint64_t flags);
 
 #endif /* _SM2_H_ */

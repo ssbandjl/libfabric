@@ -39,7 +39,7 @@
 
 static int efa_mr_regattr(struct fid *fid, const struct fi_mr_attr *attr,
 			  uint64_t flags, struct fid_mr **mr_fid);
-static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, void *attr);
+static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, const void *attr);
 static int efa_mr_dereg_impl(struct efa_mr *efa_mr);
 
 
@@ -222,11 +222,6 @@ static int efa_mr_hmem_setup(struct efa_mr *efa_mr,
 	}
 
 	if (efa_mr->domain->util_domain.info_domain_caps & FI_HMEM) {
-		/*
-		 * Skipping the domain type check above is okay here since
-		 * util_domain is at the beginning of both efa_domain and
-		 * rxr_domain.
-		 */
 		if (efa_mr->domain->hmem_info[attr->iface].initialized) {
 			efa_mr->peer.iface = attr->iface;
 		} else {
@@ -322,7 +317,7 @@ int efa_mr_cache_entry_reg(struct ofi_mr_cache *cache,
 	else if (attr.iface == FI_HMEM_SYNAPSEAI)
 		attr.device.synapseai = entry->info.device;
 
-	ret = efa_mr_reg_impl(efa_mr, 0, (void *)&attr);
+	ret = efa_mr_reg_impl(efa_mr, 0, (const void *)&attr);
 	return ret;
 }
 
@@ -335,47 +330,6 @@ void efa_mr_cache_entry_dereg(struct ofi_mr_cache *cache,
 	ret = efa_mr_dereg_impl(efa_mr);
 	if (ret)
 		EFA_WARN(FI_LOG_MR, "Unable to dereg mr: %d\n", ret);
-}
-
-/*
- * efa_mr_reg_shm() is called by rxr_read_init_iov to used to generate
- * shm only memory registrations. Such memory registrations were used
- * when read message protocol was applied to SHM EP. In which case,
- * we need to register the send iov as FI_REMOTE_READ.
- *
- * Note when we open the SHM domain we did not specify FI_MR_PROV_KEY
- * therefore the SHM domain require us to proivde a key when calling
- * fi_mr_reg on it. (rxr_set_shm_hints())
- *
- * The reason we did not specify FI_MR_PROV_KEY when opening SHM
- * domain is because we want ibv_mr and shm_mr to use the same
- * key. For that, we first call ibv_reg_mr() to register memory
- * and get a key, and use that key to register shm. (efa_m_reg_impl())
- *
- * However, for SHM's read message protocol, we do not want to call
- * ibv_reg_mr() because it is expensive, so we use a static variable
- * SHM_MR_KEYGEN to generate key.
- *
- * It is initialized as 0x100000000, and each call to efa_mr_reg_shm()
- * will use shm_mr_keygen as current key and increase it by 1.
- *
- * Note SHM_MR_KEYGEN starts from 0x100000000 because the key
- * returned from ibv_reg_mr() is a 32 bits integer, thus is always
- * smaller than 0x100000000. By starting from 0x100000000, we avoid
- * key collision.
- */
-int efa_mr_reg_shm(struct fid_domain *domain_fid, struct iovec *iov,
-		   uint64_t access, struct fid_mr **mr_fid)
-{
-	static uint64_t SHM_MR_KEYGEN =	SHM_MR_KEYGEN_INIT;
-	uint64_t requested_key;
-	struct efa_domain *efa_domain;
-
-	efa_domain = container_of(domain_fid, struct efa_domain, util_domain.domain_fid.fid);
-	assert(efa_domain->shm_domain);
-
-	requested_key = SHM_MR_KEYGEN++;
-	return fi_mr_regv(efa_domain->shm_domain, iov, 1, access, 0, requested_key, 0, mr_fid, NULL);
 }
 
 static int efa_mr_cache_regattr(struct fid *fid, const struct fi_mr_attr *attr,
@@ -430,7 +384,7 @@ static int efa_mr_cache_regv(struct fid *fid, const struct iovec *iov,
 			     uint64_t requested_key, uint64_t flags,
 			     struct fid_mr **mr_fid, void *context)
 {
-	struct fi_mr_attr attr;
+	struct fi_mr_attr attr = {0};
 
 	attr.mr_iov = iov;
 	attr.iov_count = count;
@@ -842,10 +796,10 @@ static uint64_t efa_mr_cuda_non_p2p_keygen(void) {
  * set the fi_ibv_access modes and do real registration (ibv_mr_reg)
  * Insert the key returned by ibv_mr_reg into efa mr_map and shm mr_map
  */
-static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, void *attr)
+static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, const void *attr)
 {
 	uint64_t core_access, original_access;
-	struct fi_mr_attr *mr_attr = (struct fi_mr_attr *)attr;
+	struct fi_mr_attr mr_attr = {0};
 	int fi_ibv_access = 0;
 	uint64_t shm_flags;
 	int ret = 0;
@@ -856,14 +810,19 @@ static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, void *attr)
 	efa_mr->mr_fid.mem_desc = NULL;
 	efa_mr->mr_fid.key = FI_KEY_NOTAVAIL;
 
-	ret = efa_mr_hmem_setup(efa_mr, mr_attr, flags);
+	ofi_mr_update_attr(
+		efa_mr->domain->util_domain.fabric->fabric_fid.api_version,
+		efa_mr->domain->util_domain.info_domain_caps,
+		(const struct fi_mr_attr *) attr, &mr_attr);
+
+	ret = efa_mr_hmem_setup(efa_mr, &mr_attr, flags);
 	if (ret)
 		return ret;
 
 	/* To support Emulated RMA path, if the access is not supported
 	 * by EFA, modify it to FI_SEND | FI_RECV
 	 */
-	core_access = mr_attr->access;
+	core_access = mr_attr.access;
 	if (!core_access || (core_access & ~EFA_MR_SUPPORTED_PERMISSIONS))
 		core_access = FI_SEND | FI_RECV;
 
@@ -888,10 +847,10 @@ static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, void *attr)
 	 * For FI_HMEM_CUDA iface when p2p is unavailable, skip ibv_reg_mr() and
 	 * generate proprietary mr_fid key.
 	 */
-	if (mr_attr->iface == FI_HMEM_CUDA && !efa_mr->domain->hmem_info[FI_HMEM_CUDA].p2p_supported_by_device) {
+	if (mr_attr.iface == FI_HMEM_CUDA && !efa_mr->domain->hmem_info[FI_HMEM_CUDA].p2p_supported_by_device) {
 		efa_mr->mr_fid.key = efa_mr_cuda_non_p2p_keygen();
 	} else {
-		efa_mr->ibv_mr = efa_mr_reg_ibv_mr(efa_mr, mr_attr, fi_ibv_access);
+		efa_mr->ibv_mr = efa_mr_reg_ibv_mr(efa_mr, &mr_attr, fi_ibv_access);
 		if (!efa_mr->ibv_mr) {
 			EFA_WARN(FI_LOG_MR, "Unable to register MR: %s\n",
 					fi_strerror(-errno));
@@ -908,7 +867,7 @@ static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, void *attr)
 	efa_mr->mr_fid.mem_desc = efa_mr;
 	assert(efa_mr->mr_fid.key != FI_KEY_NOTAVAIL);
 
-	ret = efa_mr_update_domain_mr_map(efa_mr, mr_attr);
+	ret = efa_mr_update_domain_mr_map(efa_mr, &mr_attr);
 	if (ret) {
 		efa_mr_dereg_impl(efa_mr);
 		return ret;
@@ -920,29 +879,29 @@ static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, void *attr)
 		/* We need to add FI_REMOTE_READ to allow for Read implemented
 		* message protocols.
 		*/
-		original_access = mr_attr->access;
-		mr_attr->access |= FI_REMOTE_READ;
+		original_access = mr_attr.access;
+		mr_attr.access |= FI_REMOTE_READ;
 		/* Inherit peer.flags with addtional feature bits such as gdrcopy handle switch */
 		shm_flags = efa_mr->peer.flags;
-		if (mr_attr->iface != FI_HMEM_SYSTEM) {
+		if (mr_attr.iface != FI_HMEM_SYSTEM) {
 			/* shm provider need the flag to turn on IPC support */
 			shm_flags |= FI_HMEM_DEVICE_ONLY;
 		}
 
-		mr_attr->hmem_data = efa_mr->peer.hmem_data;
+		mr_attr.hmem_data = efa_mr->peer.hmem_data;
 
-		ret = fi_mr_regattr(efa_mr->domain->shm_domain, mr_attr,
+		ret = fi_mr_regattr(efa_mr->domain->shm_domain, &mr_attr,
 				    shm_flags, &efa_mr->shm_mr);
 
-		mr_attr->access = original_access;
+		mr_attr.access = original_access;
 		if (ret) {
 			EFA_WARN(FI_LOG_MR,
 				"Unable to register shm MR. errno: %d err_msg: (%s) key: %ld buf: %p len: %zu\n",
 				ret,
 				fi_strerror(-ret),
 				efa_mr->mr_fid.key,
-				mr_attr->mr_iov->iov_base,
-				mr_attr->mr_iov->iov_len);
+				mr_attr.mr_iov->iov_base,
+				mr_attr.mr_iov->iov_len);
 			efa_mr_dereg_impl(efa_mr);
 			return ret;
 		}
@@ -1018,7 +977,7 @@ static int efa_mr_regattr(struct fid *fid, const struct fi_mr_attr *attr,
 	efa_mr->mr_fid.fid.context = attr->context;
 	efa_mr->mr_fid.fid.ops = &efa_mr_ops;
 
-	ret = efa_mr_reg_impl(efa_mr, flags, (void *)attr);
+	ret = efa_mr_reg_impl(efa_mr, flags, (const void *)attr);
 	if (ret)
 		goto err;
 
@@ -1035,7 +994,7 @@ static int efa_mr_regv(struct fid *fid, const struct iovec *iov,
 		       size_t count, uint64_t access, uint64_t offset, uint64_t requested_key,
 		       uint64_t flags, struct fid_mr **mr_fid, void *context)
 {
-	struct fi_mr_attr attr;
+	struct fi_mr_attr attr = {0};
 
 	attr.mr_iov = iov;
 	attr.iov_count = count;

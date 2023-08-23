@@ -19,6 +19,9 @@ struct fid_peer_av_set
 struct fid_peer_cq
 : A completion queue that may be shared between independent providers
 
+struct fid_peer_cntr
+: A counter that may be shared between independent providers
+
 struct fid_peer_srx
 : A shared receive context that may be shared between independent providers
 
@@ -286,6 +289,51 @@ on the local node.
    creates a reference between the peer_cq object and its own cq.
 ```
 
+# PEER COUNTER
+
+The peer counter defines a mechanism by which a peer provider may increment
+value or error into the counter owned by another provider.
+
+The setup of a peer counter is similar to the setup for a peer CQ outlined
+above. The owner’s counter object is imported directly into the peer.
+
+The data structures to support peer counters are defined as follows:
+
+```c
+struct fi_ops_cntr_owner {
+    size_t size;
+    void (*inc)(struct fid_peer_cntr *cntr);
+    void (*incerr)(struct fid_peer_cntr *cntr);
+};
+
+struct fid_peer_cntr {
+    struct fid fid;
+    struct fi_ops_cntr_owner *owner_ops;
+};
+
+struct fi_peer_cntr_context {
+    size_t size;
+    struct fid_peer_cntr *cntr;
+};
+```
+
+Similar to the peer CQ, if manual progress is needed on the peer counter,
+the owner should drive progress by using the fi_cntr_read()
+and the fi_cntr_read() should do nothing but progress the peer cntr.
+The peer provider should set other functions that attempt to access
+the peer’s cntr (i.e. fi_cntr_readerr, fi_cntr_set, etc.) to return
+-FI_ENOSYS.
+
+## fi_ops_cntr_owner::inc()
+
+This call directs the owner to increment the value of the cntr.
+
+## fi_ops_cntr_owner::incerr()
+
+The behavior of this call is similar to the inc() ops. It increments
+the error of the cntr indicating that a data transfer has failed
+into the cntr.
+
 # PEER DOMAIN
 
 The peer domain allows a provider to access the operations of a domain
@@ -414,6 +462,20 @@ struct fi_peer_srx_context {
 ```
 The ownership of structure field values and callback functions is similar
 to those defined for peer CQs, relative to owner versus peer ops.
+
+The owner is responsible for acquiring any necessary locks before anything that
+could result in peer callbacks.
+The following functions are progress level functions:
+get_msg(), get_tag(), queue_msg(), queue_tag(), free_entry(), start_msg(),
+start_tag(), discard_msg(), discard_tag(). If needed, it is the owner's
+responsibility to acquire the appropriate lock prior to calling into a peer's
+fi_cq_read(), or similar, function that drives progress.
+
+The following functions are domain level functions:
+foreach_unspec_addr(). This function is used outside of message progress flow
+(i.e. during fi_av_insert()). The owner of the srx is responsible for acquiring
+the same lock, if needed.
+
 
 ## fi_peer_rx_entry
 

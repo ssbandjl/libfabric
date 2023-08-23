@@ -40,7 +40,7 @@
 
 #include "efa.h"
 #include "efa_av.h"
-#include "rdm/rxr_pkt_type_base.h"
+#include "rdm/efa_rdm_pke_utils.h"
 
 /*
  * Local/remote peer detection by comparing peer GID with stored local GIDs
@@ -130,7 +130,7 @@ fi_addr_t efa_av_reverse_lookup_dgram(struct efa_av *av, uint16_t ahn, uint16_t 
  * @return	On success, return fi_addr to the peer who send the packet
  * 		If no such peer exist, return FI_ADDR_NOTAVAIL
  */
-fi_addr_t efa_av_reverse_lookup_rdm(struct efa_av *av, uint16_t ahn, uint16_t qpn, struct rxr_pkt_entry *pkt_entry)
+fi_addr_t efa_av_reverse_lookup_rdm(struct efa_av *av, uint16_t ahn, uint16_t qpn, struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_cur_reverse_av *cur_entry;
 	struct efa_prv_reverse_av *prv_entry;
@@ -153,7 +153,7 @@ fi_addr_t efa_av_reverse_lookup_rdm(struct efa_av *av, uint16_t ahn, uint16_t qp
 		return cur_entry->conn->fi_addr;
 	}
 
-	connid = rxr_pkt_connid_ptr(pkt_entry);
+	connid = efa_rdm_pke_connid_ptr(pkt_entry);
 	if (!connid) {
 		EFA_WARN_ONCE(FI_LOG_EP_CTRL,
 			     "An incoming packet does NOT have connection ID in its header.\n"
@@ -920,7 +920,7 @@ int efa_av_open(struct fid_domain *domain_fid, struct fi_av_attr *attr,
 		return -FI_ENOSYS;
 
 	/*
-	 * TODO: remove me once RxR supports resizing members tied to the AV
+	 * TODO: remove me once EFA RDM endpoint supports resizing members tied to the AV
 	 * size.
 	 */
 	if (!attr->count)

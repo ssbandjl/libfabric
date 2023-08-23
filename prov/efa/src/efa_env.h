@@ -31,8 +31,8 @@
  * SOFTWARE.
  */
 
-#ifndef _RXR_ENV_H
-#define _RXR_ENV_H
+#ifndef _EFA_ENV_H
+#define _EFA_ENV_H
 
 #include "efa_prov.h"
 
@@ -41,6 +41,13 @@
  * to cause firmware to retry indefinitely.
  */
 #define EFA_RNR_INFINITE_RETRY 7
+
+enum efa_env_huge_page_setting
+{
+	EFA_ENV_HUGE_PAGE_UNSPEC, /**< user did not set FI_EFA_USE_HUGE_PAGE, provider will decide whether to use huge page*/
+	EFA_ENV_HUGE_PAGE_ENABLED, /**< user explicitly set FI_EFA_USE_HUGE_PAGE to 1/true/on */
+	EFA_ENV_HUGE_PAGE_DISABLED, /**< user explicitly set FI_EFA_USE_HUGE_PAGE to 0/false/off */
+};
 
 struct efa_env {
 	int tx_min_credits;
@@ -100,7 +107,8 @@ struct efa_env {
 	 * is malformatted, the program should proceed with a default host id, e.g. 0.
 	 */
 	char *host_id_file;
-	int use_sm2;
+	enum efa_env_huge_page_setting huge_page_setting;
+	char *intranode_provider;
 };
 
 /**

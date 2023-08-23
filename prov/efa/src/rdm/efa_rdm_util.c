@@ -129,7 +129,7 @@ void efa_rdm_get_desc_for_shm(int numdesc, void **efa_desc, void **shm_desc)
 
 /**
  * @brief Write the error message and return its byte length
- * @param[in]    ep          RXR endpoint
+ * @param[in]    ep          EFA RDM endpoint
  * @param[in]    addr        Remote peer fi_addr_t
  * @param[in]    err         FI_* error code(must be positive)
  * @param[in]    prov_errno  EFA provider * error code(must be positive)
@@ -162,19 +162,19 @@ int efa_rdm_write_error_msg(struct efa_rdm_ep *ep, fi_addr_t addr, int err, int 
         strcpy(peer_host_id_str, "N/A");
     }
 
-    int ret = snprintf(ep->err_msg, RXR_ERROR_MSG_BUFFER_LENGTH, "%s My EFA addr: %s My host id: %s Peer EFA addr: %s Peer host id: %s",
+    int ret = snprintf(ep->err_msg, EFA_RDM_ERROR_MSG_BUFFER_LENGTH, "%s My EFA addr: %s My host id: %s Peer EFA addr: %s Peer host id: %s",
                        base_msg, ep_addr_str, local_host_id_str, peer_addr_str, peer_host_id_str);
 
-    if (ret < 0 || ret > RXR_ERROR_MSG_BUFFER_LENGTH - 1) {
+    if (ret < 0 || ret > EFA_RDM_ERROR_MSG_BUFFER_LENGTH - 1) {
         return -FI_EINVAL;
     }
 
-    if (strlen(ep->err_msg) >= RXR_ERROR_MSG_BUFFER_LENGTH) {
+    if (strlen(ep->err_msg) >= EFA_RDM_ERROR_MSG_BUFFER_LENGTH) {
         return -FI_ENOBUFS;
     }
 
     *buf = ep->err_msg;
-    *buflen = RXR_ERROR_MSG_BUFFER_LENGTH;
+    *buflen = EFA_RDM_ERROR_MSG_BUFFER_LENGTH;
 
     return 0;
 }
