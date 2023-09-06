@@ -1,0 +1,900 @@
+[root@node1 libfabric]# ./configure --prefix=/home/xb/project/libfabric/build/fabtests --enable-debug
+checking for a BSD-compatible install... /bin/install -c
+checking whether build environment is sane... yes
+checking for a thread-safe mkdir -p... /bin/mkdir -p
+checking for gawk... gawk
+checking whether make sets $(MAKE)... yes
+checking whether make supports nested variables... yes
+checking how to create a pax tar archive... gnutar
+checking whether make supports nested variables... (cached) yes
+checking build system type... x86_64-unknown-linux-gnu
+checking host system type... x86_64-unknown-linux-gnu
+checking for style of include used by make... GNU
+checking for gcc... gcc
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking whether we are using the GNU C compiler... yes
+checking whether gcc accepts -g... yes
+checking for gcc option to accept ISO C89... none needed
+checking dependency style of gcc... gcc3
+checking dependency style of gcc... gcc3
+checking for ar... ar
+checking the archiver (ar) interface... ar
+checking for gcc... (cached) gcc
+checking whether we are using the GNU C compiler... (cached) yes
+checking whether gcc accepts -g... (cached) yes
+checking for gcc option to accept ISO C89... (cached) none needed
+checking dependency style of gcc... (cached) gcc3
+checking for gcc option to accept ISO C99... none needed
+checking whether gcc and cc understand -c and -o together... yes
+checking how to run the C preprocessor... gcc -E
+checking to see if compiler supports -Wextra... yes
+checking to see if compiler supports -Wno-unused-parameter... yes
+checking to see if compiler supports -Wno-sign-compare... yes
+checking to see if compiler supports -Wno-missing-field-initializers... yes
+checking to see if compiler supports -fstack-protector-strong... yes
+checking for grep that handles long lines and -e... /bin/grep
+checking for egrep... /bin/grep -E
+checking for ANSI C header files... yes
+checking for typeof syntax and keyword spelling... typeof
+checking how to print strings... printf
+checking for a sed that does not truncate output... /bin/sed
+checking for fgrep... /bin/grep -F
+checking for ld used by gcc... /opt/rh/devtoolset-7/root/usr/libexec/gcc/x86_64-redhat-linux/7/ld
+checking if the linker (/opt/rh/devtoolset-7/root/usr/libexec/gcc/x86_64-redhat-linux/7/ld) is GNU ld... yes
+checking for BSD- or MS-compatible name lister (nm)... /opt/rh/devtoolset-7/root/usr/bin/nm -B
+checking the name lister (/opt/rh/devtoolset-7/root/usr/bin/nm -B) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 1572864
+checking whether the shell understands some XSI constructs... yes
+checking whether the shell understands "+="... yes
+checking how to convert x86_64-unknown-linux-gnu file names to x86_64-unknown-linux-gnu format... func_convert_file_noop
+checking how to convert x86_64-unknown-linux-gnu file names to toolchain format... func_convert_file_noop
+checking for /opt/rh/devtoolset-7/root/usr/libexec/gcc/x86_64-redhat-linux/7/ld option to reload object files... -r
+checking for objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for dlltool... no
+checking how to associate runtime and link libraries... printf %s\n
+checking for archiver @FILE support... @
+checking for strip... strip
+checking for ranlib... ranlib
+checking command to parse /opt/rh/devtoolset-7/root/usr/bin/nm -B output from gcc object... ok
+checking for sysroot... no
+checking for mt... no
+checking if : is a manifest tool... no
+checking for sys/types.h... yes
+checking for sys/stat.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for memory.h... yes
+checking for strings.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for unistd.h... yes
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if gcc supports -fno-rtti -fno-exceptions... no
+checking for gcc option to produce PIC... -fPIC -DPIC
+checking if gcc PIC flag -fPIC -DPIC works... yes
+checking if gcc static flag -static works... no
+checking if gcc supports -c -o file.o... yes
+checking if gcc supports -c -o file.o... (cached) yes
+checking whether the gcc linker (/opt/rh/devtoolset-7/root/usr/libexec/gcc/x86_64-redhat-linux/7/ld -m elf_x86_64) supports shared libraries... yes
+checking whether -lc should be explicitly linked in... no
+checking dynamic linker characteristics... GNU/Linux ld.so
+checking how to hardcode library paths into programs... immediate
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... yes
+checking whether to build static libraries... yes
+configure: creating ./config.lt
+config.lt: creating libtool
+checking for dlopen in -ldl... yes
+checking for pthread_mutex_init in -lpthread... yes
+checking for pthread_spin_init... yes
+checking for shm_open... no
+checking for library containing shm_open... -lrt
+checking for epoll_create... yes
+checking linux/perf_event.h usability... yes
+checking linux/perf_event.h presence... yes
+checking for linux/perf_event.h... yes
+checking whether __builtin_ia32_rdpmc is declared... yes
+checking compiler support for c11 atomics... yes
+checking compiler support for c11 atomic `least` types... yes
+checking compiler support for built-in atomics... yes
+checking for library containing __atomic_load_8... -latomic
+checking compiler support for built-in memory model aware atomics... yes
+checking for __int128... yes
+checking compiler support for built-in memory model aware 128-bit atomics... yes
+checking compiler support for cpuid... yes
+checking whether ld accepts --version-script... yes
+checking xpmem.h usability... no
+checking xpmem.h presence... no
+checking for xpmem.h... no
+checking for .symver assembler support... yes
+checking for __alias__ attribute support... yes
+checking for getifaddrs... yes
+checking ethtool support... yes
+checking whether ethtool_cmd_speed is declared... yes
+checking whether SPEED_UNKNOWN is declared... yes
+checking linux/userfaultfd.h usability... yes
+checking linux/userfaultfd.h presence... yes
+checking for linux/userfaultfd.h... yes
+checking whether __NR_userfaultfd is declared... yes
+checking for userfaultfd unmap support... yes
+checking for elf.h... yes
+checking for sys/auxv.h... yes
+checking for library containing clock_gettime... none required
+checking liburing.h usability... no
+checking liburing.h presence... no
+checking for liburing.h... no
+checking cuda_runtime.h usability... no
+checking cuda_runtime.h presence... no
+checking for cuda_runtime.h... no
+checking level_zero/ze_api.h usability... no
+checking level_zero/ze_api.h presence... no
+checking for level_zero/ze_api.h... no
+checking nrt/nrt.h usability... no
+checking nrt/nrt.h presence... no
+checking for nrt/nrt.h... no
+checking habanalabs/synapse_api.h usability... no
+checking habanalabs/synapse_api.h presence... no
+checking for habanalabs/synapse_api.h... no
+checking for __curbrk... yes
+checking for __clear_cache... yes
+checking linux/mman.h usability... yes
+checking linux/mman.h presence... yes
+checking for linux/mman.h... yes
+checking sys/syscall.h usability... yes
+checking sys/syscall.h presence... yes
+checking for sys/syscall.h... yes
+checking whether __syscall is declared... no
+checking for __syscall... no
+checking hsa/hsa_ext_amd.h usability... no
+checking hsa/hsa_ext_amd.h presence... no
+checking for hsa/hsa_ext_amd.h... no
+checking size of void *... 0
+configure: *** Configuring psm2 provider
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: configure: recheck psm2 without psm2_info_query.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: recheck psm2 without psm2_mq_ipeek_dequeue_multi.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: recheck psm2 without psm2_mq_fp_msg.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: recheck psm2 without psm2_am_register_handlers_2.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: psm2 provider: disabled
+configure: *** Configuring psm3 provider
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking numa.h usability... yes
+checking numa.h presence... yes
+checking for numa.h... yes
+configure: looking for library without search path
+checking for numa_node_of_cpu in -lnuma... yes
+checking infiniband/verbs.h usability... yes
+checking infiniband/verbs.h presence... yes
+checking for infiniband/verbs.h... yes
+configure: looking for library without search path
+checking for ibv_get_device_list in -libverbs... yes
+checking uuid/uuid.h usability... yes
+checking uuid/uuid.h presence... yes
+checking for uuid/uuid.h... yes
+configure: looking for library without search path
+checking for uuid_parse in -luuid... yes
+checking for -msse4.2 support... yes
+checking for -mavx support... yes
+checking for -mavx2 support... yes
+checking for grep that handles long lines and -e... (cached) /bin/grep
+checking for -Wno-address-of-packed-member support... no
+checking rdma/rv_user_ioctls.h usability... no
+checking rdma/rv_user_ioctls.h presence... no
+checking for rdma/rv_user_ioctls.h... no
+checking linux/idxd.h usability... yes
+checking linux/idxd.h presence... yes
+checking for linux/idxd.h... yes
+checking for full Intel DSA support... yes
+configure: psm3 provider: include in libfabric
+configure: *** Configuring sockets provider
+checking sys/socket.h usability... yes
+checking sys/socket.h presence... yes
+checking for sys/socket.h... yes
+checking for shm_open... (cached) no
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking for getifaddrs... (cached) yes
+configure: sockets provider: include in libfabric
+configure: *** Configuring verbs provider
+checking infiniband/verbs.h usability... yes
+checking infiniband/verbs.h presence... yes
+checking for infiniband/verbs.h... yes
+configure: looking for library without search path
+checking for ibv_open_device in -libverbs... yes
+checking if libibverbs is linkable by libtool... yes
+checking rdma/rdma_cma.h usability... yes
+checking rdma/rdma_cma.h presence... yes
+checking for rdma/rdma_cma.h... yes
+configure: looking for library without search path
+checking for rdma_create_qp in -lrdmacm... yes
+checking rdma/rdma_cma.h usability... yes
+checking rdma/rdma_cma.h presence... yes
+checking for rdma/rdma_cma.h... yes
+configure: looking for library without search path
+checking for rdma_create_qp_ex in -lrdmacm... yes
+checking whether ibv_query_device_ex is declared... yes
+checking whether IBV_QPT_XRC_SEND is declared... yes
+checking whether rdma_establish is declared... yes
+checking whether ibv_reg_dmabuf_mr is declared... yes
+configure: verbs provider: include in libfabric
+configure: *** Configuring efa provider
+checking infiniband/verbs.h usability... yes
+checking infiniband/verbs.h presence... yes
+checking for infiniband/verbs.h... yes
+configure: looking for library without search path
+checking for ibv_open_device in -libverbs... yes
+checking if libibverbs is linkable by libtool... yes
+checking for GCC... yes
+checking infiniband/efadv.h usability... yes
+checking infiniband/efadv.h presence... yes
+checking for infiniband/efadv.h... yes
+configure: looking for library without search path
+checking for efadv_query_ah in -lefa... yes
+checking for struct efadv_device_attr.max_rdma_size... yes
+checking whether EFADV_DEVICE_ATTR_CAPS_RNR_RETRY is declared... yes
+checking whether EFADV_DEVICE_ATTR_CAPS_RDMA_WRITE is declared... no
+checking whether ibv_is_fork_initialized is declared... yes
+checking whether IBV_QUERY_QP_DATA_IN_ORDER_ALIGNED_128_BYTES is declared... no
+checking whether efadv_create_cq is declared... no
+checking whether efadv_cq_from_ibv_cq_ex is declared... no
+checking whether efadv_wc_read_sgid is declared... no
+configure: efa provider: include in libfabric
+configure: *** Configuring usnic provider
+checking for infiniband/verbs.h... (cached) yes
+checking infiniband/driver.h usability... no
+checking infiniband/driver.h presence... no
+checking for infiniband/driver.h... no
+checking if building usnic fake verbs driver... no
+configure: checking for libnl3
+checking for libnl3 prefix... /usr
+checking for /usr/include/libnl3... found
+configure: looking for header without includes
+checking netlink/version.h usability... yes
+checking netlink/version.h presence... yes
+checking for netlink/version.h... yes
+configure: looking for library without search path
+checking for nl_socket_set_peer_groups in -lnl-3... yes
+checking for library containing nl_rtgen_request... -lnl-route-3
+checking to ensure these really are libnl3 headers... yes
+configure: usnic provider: include in libfabric
+checking for pkg-config... /bin/pkg-config
+checking pkg-config is at least version 0.9.0... yes
+configure: *** Configuring gni provider
+checking for CRAY_GNI_HEADERS... no
+configure: gni provider: disabled
+configure: *** Configuring udp provider
+checking for sys/socket.h... (cached) yes
+configure: udp provider: include in libfabric
+configure: *** Configuring tcp provider
+configure: tcp provider: include in libfabric
+configure: *** Configuring rxm provider
+configure: rxm provider: include in libfabric
+configure: *** Configuring mrail provider
+configure: mrail provider: include in libfabric
+configure: *** Configuring rxd provider
+configure: rxd provider: include in libfabric
+configure: *** Configuring bgq provider
+checking for direct bgq provider... no
+configure: bgq provider: disabled
+configure: *** Configuring shm provider
+checking for shm_open... (cached) no
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking accel-config/libaccel_config.h usability... no
+checking accel-config/libaccel_config.h presence... no
+checking for accel-config/libaccel_config.h... no
+checking whether HAVE_ATOMICS is declared... yes
+configure: shm provider: include in libfabric
+configure: *** Configuring sm2 provider
+checking for shm_open... (cached) no
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking whether HAVE_ATOMICS is declared... (cached) yes
+configure: sm2 provider: include in libfabric
+configure: *** Configuring rstream provider
+configure: rstream provider: include in libfabric
+configure: *** Configuring ucx provider
+configure: ucx provider: disabled
+configure: *** Configuring perf provider
+configure: perf provider: include in libfabric
+configure: *** Configuring trace provider
+configure: trace provider: include in libfabric
+configure: *** Configuring profile provider
+configure: profile provider: include in libfabric
+configure: *** Configuring hook_debug provider
+configure: hook_debug provider: include in libfabric
+configure: *** Configuring hook_hmem provider
+configure: hook_hmem provider: include in libfabric
+configure: *** Configuring dmabuf_peer_mem provider
+configure: dmabuf_peer_mem provider: include in libfabric
+configure: *** Configuring opx provider
+checking for opx provider... checking uuid/uuid.h usability... yes
+checking uuid/uuid.h presence... yes
+checking for uuid/uuid.h... yes
+configure: looking for library without search path
+checking for uuid_parse in -luuid... yes
+checking numa.h usability... yes
+checking numa.h presence... yes
+checking for numa.h... yes
+configure: looking for library without search path
+checking for numa_node_of_cpu in -lnuma... yes
+checking rdma/hfi/hfi1_user.h usability... yes
+checking rdma/hfi/hfi1_user.h presence... yes
+checking for rdma/hfi/hfi1_user.h... yes
+configure: hfi1_user.h HFI1_CAP_TID_RDMA defined... yes
+checking whether HAVE_ATOMICS is declared... (cached) yes
+configure: opx provider: include in libfabric
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating prov/psm3/psm3/psm2_hal_inlines_i.h
+config.status: creating prov/psm3/psm3/psm2_hal_inlines_d.h
+config.status: creating prov/psm3/src/psm3_revision.c
+config.status: creating libfabric.pc
+config.status: creating Makefile
+config.status: creating libfabric.spec
+config.status: creating libfabric.map
+config.status: creating config.h
+config.status: config.h is unchanged
+config.status: executing depfiles commands
+config.status: executing libtool commands
+***
+*** Built-in providers: opx dmabuf_peer_mem hook_hmem hook_debug profile trace perf rstream sm2 shm rxd mrail rxm tcp udp usnic efa verbs sockets psm3 
+*** DSO providers:
+***
+[root@node1 libfabric]# make -j1
+  GEN      prov/psm3/src/psm3_src_chksum.h
+make  all-am
+make[1]: Entering directory '/home/xb/project/libfabric'
+  CC       src/src_libfabric_la-fabric.lo
+  CC       src/src_libfabric_la-fi_tostr.lo
+  CC       src/src_libfabric_la-perf.lo
+  CC       src/src_libfabric_la-log.lo
+  CC       src/src_libfabric_la-var.lo
+  CC       src/src_libfabric_la-abi_1_0.lo
+  CC       prov/hook/src/src_libfabric_la-hook.lo
+  CC       prov/hook/src/src_libfabric_la-hook_av.lo
+  CC       prov/hook/src/src_libfabric_la-hook_cm.lo
+  CC       prov/hook/src/src_libfabric_la-hook_cntr.lo
+  CC       prov/hook/src/src_libfabric_la-hook_cq.lo
+  CC       prov/hook/src/src_libfabric_la-hook_domain.lo
+  CC       prov/hook/src/src_libfabric_la-hook_ep.lo
+  CC       prov/hook/src/src_libfabric_la-hook_eq.lo
+  CC       prov/hook/src/src_libfabric_la-hook_wait.lo
+  CC       prov/hook/src/src_libfabric_la-hook_xfer.lo
+  CC       src/src_libfabric_la-hmem.lo
+  CC       src/src_libfabric_la-hmem_rocr.lo
+  CC       src/src_libfabric_la-hmem_cuda.lo
+  CC       src/src_libfabric_la-hmem_cuda_gdrcopy.lo
+  CC       src/src_libfabric_la-hmem_ze.lo
+  CC       src/src_libfabric_la-hmem_neuron.lo
+  CC       src/src_libfabric_la-hmem_synapseai.lo
+  CC       src/src_libfabric_la-hmem_ipc_cache.lo
+  CC       src/src_libfabric_la-xpmem.lo
+  CC       src/src_libfabric_la-xpmem_cache.lo
+  CC       src/src_libfabric_la-common.lo
+  CC       src/src_libfabric_la-enosys.lo
+  CC       src/src_libfabric_la-rbtree.lo
+  CC       src/src_libfabric_la-tree.lo
+  CC       src/src_libfabric_la-fasthash.lo
+  CC       src/src_libfabric_la-indexer.lo
+  CC       src/src_libfabric_la-mem.lo
+  CC       src/src_libfabric_la-iov.lo
+  CC       src/src_libfabric_la-ofi_str.lo
+  CC       prov/util/src/src_libfabric_la-util_atomic.lo
+  CC       prov/util/src/src_libfabric_la-util_attr.lo
+  CC       prov/util/src/src_libfabric_la-util_av.lo
+  CC       prov/util/src/src_libfabric_la-rxm_av.lo
+  CC       prov/util/src/src_libfabric_la-util_cq.lo
+  CC       prov/util/src/src_libfabric_la-util_cntr.lo
+  CC       prov/util/src/src_libfabric_la-util_domain.lo
+  CC       prov/util/src/src_libfabric_la-util_ep.lo
+  CC       prov/util/src/src_libfabric_la-util_pep.lo
+  CC       prov/util/src/src_libfabric_la-util_eq.lo
+  CC       prov/util/src/src_libfabric_la-util_fabric.lo
+  CC       prov/util/src/src_libfabric_la-util_main.lo
+  CC       prov/util/src/src_libfabric_la-util_poll.lo
+  CC       prov/util/src/src_libfabric_la-util_wait.lo
+  CC       prov/util/src/src_libfabric_la-util_buf.lo
+  CC       prov/util/src/src_libfabric_la-util_mr_map.lo
+  CC       prov/util/src/src_libfabric_la-util_ns.lo
+  CC       prov/util/src/src_libfabric_la-util_srx.lo
+  CC       prov/util/src/src_libfabric_la-util_mem_monitor.lo
+  CC       prov/util/src/src_libfabric_la-util_mem_hooks.lo
+  CC       prov/util/src/src_libfabric_la-util_mr_cache.lo
+  CC       prov/util/src/src_libfabric_la-cuda_mem_monitor.lo
+  CC       prov/util/src/src_libfabric_la-rocr_mem_monitor.lo
+  CC       prov/util/src/src_libfabric_la-ze_mem_monitor.lo
+  CC       prov/util/src/src_libfabric_la-cuda_ipc_monitor.lo
+  CC       prov/util/src/src_libfabric_la-rocr_ipc_monitor.lo
+  CC       prov/util/src/src_libfabric_la-xpmem_monitor.lo
+  CC       prov/coll/src/src_libfabric_la-coll_attr.lo
+  CC       prov/coll/src/src_libfabric_la-coll_av.lo
+  CC       prov/coll/src/src_libfabric_la-coll_av_set.lo
+  CC       prov/coll/src/src_libfabric_la-coll_coll.lo
+  CC       prov/coll/src/src_libfabric_la-coll_cq.lo
+  CC       prov/coll/src/src_libfabric_la-coll_domain.lo
+  CC       prov/coll/src/src_libfabric_la-coll_ep.lo
+  CC       prov/coll/src/src_libfabric_la-coll_eq.lo
+  CC       prov/coll/src/src_libfabric_la-coll_fabric.lo
+  CC       prov/coll/src/src_libfabric_la-coll_init.lo
+  CC       src/unix/src_libfabric_la-osd.lo
+  CC       src/linux/src_libfabric_la-osd.lo
+  CC       src/linux/src_libfabric_la-rdpmc.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_attr.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_av.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_dom.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_mr.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_eq.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_cq.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_cntr.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_poll.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_wait.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_ep_rdm.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_ep_dgram.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_ep_msg.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_fabric.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_ep.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_ctx.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_rx_entry.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_progress.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_comm.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_conn.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_msg.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_rma.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_atomic.lo
+  CC       prov/sockets/src/src_libfabric_la-sock_trigger.lo
+  CC       prov/udp/src/src_libfabric_la-udpx_attr.lo
+  CC       prov/udp/src/src_libfabric_la-udpx_cq.lo
+  CC       prov/udp/src/src_libfabric_la-udpx_domain.lo
+  CC       prov/udp/src/src_libfabric_la-udpx_ep.lo
+  CC       prov/udp/src/src_libfabric_la-udpx_fabric.lo
+  CC       prov/udp/src/src_libfabric_la-udpx_init.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_init.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_cm.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_cm_xrc.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_cq.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_domain.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_domain_xrc.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_mr.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_eq.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_info.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_ep.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_msg.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_rma.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_dgram_ep_msg.lo
+  CC       prov/verbs/src/src_libfabric_la-verbs_dgram_av.lo
+  CC       prov/efa/src/src_libfabric_la-efa_device.lo
+  CC       prov/efa/src/src_libfabric_la-efa_hmem.lo
+  CC       prov/efa/src/src_libfabric_la-efa_shm.lo
+  CC       prov/efa/src/src_libfabric_la-efa_av.lo
+  CC       prov/efa/src/src_libfabric_la-efa_domain.lo
+  CC       prov/efa/src/src_libfabric_la-efa_fabric.lo
+  CC       prov/efa/src/src_libfabric_la-efa_mr.lo
+  CC       prov/efa/src/src_libfabric_la-efa_strerror.lo
+  CC       prov/efa/src/src_libfabric_la-efa_user_info.lo
+  CC       prov/efa/src/src_libfabric_la-efa_prov_info.lo
+  CC       prov/efa/src/src_libfabric_la-efa_fork_support.lo
+  CC       prov/efa/src/src_libfabric_la-efa_tp_def.lo
+  CC       prov/efa/src/src_libfabric_la-efa_base_ep.lo
+  CC       prov/efa/src/src_libfabric_la-efa_prov.lo
+  CC       prov/efa/src/src_libfabric_la-efa_env.lo
+  CC       prov/efa/src/src_libfabric_la-efa_cntr.lo
+  CC       prov/efa/src/dgram/src_libfabric_la-efa_dgram_ep.lo
+  CC       prov/efa/src/dgram/src_libfabric_la-efa_dgram_cq.lo
+  CC       prov/efa/src/dgram/src_libfabric_la-efa_dgram_msg.lo
+  CC       prov/efa/src/dgram/src_libfabric_la-efa_dgram_rma.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_peer.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_cq.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_ep_utils.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_ep_fiops.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_ep_progress.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_rma.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_msg.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_utils.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_rtm.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_rtr.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_rtw.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_rta.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_req.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_nonreq.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pke_cmd.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_pkt_type.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_ope.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_rxe_map.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_atomic.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_tracepoint_def.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_srx.lo
+  CC       prov/efa/src/rdm/src_libfabric_la-efa_rdm_util.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-libnl_utils_common.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_caps.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_dest.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_device.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_event.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_enum.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_ib_cmd.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_ib_sysfs.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_mem.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_poll.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_post.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_post_ud_raw.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_post_ud_udp.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_post_ud_pio_udp.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_queues.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_socket.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usd_vnic.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-usnic_ip_utils.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-vnic_cq.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-vnic_dev.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-vnic_rq.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-vnic_wq.lo
+  CC       prov/usnic/src/usnic_direct/src_libfabric_la-vnic_intr.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_av.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_cm.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_cq.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_dgram.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_domain.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_endpoint.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_ep_dgram.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_eq.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_fabric.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_mem.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_pep.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_progress.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_timer.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_poll.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_ext.lo
+  CC       prov/usnic/src/src_libfabric_la-usdf_wait.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_attr.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_init.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_fabric.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_domain.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_conn.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_ep.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_msg.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_tagged.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_cq.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_rma.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_atomic.lo
+  CC       prov/rxm/src/src_libfabric_la-rxm_eq.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_init.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_attr.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_fabric.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_domain.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_cq.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_ep.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_av.lo
+  CC       prov/mrail/src/src_libfabric_la-mrail_rma.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_attr.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_init.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_fabric.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_domain.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_av.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_cq.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_cntr.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_ep.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_msg.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_tagged.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_rma.lo
+  CC       prov/rxd/src/src_libfabric_la-rxd_atomic.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_atomic.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_av.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cm.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cntr.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cq.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cq_ops_table_locking.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cq_ops_table_locking_8192.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cq_ops_table_locking_runtime.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cq_ops_table_non_locking.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cq_ops_table_non_locking_8192.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_cq_ops_table_non_locking_runtime.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_domain.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_tid_domain.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_ep.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_eq.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_fabric.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_info.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_init.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_mr.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_msg.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_rma.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_hfi1.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_hfi1_sdma.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_reliability.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_tagged.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_sep.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_sysfs.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_service.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_shm.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_tid_cache.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_hfi_select.lo
+  CC       prov/opx/src/src_libfabric_la-opa_utils_gen1.lo
+  CC       prov/opx/src/src_libfabric_la-opa_proto.lo
+  CC       prov/opx/src/src_libfabric_la-fi_opx_progress.lo
+  CC       prov/shm/src/src_libfabric_la-smr_attr.lo
+  CC       prov/shm/src/src_libfabric_la-smr_cq.lo
+  CC       prov/shm/src/src_libfabric_la-smr_domain.lo
+  CC       prov/shm/src/src_libfabric_la-smr_progress.lo
+  CC       prov/shm/src/src_libfabric_la-smr_comp.lo
+  CC       prov/shm/src/src_libfabric_la-smr_cntr.lo
+  CC       prov/shm/src/src_libfabric_la-smr_msg.lo
+  CC       prov/shm/src/src_libfabric_la-smr_rma.lo
+  CC       prov/shm/src/src_libfabric_la-smr_atomic.lo
+  CC       prov/shm/src/src_libfabric_la-smr_ep.lo
+  CC       prov/shm/src/src_libfabric_la-smr_fabric.lo
+  CC       prov/shm/src/src_libfabric_la-smr_init.lo
+  CC       prov/shm/src/src_libfabric_la-smr_av.lo
+  CC       prov/shm/src/src_libfabric_la-smr_dsa.lo
+  CC       prov/shm/src/src_libfabric_la-smr_util.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_attr.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_cq.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_domain.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_progress.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_comp.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_cntr.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_msg.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_ep.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_fabric.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_init.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_av.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_coordination.lo
+  CC       prov/sm2/src/src_libfabric_la-sm2_atomic.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_fabric.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_attr.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_cm.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_rdm_cm.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_domain.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_rma.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_msg.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_ep.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_rdm.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_pep.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_srx.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_cq.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_eq.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_init.lo
+  CC       prov/tcp/src/src_libfabric_la-xnet_progress.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_domain.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_fabric.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_attr.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_init.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_cm.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_msg.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_eq.lo
+  CC       prov/rstream/src/src_libfabric_la-rstream_ep.lo
+  CC       prov/hook/perf/src/src_libfabric_la-hook_perf.lo
+  CC       prov/hook/trace/src/src_libfabric_la-hook_trace.lo
+  CC       prov/hook/profile/src/src_libfabric_la-hook_profile.lo
+  CC       prov/hook/profile/src/src_libfabric_la-prof_report.lo
+  CC       prov/hook/hook_debug/src/src_libfabric_la-hook_debug.lo
+  CC       prov/hook/hook_hmem/src/src_libfabric_la-hook_hmem.lo
+  CC       prov/hook/dmabuf_peer_mem/src/src_libfabric_la-hook_dmabuf_peer_mem.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_am.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_atomic.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_attr.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_av.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_cm.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_cntr.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_cq.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_domain.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_ep.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_fabric.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_init.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_mr.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_msg.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_rma.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_tagged.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_trx_ctxt.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_util.lo
+  CC       prov/psm3/src/libpsm3_la-psmx3_wait.lo
+  CC       prov/psm3/src/libpsm3_la-psm3_revision.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_am.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_context.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_diags.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_ep.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_ep_connect.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_error.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_memcpy.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_mock.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_mpool.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_mq.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_mq_recv.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_mq_utils.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_oneapi_ze.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_perf.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_rndv_mod.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_stats.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_sysbuf.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_timer.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_uffd.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_utils.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_verbs_mr.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psmi_wrappers.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm2_hal.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm2_hal_loopback.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_debug.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_dsa.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_dwordcpy-x86_64.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_env.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_sysfs.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_syslog.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_time.lo
+  CC       prov/psm3/psm3/utils/prov_psm3_psm3_libutils_la-utils_mallopt.lo
+  CCLD     prov/psm3/psm3/libutils.la
+  CC       prov/psm3/psm3/ptl_am/prov_psm3_psm3_libptl_am_la-am_cuda_memhandle_cache.lo
+  CC       prov/psm3/psm3/ptl_am/prov_psm3_psm3_libptl_am_la-am_oneapi_memhandle_cache.lo
+  CC       prov/psm3/psm3/ptl_am/prov_psm3_psm3_libptl_am_la-am_reqrep.lo
+  CC       prov/psm3/psm3/ptl_am/prov_psm3_psm3_libptl_am_la-am_reqrep_shmem.lo
+  CC       prov/psm3/psm3/ptl_am/prov_psm3_psm3_libptl_am_la-cmarwu.lo
+  CC       prov/psm3/psm3/ptl_am/prov_psm3_psm3_libptl_am_la-ptl.lo
+  CCLD     prov/psm3/psm3/libptl_am.la
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_crc32.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_epstate.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_opp_path_rec.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_path_rec.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_am.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_connect.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_dump.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_expected.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_mq.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_recv.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_recvq.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_scb.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_tid.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_tidcache.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_tidflow.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ptl.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ptl_rcvthread.lo
+  CCLD     prov/psm3/psm3/libptl_ips.la
+  CC       prov/psm3/psm3/ptl_self/prov_psm3_psm3_libptl_self_la-ptl.lo
+  CCLD     prov/psm3/psm3/libptl_self.la
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_ep.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_service.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_gdrcpy.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_hal.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_ptl_ips.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_rcvthread.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_recvhdrq.lo
+  CCLD     prov/psm3/psm3/libhal_verbs.la
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_ep.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_service.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_gdrcpy.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_hal.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_proto.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_ptl_ips.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_rcvthread.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_recvhdrq.lo
+  CCLD     prov/psm3/psm3/libhal_sockets.la
+  CCLD     prov/psm3/psm3/libpsm3i.la
+  CCLD     libpsm3.la
+  CCLD     src/libfabric.la
+copying selected object files to avoid basename conflicts...
+  CC       util/info.o
+  CCLD     util/fi_info
+  CC       util/strerror.o
+  CCLD     util/fi_strerror
+  CC       util/pingpong.o
+  CCLD     util/fi_pingpong
+make[1]: Leaving directory '/home/xb/project/libfabric'
+
+[root@node1 libfabric]# make install
+make  install-am
+make[1]: Entering directory '/home/xb/project/libfabric'
+make[2]: Entering directory '/home/xb/project/libfabric'
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/lib'
+ /bin/sh ./libtool   --mode=install /bin/install -c   src/libfabric.la '/home/xb/project/libfabric/build/fabtests/lib'
+libtool: install: /bin/install -c src/.libs/libfabric.so.1.22.0 /home/xb/project/libfabric/build/fabtests/lib/libfabric.so.1.22.0
+libtool: install: (cd /home/xb/project/libfabric/build/fabtests/lib && { ln -s -f libfabric.so.1.22.0 libfabric.so.1 || { rm -f libfabric.so.1 && ln -s libfabric.so.1.22.0 libfabric.so.1; }; })
+libtool: install: (cd /home/xb/project/libfabric/build/fabtests/lib && { ln -s -f libfabric.so.1.22.0 libfabric.so || { rm -f libfabric.so && ln -s libfabric.so.1.22.0 libfabric.so; }; })
+libtool: install: /bin/install -c src/.libs/libfabric.lai /home/xb/project/libfabric/build/fabtests/lib/libfabric.la
+libtool: install: /bin/install -c src/.libs/libfabric.a /home/xb/project/libfabric/build/fabtests/lib/libfabric.a
+libtool: install: chmod 644 /home/xb/project/libfabric/build/fabtests/lib/libfabric.a
+libtool: install: ranlib /home/xb/project/libfabric/build/fabtests/lib/libfabric.a
+libtool: finish: PATH="/root/.vscode-server/bin/74f6148eb9ea00507ec113ec51c489d6ffb4b771/bin/remote-cli:/opt/rh/devtoolset-7/root/usr/bin:/usr/lib64/qt-3.3/bin:/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/opt/h3c/bin:/opt/h3c/sbin:/opt/h3c/zookeeper/bin:/home/SDS_Admin/.local/bin:/home/SDS_Admin/bin:/opt/h3c/bin:/opt/h3c/sbin:/opt/h3c/zookeeper/bin:/opt/h3c/bin:/opt/h3c/sbin::/opt/h3c/bin:/opt/h3c/sbin:/opt/h3c/zookeeper/bin:/opt/h3c/bin:/opt/h3c/sbin:/opt/h3c/zookeeper/bin:/root/bin:/opt/h3c/bin:/opt/h3c/sbin:/sbin" ldconfig -n /home/xb/project/libfabric/build/fabtests/lib
+----------------------------------------------------------------------
+Libraries have been installed in:
+   /home/xb/project/libfabric/build/fabtests/lib
+
+If you ever happen to want to link against installed libraries
+in a given directory, LIBDIR, you must either use libtool, and
+specify the full pathname of the library, or use the `-LLIBDIR'
+flag during linking and do at least one of the following:
+   - add LIBDIR to the `LD_LIBRARY_PATH' environment variable
+     during execution
+   - add LIBDIR to the `LD_RUN_PATH' environment variable
+     during linking
+   - use the `-Wl,-rpath -Wl,LIBDIR' linker flag
+   - have your system administrator add LIBDIR to `/etc/ld.so.conf'
+
+See any operating system documentation about shared libraries for
+more information, such as the ld(1) and ld.so(8) manual pages.
+----------------------------------------------------------------------
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/bin'
+  /bin/sh ./libtool   --mode=install /bin/install -c util/fi_info util/fi_strerror util/fi_pingpong '/home/xb/project/libfabric/build/fabtests/bin'
+libtool: install: /bin/install -c util/.libs/fi_info /home/xb/project/libfabric/build/fabtests/bin/fi_info
+libtool: install: /bin/install -c util/.libs/fi_strerror /home/xb/project/libfabric/build/fabtests/bin/fi_strerror
+libtool: install: /bin/install -c util/.libs/fi_pingpong /home/xb/project/libfabric/build/fabtests/bin/fi_pingpong
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/share/man/man1'
+ /bin/install -c -m 644 man/man1/fi_info.1 man/man1/fi_pingpong.1 man/man1/fi_strerror.1 '/home/xb/project/libfabric/build/fabtests/share/man/man1'
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_atomic.3 man/man3/fi_av.3 man/man3/fi_av_set.3 man/man3/fi_cm.3 man/man3/fi_cntr.3 man/man3/fi_collective.3 man/man3/fi_control.3 man/man3/fi_cq.3 man/man3/fi_domain.3 man/man3/fi_endpoint.3 man/man3/fi_errno.3 man/man3/fi_eq.3 man/man3/fi_fabric.3 man/man3/fi_peer.3 man/man3/fi_provider.3 man/man3/fi_getinfo.3 man/man3/fi_mr.3 man/man3/fi_msg.3 man/man3/fi_nic.3 man/man3/fi_poll.3 man/man3/fi_rma.3 man/man3/fi_tagged.3 man/man3/fi_trigger.3 man/man3/fi_version.3 man/man3/fi_accept.3 man/man3/fi_alias.3 man/man3/fi_allgather.3 man/man3/fi_allreduce.3 man/man3/fi_alltoall.3 man/man3/fi_atomic_valid.3 man/man3/fi_atomicmsg.3 man/man3/fi_atomicv.3 man/man3/fi_av_bind.3 man/man3/fi_av_insert.3 man/man3/fi_av_insertsvc.3 man/man3/fi_av_lookup.3 man/man3/fi_av_open.3 man/man3/fi_av_remove.3 man/man3/fi_av_set_diff.3 man/man3/fi_av_set_insert.3 '/home/xb/project/libfabric/build/fabtests/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_av_set_intersect.3 man/man3/fi_av_set_remove.3 man/man3/fi_av_set_union.3 man/man3/fi_av_straddr.3 man/man3/fi_barrier.3 man/man3/fi_broadcast.3 man/man3/fi_cancel.3 man/man3/fi_close.3 man/man3/fi_cntr_add.3 man/man3/fi_cntr_open.3 man/man3/fi_cntr_read.3 man/man3/fi_cntr_set.3 man/man3/fi_cntr_wait.3 man/man3/fi_compare_atomic.3 man/man3/fi_compare_atomic_valid.3 man/man3/fi_compare_atomicmsg.3 man/man3/fi_compare_atomicv.3 man/man3/fi_connect.3 man/man3/fi_cq_open.3 man/man3/fi_cq_read.3 man/man3/fi_cq_readerr.3 man/man3/fi_cq_readfrom.3 man/man3/fi_cq_sread.3 man/man3/fi_cq_sreadfrom.3 man/man3/fi_cq_strerror.3 man/man3/fi_cq_signal.3 man/man3/fi_domain_bind.3 man/man3/fi_domain_query.3 man/man3/fi_dupinfo.3 man/man3/fi_enable.3 man/man3/fi_ep.3 man/man3/fi_ep_bind.3 man/man3/fi_eq_open.3 man/man3/fi_eq_read.3 man/man3/fi_eq_readerr.3 man/man3/fi_eq_sread.3 man/man3/fi_eq_strerror.3 man/man3/fi_eq_write.3 man/man3/fi_fetch_atomic.3 man/man3/fi_fetch_atomic_valid.3 '/home/xb/project/libfabric/build/fabtests/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_fetch_atomicmsg.3 man/man3/fi_fetch_atomicv.3 man/man3/fi_freeinfo.3 man/man3/fi_getname.3 man/man3/fi_getopt.3 man/man3/fi_getpeer.3 man/man3/fi_inject.3 man/man3/fi_injectdata.3 man/man3/fi_inject_atomic.3 man/man3/fi_inject_write.3 man/man3/fi_inject_writedata.3 man/man3/fi_join.3 man/man3/fi_join_collective.3 man/man3/fi_leave.3 man/man3/fi_listen.3 man/man3/fi_mr_bind.3 man/man3/fi_mr_desc.3 man/man3/fi_mr_key.3 man/man3/fi_mr_reg.3 man/man3/fi_mr_regattr.3 man/man3/fi_mr_regv.3 man/man3/fi_open.3 man/man3/fi_open_ops.3 man/man3/fi_passive_ep.3 man/man3/fi_pep_bind.3 man/man3/fi_poll_add.3 man/man3/fi_poll_del.3 man/man3/fi_poll_open.3 man/man3/fi_query_atomic.3 man/man3/fi_query_collective.3 man/man3/fi_read.3 man/man3/fi_readmsg.3 man/man3/fi_readv.3 man/man3/fi_recv.3 man/man3/fi_recvmsg.3 man/man3/fi_recvv.3 man/man3/fi_reduce_scatter.3 man/man3/fi_reject.3 man/man3/fi_rx_addr.3 man/man3/fi_rx_size_left.3 '/home/xb/project/libfabric/build/fabtests/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_scalable_ep_bind.3 man/man3/fi_send.3 man/man3/fi_senddata.3 man/man3/fi_sendmsg.3 man/man3/fi_sendv.3 man/man3/fi_setname.3 man/man3/fi_setopt.3 man/man3/fi_shutdown.3 man/man3/fi_strerror.3 man/man3/fi_tinject.3 man/man3/fi_tinjectdata.3 man/man3/fi_tostr.3 man/man3/fi_trecv.3 man/man3/fi_trecvmsg.3 man/man3/fi_trecvv.3 man/man3/fi_trywait.3 man/man3/fi_tsend.3 man/man3/fi_tsenddata.3 man/man3/fi_tsendmsg.3 man/man3/fi_tsendv.3 man/man3/fi_tx_size_left.3 man/man3/fi_wait.3 man/man3/fi_wait_open.3 man/man3/fi_write.3 man/man3/fi_writedata.3 man/man3/fi_writemsg.3 man/man3/fi_writev.3 '/home/xb/project/libfabric/build/fabtests/share/man/man3'
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/share/man/man7'
+ /bin/install -c -m 644 man/man7/fabric.7 man/man7/fi_arch.7 man/man7/fi_direct.7 man/man7/fi_guide.7 man/man7/fi_hook.7 man/man7/fi_intro.7 man/man7/fi_provider.7 man/man7/fi_setup.7 man/man7/fi_sockets.7 man/man7/fi_udp.7 man/man7/fi_verbs.7 man/man7/fi_efa.7 man/man7/fi_usnic.7 man/man7/fi_psm3.7 man/man7/fi_rxm.7 man/man7/fi_mrail.7 man/man7/fi_opx.7 man/man7/fi_shm.7 man/man7/fi_tcp.7 man/man7/fi_rstream.7 '/home/xb/project/libfabric/build/fabtests/share/man/man7'
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/lib/pkgconfig'
+ /bin/install -c -m 644 libfabric.pc '/home/xb/project/libfabric/build/fabtests/lib/pkgconfig'
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/include/rdma/providers'
+ /bin/install -c -m 644 ./include/rdma/providers/fi_log.h ./include/rdma/providers/fi_peer.h ./include/rdma/providers/fi_prov.h '/home/xb/project/libfabric/build/fabtests/include/rdma/providers'
+ /bin/mkdir -p '/home/xb/project/libfabric/build/fabtests/include/rdma'
+ /bin/install -c -m 644 ./include/rdma/fabric.h ./include/rdma/fi_atomic.h ./include/rdma/fi_cm.h ./include/rdma/fi_collective.h ./include/rdma/fi_domain.h ./include/rdma/fi_eq.h ./include/rdma/fi_ext.h ./include/rdma/fi_rma.h ./include/rdma/fi_endpoint.h ./include/rdma/fi_errno.h ./include/rdma/fi_tagged.h ./include/rdma/fi_trigger.h prov/usnic/src/fi_ext_usnic.h '/home/xb/project/libfabric/build/fabtests/include/rdma'
+make[2]: Leaving directory '/home/xb/project/libfabric'
+make[1]: Leaving directory '/home/xb/project/libfabric'
+[root@node1 libfabric]# export PATH=/home/xb/project/libfabric/build/fabtests/bin:$PATH
+[root@node1 libfabric]# fi_info
+fi_info: error while loading shared libraries: libatomic.so.1: cannot open shared object file: No such file or directory
+[root@node1 libfabric]# ldd fi_info
+ldd: ./fi_info: No such file or directory
+[root@node1 libfabric]# which fi_info
+/home/xb/project/libfabric/build/fabtests/bin/fi_info
+[root@node1 libfabric]# ldd /home/xb/project/libfabric/build/fabtests/bin/fi_info
+        linux-vdso.so.1 =>  (0x00007ffc859d8000)
+        libfabric.so.1 => /home/xb/project/libfabric/build/fabtests/lib/libfabric.so.1 (0x00007faf6c7b0000)
+        librdmacm.so.1 => /lib64/librdmacm.so.1 (0x00007faf6c596000)
+        libefa.so.1 => /lib64/libefa.so.1 (0x00007faf6c38c000)
+        libnl-3.so.200 => /lib64/libnl-3.so.200 (0x00007faf6c16b000)
+        libnl-route-3.so.200 => /lib64/libnl-route-3.so.200 (0x00007faf6befe000)
+        libibverbs.so.1 => /lib64/libibverbs.so.1 (0x00007faf6bcdf000)
+        libuuid.so.1 => /lib64/libuuid.so.1 (0x00007faf6bada000)
+        libnuma.so.1 => /lib64/libnuma.so.1 (0x00007faf6b8ce000)
+        libatomic.so.1 => not found
+        librt.so.1 => /lib64/librt.so.1 (0x00007faf6b6c6000)
+        libpthread.so.0 => /lib64/libpthread.so.0 (0x00007faf6b4aa000)
+        libdl.so.2 => /lib64/libdl.so.2 (0x00007faf6b2a6000)
+        libc.so.6 => /lib64/libc.so.6 (0x00007faf6aed8000)
+        /lib64/ld-linux-x86-64.so.2 (0x00007faf6d028000)
+        libatomic.so.1 => not found
+        libm.so.6 => /lib64/libm.so.6 (0x00007faf6abd6000)
+        libgcc_s.so.1 => /lib64/libgcc_s.so.1 (0x00007faf6a9c0000)
+[root@node1 libfabric]# ldd /home/xb/project/libfabric/build/fabtests/bin/fi_info|grep no
+        libatomic.so.1 => not found
+        libatomic.so.1 => not found
+[root@node1 libfabric]# 

@@ -1,0 +1,295 @@
+https://github.com/ssbandjl/libfabric.git
+git remote add upstream https://github.com/ofiwg/libfabric.git
+git fetch upstream
+git merge upstream/main
+
+fabtests 测试, fabtests/README, fabtests/README.md
+使用 --with-libfabric=<directory> 选项告诉 Fabtests 在哪里可以找到已安装的 Libfabric 的头文件和库文件
+编译:
+./autogen.sh
+./configure --with-libfabric=/opt/libfabric --prefix=/opt/fabtests && make -j 32 && sudo make install   #or
+./configure --prefix=/opt/fabtests && make -j 32 && sudo make install
+./configure --with-libfabric=/home/xb/project/net/libfabric/libfabric/build/libfabric --prefix=/home/xb/project/net/libfabric/libfabric/build/fabtests --enable-debug && make -j 32 && sudo make install
+
+server
+#原生网卡名
+fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged -d mlx5_0 -v -I 2
+
+client
+fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged 175.16.53.73 -v -I 2
+
+server
+gdb --args ./build/fabtests/bin/fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged -d mlx5_0 -v -I 2
+fi_pingpong源码: util/pingpong.c
+main -> int main(int argc, char **argv)
+ct.hints = fi_allocinfo()
+ct.hints->ep_attr->type = FI_EP_DGRAM 数据报端点
+ofi_osd_init -> null
+getopt -> static void pp_parse_opts 解析参数
+  case 'e' Endpoint -> ct->hints->ep_attr->type = FI_EP_RDM
+  case 'p' Provider -> ct->hints->fabric_attr->prov_name = strdup(optarg) verbs;ofi_rxm
+  case 'm' ct->hints->caps &= ~FI_MSG -> ct->hints->caps |= FI_TAGGED 去掉和增加标记
+  case 'd' Domain -> ct->hints->domain_attr->name = strdup(optarg)
+  case 'I' Iterations 迭代/重复 -> ct->opts.options |= PP_OPT_ITER
+ct.opts.dst_addr -> 
+pp_banner_options -> static void pp_banner_options 打印横幅banner
+  opts.transfer_size 64
+  PP_DEBUG(" * PingPong options:\n")
+switch (ct.hints->ep_attr->type) -> case FI_EP_RDM -> ret = run_pingpong_rdm(&ct) -> static int run_pingpong_rdm
+  pp_init_fabric -> static int pp_init_fabric
+    pp_ctrl_init -> static int pp_ctrl_init
+      default_ctrl = 47592 默认服务端口
+      pp_ctrl_init_server -> static int pp_ctrl_init_server
+        listenfd = ofi_socket(pp_ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0) -> static inline SOCKET ofi_socket(int domain, int type, int protocol) -> socket(domain, type, protocol)
+        setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR
+        struct sockaddr_in ctrl_addr = {0}
+        ctrl_addr.sin_port = htons(ct->opts.src_port) 47592
+        ctrl_addr.sin_addr.s_addr = htonl(INADDR_ANY)
+        ret = bind(listenfd
+        listen(listenfd, 10)
+        ct->ctrl_connfd = accept(listenfd, NULL, NULL) 等待客户端调用connect触发服务端accept
+        ofi_close_socket(listenfd)
+      setsockopt(ct->ctrl_connfd
+  run_suite_pingpong
+  pp_finalize
+pp_free_res
+
+
+client:
+gdb --args ./build/fabtests/bin/fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged 175.16.53.73 -v -I 2
+ct.hints = fi_allocinfo
+ct.opts.dst_addr 175.16.53.73
+run_pingpong_rdm -> static int run_pingpong_rdm
+pp_init_fabric -> pp_ctrl_init_client
+  connect(ct->ctrl_connfd, rp->ai_addr, (socklen_t) rp->ai_addrlen) 连接服务端, 服务端执行accept
+setsockopt(ct->ctrl_connfd
+pp_ctrl_init
+if (ct->opts.dst_addr)
+pp_recv_name
+pp_getinfo
+pp_open_fabric_res
+pp_alloc_active_res
+pp_init_ep
+pp_send_name
+pp_av_insert
+
+run_suite_pingpong
+pp_finalize
+
+编译:
+make util/fi_pingpong -> util/fi_pingpong$(EXEEXT)
+
+端点类型:
+enum fi_ep_type {
+	FI_EP_UNSPEC,
+	FI_EP_MSG,
+	FI_EP_DGRAM,
+	FI_EP_RDM,
+	FI_EP_SOCK_STREAM,
+	FI_EP_SOCK_DGRAM,
+};
+
+
+
+宏
+int DEFAULT_SYMVER_PRE(fi_getinfo)
+
+
+
+dos2unix autogen.sh
+./autogen.sh
+./configure --prefix="" --disable-efa --disable-psm3 --without-gdrcopy --enable-debug --disable-psm2 --disable-psm3
+make && make install
+
+
+fi_pingpong -p sockets
+fi_pingpong -p sockets "localhost" -v
+
+server:
+fi_pingpong -p sockets
+
+
+makeword是将两个byte型合并成一个word型，一个在高8位(b)，一个在低8位(a)
+MAKEWORD(2,2)就是调用2.2版
+
+client:
+fi_pingpong -p sockets "192.168.1.6" -v
+
+export PATH=/root/github/storage/daos/libfabric/util:$PATH
+util/pingpong.c
+
+server:
+main -> ofi_osd_init -> MAKEWORD -> WSAStartup -> pp_parse_opts 解析参数 -> pp_banner_options 打印横幅 -> FI_EP_RDM -> run_pingpong_rdm -> pp_init_fabric -> run_suite_pingpong -> pp_finalize
+
+pp_init_fabric -> 
+
+client:
+
+run_pingpong_rdm -> PP_POST -> 
+
+fi_pingpong.1.md
+
+WRITE:写
+vrb_msg_ep_rma_write -> IBV_WR_RDMA_WRITE -> ibv_post_send
+
+debug:
+FI_WARN(&core_prov, FI_LOG_CORE, "iov:%p\n", iov);
+
+
+tcpx_tx_queue_insert -> 
+
+fi_tsend -> rxm_ep_tsend -> rxm_get_conn -> rxm_send_common -> rxm_send_eager -> rxm_msg_tsend -> tcpx_tx_queue_insert -> rxm_cq_write 发完后写完成队列 -> ofi_cq_write
+
+
+断点: rxm_ep_tsend
+
+获取连接:
+rxm_get_conn
+  ofi_av_addr_context
+    ofi_av_get_addr
+      ofi_bufpool_get_ibuf
+  rxm_add_conn
+    ofi_idm_lookup
+    rxm_alloc_conn
+      rxm_av_alloc_conn
+        ofi_buf_alloc(av->conn_pool)
+          ofi_bufpool_grow
+  rxm_ep_do_progress
+  rxm_connect
+    rxm_send_connect 空闲状态则建立连接(RXM_CM_IDLE)
+      rxm_open_conn
+        fi_endpoint
+        fi_ep_bind
+        fi_enable
+        rxm_prepost_recv
+      rxm_init_connect_data 将被动端点做连接请求发送到服务器
+      fi_connect
+        tcpx_ep_connect
+          ofi_wait_add_fd epoll
+  rxm_conn_progress
+    fi_eq_read 循环读取,从事件队列读取事件
+    rxm_handle_event
+    rxm_handle_error
+
+
+rxm_ep_do_progress
+  do
+    fi_cq_read
+    handle_comp_error rxm_handle_comp_error
+      fi_cq_readerr
+      ofi_cq_write_error
+
+
+
+1. fi_tsend
+/lib/libfabric.so.1(+0xf8b83) [0x7fbe1c660b83]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0xf494) [0x7fbe1c744494]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0xf875) [0x7fbe1c744875]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0xee1a) [0x7fbe1c99fe1a]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Core_forward+0x140) [0x7fbe1c9a8550]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Forward+0xc8) [0x7fbe1c999f98]
+2.  na_ofi_progress
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0x139ac) [0x7fbe1c7489ac]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(NA_Progress+0x24b) [0x7fbe1c73d77b]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0xffbb) [0x7fbe1c9a0fbb]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0x12169) [0x7fbe1c9a3169]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Core_progress+0x10) [0x7fbe1c9a8920]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Progress+0x18) [0x7fbe1c99a378]
+
+
+recv_list
+
+
+HG_Progress -> NA_Progress -> na_ofi_progress -> ofi_cq_readfrom -> ofi_cq_progress -> rxm_ep_progress -> rxm_ep_do_progress -> rxm_handle_comp -> rxm_finish_eager_send -> rxm_cq_write_tx_comp -> rxm_cq_write -> print_stacktrace  -> HG -> na_ofi_cq_read
+
+server: NA_CB_RECV_UNEXPECTED CQ event 非预期接收
+
+
+地址向量:
+
+ip_av_insert_addr
+
+打印地址
+ofi_straddr_dbg(av->prov, FI_LOG_AV, "av_insert addr", addr)
+
+HASH_ADD(hh, av->hash, data, av->addrlen, entry)
+
+ofi_av_write_event
+
+fi_eq_write
+
+
+
+
+
+
+fi_cq_open
+cq_open vrb_cq_open
+ibv_create_cq
+
+
+
+2013
+获取大页: 
+ofi_hugepage_enabled
+  ofi_get_hugepage_size
+  ofi_alloc_hugepage_buf
+  ofi_unmap_anon_pages
+
+check fork: ibv_is_fork_initialized
+
+注册内存:
+参考daos: C:\Users\s30893\project\stor\storage\daos\daos.drawio
+...
+na_ofi_initialize
+  na_ofi_class->send_pool = hg_mem_pool_create(pool_chunk_size ... na_ofi_mem_buf_register 注册初始内存池
+  na_ofi_class->recv_pool = hg_mem_pool_create -> hg_mem_pool_create(size_t chunk_size
+    struct hg_mem_pool_block *hg_mem_pool_block = hg_mem_pool_block_alloc register_func
+      int rc = register_func(mem_ptr, block_size, flags, &mr_handle, arg) -> na_ofi_mem_buf_register -> na_ofi_mem_buf_register(const void *buf
+        rc = fi_mr_reg(na_ofi_class->domain->fi_domain, buf, len, access,
+          .reg = vrb_mr_reg -> vrb_mr_reg(struct fid *fid, const void *buf, size_t len, uint64_t access -> vrb_mr_reg_iface
+          _domain->cache.add_region = vrb_mr_cache_add_region; -> int vrb_mr_reg_common -> md->mr = ibv_reg_mr(md->domain->pd, (void *) buf, len,
+          
+
+  
+
+
+立即数: wr.imm_data = htonl((uint32_t)data)
+
+
+
+rdma write, 单边写, 
+NA_Put
+na_ofi_put
+na_ofi_rma fi_writemsg = fi_rma_op   .writemsg =    -> include/rdma/fi_rma.h -> fi_writemsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uint64_t flags)
+ep->rma->writemsg(ep, msg, flags)
+.writemsg = vrb_msg_ep_rma_writemsg
+vrb_msg_ep_rma_writemsg -> prov/verbs/src/verbs_rma.c
+  struct ibv_send_wr wr
+  wr.opcode = IBV_WR_RDMA_WRITE | wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM 写|立即数写
+  vrb_send_iov(ep, &wr, msg->msg_iov, msg->desc -> ssize_t vrb_send_iov
+    wr->sg_list = alloca(sizeof(*wr->sg_list) * count)
+    wr->sg_list[i].addr = (uintptr_t) iov[i].iov_base
+    wr->sg_list[i].length = iov[i].iov_len;
+    wr->send_flags = IBV_SEND_INLINE ?IBV_SEND_FENCE
+    wr->sg_list[0]
+    wr->num_sge =
+    vrb_post_send(ep, wr, flags) -> prov/verbs/src/verbs_ep.c -> ssize_t vrb_post_send
+      ibv_post_send(ep->ibv_qp, wr, &bad_wr)
+
+所有标签(Flags), include/rdma/fabric.h -> #define FI_MSG			(1ULL << 1) ...
+
+
+
+iodepth:
+static int vrb_ep_enable
+vrb_msg_ep_get_qp_attr(ep, &attr);
+  attr->cap.max_send_wr = ep->info_attr.tx_size;
+  attr->cap.max_send_sge = ep->info_attr.tx_iov_limit;
+  attr->cap.max_recv_wr = ep->info_attr.rx_size;
+  attr->cap.max_recv_sge = ep->info_attr.rx_iov_limit;
+vrb_create_dgram_ep
+  ibv_create_qp
+
+
+测试安装成功: fi_info
