@@ -520,3 +520,47 @@ void test_efa_rdm_ep_atomic_without_caps(struct efa_resource **state)
 
 	assert_int_equal(err, -FI_EOPNOTSUPP);
 }
+
+/*
+ * Check fi_getopt return with different input opt_len
+ */
+void test_efa_rdm_ep_getopt(struct efa_resource **state, size_t opt_len, int expected_return)
+{
+	struct efa_resource *resource = *state;
+	size_t opt_val;
+	size_t opt_len_temp;
+	size_t i;
+	int ret;
+	int opt_names[] = {
+		FI_OPT_MIN_MULTI_RECV,
+		FI_OPT_EFA_RNR_RETRY,
+		FI_OPT_FI_HMEM_P2P,
+		FI_OPT_EFA_EMULATED_READ,
+		FI_OPT_EFA_EMULATED_WRITE,
+		FI_OPT_EFA_EMULATED_ATOMICS,
+		FI_OPT_EFA_USE_DEVICE_RDMA,
+		FI_OPT_EFA_SENDRECV_IN_ORDER_ALIGNED_128_BYTES,
+		FI_OPT_EFA_WRITE_IN_ORDER_ALIGNED_128_BYTES
+	};
+	size_t num_opt_names = sizeof(opt_names) / sizeof(int);
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+
+	for (i = 0; i < num_opt_names; i++) {
+		opt_len_temp = opt_len;
+		ret = fi_getopt(&resource->ep->fid, FI_OPT_ENDPOINT, opt_names[i], &opt_val, &opt_len_temp);
+		assert_int_equal(ret, expected_return);
+	}
+}
+
+/* undersized optlen should return -FI_ETOOSMALL */
+void test_efa_rdm_ep_getopt_undersized_optlen(struct efa_resource **state)
+{
+	test_efa_rdm_ep_getopt(state, 0, -FI_ETOOSMALL);
+}
+
+/* oversized optlen should return FI_SUCCESS */
+void test_efa_rdm_ep_getopt_oversized_optlen(struct efa_resource **state)
+{
+	test_efa_rdm_ep_getopt(state, 16, FI_SUCCESS);
+}

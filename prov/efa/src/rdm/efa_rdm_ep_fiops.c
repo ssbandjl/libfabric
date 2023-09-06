@@ -114,7 +114,7 @@ void efa_rdm_pke_pool_mr_dereg_handler(struct ofi_bufpool_region *region)
 
 /**
  * @brief creates a packet entry pool.
- *
+ * 
  * The pool is allowed to grow if
  * max_cnt is 0 and is fixed size otherwise.
  *
@@ -493,6 +493,7 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 	efa_rdm_ep->efa_total_posted_tx_ops = 0;
 	efa_rdm_ep->send_comps = 0;
 	efa_rdm_ep->failed_send_comps = 0;
+	efa_rdm_ep->failed_write_comps = 0;
 	efa_rdm_ep->recv_comps = 0;
 #endif
 
@@ -944,11 +945,7 @@ void efa_rdm_ep_set_use_shm_for_tx(struct efa_rdm_ep *ep)
 		return;
 	}
 
-	if (strcmp(efa_env.intranode_provider, "efa"))
-		ep->use_shm_for_tx = true;
-	else
-		ep->use_shm_for_tx = false;
-
+	ep->use_shm_for_tx = efa_env.enable_shm_transfer;
 	return;
 }
 
@@ -1358,38 +1355,56 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 
 	switch (optname) {
 	case FI_OPT_MIN_MULTI_RECV:
+		if (*optlen < sizeof(size_t))
+			return -FI_ETOOSMALL;
 		*(size_t *)optval = efa_rdm_ep->min_multi_recv_size;
 		*optlen = sizeof(size_t);
 		break;
 	case FI_OPT_EFA_RNR_RETRY:
+		if (*optlen < sizeof(size_t))
+			return -FI_ETOOSMALL;
 		*(size_t *)optval = efa_rdm_ep->base_ep.rnr_retry;
 		*optlen = sizeof(size_t);
 		break;
 	case FI_OPT_FI_HMEM_P2P:
+		if (*optlen < sizeof(int))
+			return -FI_ETOOSMALL;
 		*(int *)optval = efa_rdm_ep->hmem_p2p_opt;
 		*optlen = sizeof(int);
 		break;
 	case FI_OPT_EFA_EMULATED_READ:
+		if (*optlen < sizeof(bool))
+			return -FI_ETOOSMALL;
 		*(bool *)optval = !efa_rdm_ep_support_rdma_read(efa_rdm_ep);
 		*optlen = sizeof(bool);
 		break;
 	case FI_OPT_EFA_EMULATED_WRITE:
+		if (*optlen < sizeof(bool))
+			return -FI_ETOOSMALL;
 		*(bool *)optval = !efa_rdm_ep_support_rdma_write(efa_rdm_ep);
 		*optlen = sizeof(bool);
 		break;
 	case FI_OPT_EFA_EMULATED_ATOMICS:
+		if (*optlen < sizeof(bool))
+			return -FI_ETOOSMALL;
 		*(bool *)optval = true;
 		*optlen = sizeof(bool);
 		break;
 	case FI_OPT_EFA_USE_DEVICE_RDMA:
+		if (*optlen < sizeof(bool))
+			return -FI_ETOOSMALL;
 		*(bool *)optval = efa_rdm_ep->use_device_rdma;
 		*optlen = sizeof(bool);
 		break;
 	case FI_OPT_EFA_SENDRECV_IN_ORDER_ALIGNED_128_BYTES:
+		if (*optlen < sizeof(bool))
+			return -FI_ETOOSMALL;
 		*(bool *)optval = efa_rdm_ep->sendrecv_in_order_aligned_128_bytes;
 		*optlen = sizeof(bool);
 		break;
 	case FI_OPT_EFA_WRITE_IN_ORDER_ALIGNED_128_BYTES:
+		if (*optlen < sizeof(bool))
+			return -FI_ETOOSMALL;
 		*(bool *)optval = efa_rdm_ep->write_in_order_aligned_128_bytes;
 		*optlen = sizeof(bool);
 		break;

@@ -890,7 +890,10 @@ __OPX_FORCE_INLINE__
 void fi_opx_hfi1_reliability_iov_payload_check(
 		struct fi_opx_reliability_tx_replay *replay,
 		const uint64_t key,
-		const char *error_msg)
+		const char *error_msg,
+		const char *file,
+		const char *func,
+		const int line)
 {
 #ifndef NDEBUG
 	if (!replay->use_iov) {
@@ -901,14 +904,43 @@ void fi_opx_hfi1_reliability_iov_payload_check(
 
 	for (int i = 0; i < copy_payload_qws; ++i) {
 		if (replay_iov_base[i] != replay->orig_payload[i]) {
+			struct fi_opx_hfi1_sdma_work_entry *we = replay->sdma_we;
+			void *bounce_buf = NULL;
+			int use_bounce_buf = 0;
+			int pending_bounce_buf = 0;
+			struct fi_opx_completion_counter *we_cc = NULL;
+			size_t we_cc_byte_counter = 0;
+
+			if (we) {
+				bounce_buf = we->bounce_buf.buf;
+				use_bounce_buf = we->use_bounce_buf;
+				pending_bounce_buf = we->pending_bounce_buf;
+				we_cc = &we->bounce_buf.cc;
+				we_cc_byte_counter = we_cc->byte_counter;
+			}
+
+			struct fi_opx_completion_counter *cc_next = replay->cc_ptr->next;
+			size_t cc_next_byte_counter = cc_next ? cc_next->byte_counter : 0;
+
 			fprintf(stderr,
 				"(%d) %s:%s():%d (tx) flow %016lX|psn=%d (0x%X)|"
+				"sdma_we=%p|sdma_we->bounce_buf=%p|sdma_we->use_bb=%d|sdma_we->pending_bb=%d|"
+				"bb_cc=%p|bb_cc->byte_counter=%lu|"
+				"replay->cc=%p|replay->cc->byte_counter=%lu|replay->cc_dec=%lu|"
+				"replay->cc->next=%p|replay->cc->next->byte_counter=%lu|"
+				"opcode=%02X|dput_opcode=%02X|"
 				"iov_base=%p|iov_len=%lu|%s|"
 				"orig_payload[%d]=%016lX current[@%p]=%016lX\n",
-				getpid(), __FILE__, __func__, __LINE__,
+				getpid(), file, func, line,
 				key,
 				FI_OPX_HFI1_PACKET_PSN(&replay->scb.hdr),
 				FI_OPX_HFI1_PACKET_PSN(&replay->scb.hdr),
+				replay->sdma_we, bounce_buf, use_bounce_buf, pending_bounce_buf,
+				we_cc, we_cc_byte_counter,
+				replay->cc_ptr, replay->cc_ptr->byte_counter, replay->cc_dec,
+				cc_next, cc_next_byte_counter,
+				replay->scb.hdr.stl.bth.opcode,
+				replay->scb.hdr.dput.target.opcode,
 				replay->iov->iov_base, replay->iov->iov_len,
 				error_msg,
 				i, replay->orig_payload[i],
@@ -995,6 +1027,7 @@ void fi_opx_hfi1_rx_reliability_ack (struct fid_ep *ep,
 		tmp->psn_ptr->psn.nack_count = 0;
 
 		do {
+			assert(!tmp->acked);
 #ifdef OPX_RELIABILITY_DEBUG
 			if (last_ack_index < LAST_ACK_LEN)
 				last_ack_index += snprintf(&last_ack[last_ack_index],
@@ -1009,7 +1042,8 @@ void fi_opx_hfi1_rx_reliability_ack (struct fid_ep *ep,
 			if(cc_ptr) {
 #ifndef NDEBUG
 				fi_opx_hfi1_reliability_iov_payload_check(tmp, key,
-					"Received ACK for packet where source buffer has changed!");
+					"Received ACK for packet where source buffer has changed!",
+					__FILE__, __func__, __LINE__);
 #endif
 				cc_ptr->byte_counter -= dec;
 				assert(cc_ptr->byte_counter >= 0);
@@ -1134,6 +1168,7 @@ void fi_opx_hfi1_rx_reliability_ack (struct fid_ep *ep,
 
 	struct fi_opx_reliability_tx_replay * tmp = start;
 	do {
+		assert(!tmp->acked);
 #ifdef OPX_RELIABILITY_DEBUG
 		if (last_ack_index < LAST_ACK_LEN)
 			last_ack_index+=snprintf(&last_ack[last_ack_index],LAST_ACK_LEN-last_ack_index,
@@ -1147,7 +1182,8 @@ void fi_opx_hfi1_rx_reliability_ack (struct fid_ep *ep,
 		if(cc_ptr) {
 #ifndef NDEBUG
 			fi_opx_hfi1_reliability_iov_payload_check(tmp, key,
-				"Received ACK for packet where source buffer has changed!");
+				"Received ACK for packet where source buffer has changed!",
+				__FILE__, __func__, __LINE__);
 #endif
 			cc_ptr->byte_counter -= dec;
 			assert(cc_ptr->byte_counter >= 0);
@@ -1306,7 +1342,7 @@ ssize_t fi_opx_reliability_service_do_replay_sdma (struct fid_ep *ep,
 			}
 			uint64_t payload_size = fi_opx_reliability_replay_get_payload_size(replay);
 #ifndef NDEBUG
-			fi_opx_hfi1_reliability_iov_payload_check(replay, key.value, "Replaying packet (SDMA) where source buffer has changed!");
+			fi_opx_hfi1_reliability_iov_payload_check(replay, key.value, "Replaying packet (SDMA) where source buffer has changed!", __FILE__, __func__, __LINE__);
 #endif
 			fi_opx_hfi1_sdma_replay_add_packet(sdma_we, replay, payload_size);/*, replay->use_iov, frag_size);*/
 #ifdef OPX_RELIABILITY_DEBUG
@@ -1464,7 +1500,7 @@ ssize_t fi_opx_reliability_service_do_replay (struct fi_opx_reliability_service 
 				assert(0);
 			}
 		}
-		fi_opx_hfi1_reliability_iov_payload_check(replay, key.value, "Replaying packet (PIO) where source buffer has changed!");
+		fi_opx_hfi1_reliability_iov_payload_check(replay, key.value, "Replaying packet (PIO) where source buffer has changed!", __FILE__, __func__, __LINE__);
 #endif
 		buf_qws = replay->iov[0].iov_base;
 	} else {
@@ -3041,8 +3077,8 @@ void fi_opx_hfi_rx_reliablity_process_requests(struct fid_ep *ep, int max_to_sen
 
 __OPX_FORCE_INLINE__
 ssize_t fi_opx_hfi1_tx_reliability_inject_shm (struct fid_ep *ep,
-		const uint64_t key, const uint64_t dlid, const uint64_t reliability_rx,
-		const uint8_t hfi1_unit, const uint64_t opcode)
+		const uint64_t key, const uint64_t dlid, const uint64_t u8_reliability_rx,
+		const uint8_t hfi1_unit, const uint64_t u32_reliability_rx,const uint64_t opcode)
 {
 	struct fi_opx_ep * opx_ep = container_of(ep, struct fi_opx_ep, ep_fid);
 	ssize_t rc;
@@ -3050,10 +3086,10 @@ ssize_t fi_opx_hfi1_tx_reliability_inject_shm (struct fid_ep *ep,
 #ifdef OPX_RELIABILITY_DEBUG
 	if (opcode == FI_OPX_HFI_UD_OPCODE_RELIABILITY_RESYNCH) {
 		fprintf(stderr, "(tx) SHM - Client flow__ %016lx 0x%x inj resynch\n",
-			key, (unsigned)reliability_rx);
+			key, (unsigned)u32_reliability_rx);
 	} else if (opcode == FI_OPX_HFI_UD_OPCODE_RELIABILITY_RESYNCH_ACK) {
 		fprintf(stderr, "(rx) SHM - Server flow__ %016lx 0x%x inj resynch ack\n",
-			key, (unsigned)reliability_rx);
+			key, (unsigned)u32_reliability_rx);
 	} else {
 		fprintf(stderr, "%s:%s():%d bad opcode (%lu) .. abort\n", __FILE__, __func__, __LINE__, opcode);
 		abort();
@@ -3061,7 +3097,7 @@ ssize_t fi_opx_hfi1_tx_reliability_inject_shm (struct fid_ep *ep,
 #endif
 
 	/* Make sure the connection to remote EP exists. */
-	rc = fi_opx_shm_dynamic_tx_connect(1, opx_ep, (unsigned)reliability_rx, hfi1_unit);
+	rc = fi_opx_shm_dynamic_tx_connect(1, opx_ep, (unsigned)u32_reliability_rx, hfi1_unit);
 	if (OFI_UNLIKELY(rc)) {
 		return -FI_EAGAIN;
 	}
@@ -3070,15 +3106,18 @@ ssize_t fi_opx_hfi1_tx_reliability_inject_shm (struct fid_ep *ep,
 	 * Construct and send packet to send to remote EP
 	 */
 	uint64_t pos;
-	/* HFI Rank Support:  Rank already set in reliability_rx */
+	/* HFI Rank Support:  Rank already set in reliability_rx
+	 * The rank_inst field has been depricated and will be phased out.
+	 * The value is always zero.
+	 */
 	union fi_opx_hfi1_packet_hdr * const hdr =
-		opx_shm_tx_next(&opx_ep->tx->shm, reliability_rx, &pos,
-			false, opx_ep->daos_info.rank, opx_ep->daos_info.rank_inst, &rc);
+		opx_shm_tx_next(&opx_ep->tx->shm, hfi1_unit, u8_reliability_rx, &pos,
+			true, u32_reliability_rx, 0, &rc);
 
 	if (!hdr) return rc;
 
 	const uint64_t lrh_dlid = dlid << 16;
-	const uint64_t bth_rx = reliability_rx << 56;
+	const uint64_t bth_rx = u8_reliability_rx << 56;
 
 	struct fi_opx_hfi1_txe_scb model = opx_ep->reliability->service.tx.hfi1.ping_model;
 	model.hdr.ud.opcode = opcode;
@@ -3247,8 +3286,7 @@ void fi_opx_hfi1_rx_reliability_resynch (struct fid_ep *ep,
 	 * Reset all SHM related reliability protocol data retained by this
 	 * Server EP about the remote Client EP.
 	 */
-	if (rx_key.slid == rx_key.dlid) {
-
+	if (fi_opx_hfi_is_intranode(rx_key.slid)) {
 		/* Record completion of the resynch request for the remote Client EP */
 		opx_ep->rx->shm.resynch_connection[origin_reliability_rx].completed = true;
 		opx_ep->rx->shm.resynch_connection[origin_reliability_rx].counter++;
@@ -3259,18 +3297,19 @@ void fi_opx_hfi1_rx_reliability_resynch (struct fid_ep *ep,
 			opx_ep->rx->shm.resynch_connection[origin_reliability_rx].counter);
 #endif
 
+		int hfi_unit = fi_opx_hfi1_get_lid_local_unit(rx_key.slid);
 		/*
 		 * Close connection to the remote Client EP to cause the Server EP to
 		 * re-establish a connection on the next transmit operation issued
 		 *  by the Server EP.
 		 */
-		opx_shm_tx_close(&opx_ep->tx->shm, origin_reliability_rx);
+		opx_shm_tx_close(&opx_ep->tx->shm,
+				OPX_SHM_SEGMENT_INDEX(hfi_unit, origin_reliability_rx));
 
 	 	/* Send ack to notify the remote ep that the resynch was completed */
-
 		fi_opx_hfi1_tx_reliability_inject_shm(ep,
-			rx_key.value, tx_key.dlid, origin_reliability_rx,
-			opx_ep->hfi->hfi_unit,
+			rx_key.value, tx_key.dlid, hdr->service.origin_reliability_rx,
+			(uint8_t)hfi_unit, origin_reliability_rx,
 			FI_OPX_HFI_UD_OPCODE_RELIABILITY_RESYNCH_ACK);
 		
 		return;
@@ -3385,7 +3424,7 @@ void fi_opx_hfi1_rx_reliability_ack_resynch (struct fid_ep *ep,
 
 #ifdef OPX_RELIABILITY_DEBUG
 	fprintf(stderr, "(rx) %s Client flow__ %016lx rcv resynch ack\n",
-		(rx_key.slid == rx_key.dlid) ? "SHM -" : "",
+		(fi_opx_hfi_is_intranode(rx_key.dlid)) ? "SHM -" : "",
 		rx_key.value);
 #endif
 
@@ -3406,7 +3445,7 @@ void fi_opx_hfi1_rx_reliability_ack_resynch (struct fid_ep *ep,
 #ifdef OPX_RELIABILITY_DEBUG
 	else {
 		fprintf(stderr, "Warning, (rx) %s Client flow__ %016lx rcv resynch ack; not found.\n",
-			(rx_key.slid == rx_key.dlid) ? "SHM -" : "",
+			(fi_opx_hfi_is_intranode(rx_key.dlid)) ? "SHM -" : "",
 			rx_key.value);
 	}
 #endif
@@ -3449,9 +3488,12 @@ ssize_t fi_opx_reliability_do_remote_ep_resynch(struct fid_ep *ep,
 				opx_ep->daos_info.rank = opx_addr->rank;
 				opx_ep->daos_info.rank_inst = opx_addr->rank_inst;
 				FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA,
-					"(tx) SHM - rank:%d, rank_inst:%d\n",
+					"(tx) SHM - rank:%d, rank_inst:%d, hfi_rank:%d, SLID:0x%x, DLID:0x%x\n",
 					opx_ep->daos_info.rank,
-					opx_ep->daos_info.rank_inst);
+					opx_ep->daos_info.rank_inst,
+					opx_ep->hfi->daos_info.rank,
+					opx_ep->tx->send.hdr.stl.lrh.slid,
+					dest_addr.uid.lid);
 			} else {
 				FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA,
 					"(tx) SHM - Extended address not available\n");
@@ -3461,11 +3503,16 @@ ssize_t fi_opx_reliability_do_remote_ep_resynch(struct fid_ep *ep,
 				"(tx) SHM - Extended address not available\n");
 		}
 
-		if (opx_ep->daos_info.rank == opx_ep->hfi->daos_info.rank &&
+		if ((opx_ep->tx->send.hdr.stl.lrh.slid == dest_addr.uid.lid) &&
+			opx_ep->daos_info.rank == opx_ep->hfi->daos_info.rank &&
 			opx_ep->daos_info.rank_inst == opx_ep->hfi->daos_info.rank_inst) {
 			/* Nothing to do */
 			return FI_SUCCESS;
 		}
+
+#ifdef OPX_DAOS_DEBUG
+		fi_opx_dump_daos_av_addr_rank(opx_ep, dest_addr, "SEND");
+#endif
 
 		unsigned rx_index =
 			(opx_ep->daos_info.hfi_rank_enabled) ?
@@ -3487,12 +3534,40 @@ ssize_t fi_opx_reliability_do_remote_ep_resynch(struct fid_ep *ep,
 		}
 
 		/* 
+		 * Check whether a RESYNCH request was already received from the remote EP.
+		 * If so, then this is a Server EP; otherwise this is a Client EP.
+		 */
+		bool resynch_rcvd = false;
+		void * rx_itr = fi_opx_rbt_find(opx_ep->reliability->state.flow_rbtree_resynch,
+										(void*)tx_key.value);
+
+		if (rx_itr) {
+			struct fi_opx_reliability_resynch_flow ** value_ptr =
+				(struct fi_opx_reliability_resynch_flow **) fi_opx_rbt_value_ptr(
+						opx_ep->reliability->state.flow_rbtree_resynch, rx_itr
+					);
+ 
+			struct fi_opx_reliability_resynch_flow * resynch_flow = *value_ptr;
+			if (resynch_flow->client_ep && resynch_flow->remote_ep_resynch_completed) {
+				FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA,
+					"(rx) SHM - Client has received resynch from Server %016lx: %ld\n",
+					tx_key.value, resynch_flow->resynch_counter);
+				resynch_rcvd = true;;
+			} else {
+				FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA,
+					"(rx) SHM - This is a Server %016lx: %ld\n",
+					tx_key.value, resynch_flow->resynch_counter);
+			}
+		}
+
+		/* 
 		 * Check whether packets have already been sent to the dest EP.  If not,
 		 * then send RESYNCH request to the dest Server EP.  This causes the dest
 		 * Server EP to resynch all SHM related data that it maintains associated
 		 * with this Client EP.
 		 */
-		if (!opx_ep->tx->shm.fifo_segment[rx_index] ||
+		if (!resynch_rcvd ||
+			!opx_ep->tx->shm.fifo_segment[rx_index] ||
 			!opx_ep->tx->shm.connection[rx_index].inuse) {
 			rc = fi_opx_shm_dynamic_tx_connect(1, opx_ep, rx_index, dest_addr.hfi1_unit);
 			if (OFI_UNLIKELY(rc)) {
@@ -3501,11 +3576,16 @@ ssize_t fi_opx_reliability_do_remote_ep_resynch(struct fid_ep *ep,
 
 			inject_done = true;
 			rc = fi_opx_hfi1_tx_reliability_inject_shm(ep,
-					tx_key.value, dest_addr.uid.lid, rx_index,
-					dest_addr.hfi1_unit,
+					tx_key.value, dest_addr.uid.lid, dest_addr.hfi1_rx,
+					dest_addr.hfi1_unit, rx_index,
 					FI_OPX_HFI_UD_OPCODE_RELIABILITY_RESYNCH);
 			if (rc)
 				return -FI_EAGAIN;
+		} else {
+			FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA,
+				"(tx) SHM - No resynch necessary from Client %016lx 0x%x\n",
+				tx_key.value,
+				rx_index);
 		}
 	} else {
 		/* INTER-NODE */
