@@ -163,18 +163,28 @@ struct efa_rdm_rma_context_pkt {
 	uint16_t flags;
 	/* end of efa_rdm_base_hdr */
 	uint32_t context_type;
-	uint32_t tx_id; /* used by write context */
-	uint32_t read_id; /* used by read context */
-	size_t seg_size; /* used by read context */
+
+	/* Used by write context */
+	uint32_t tx_id;
+	void *local_buf;
+	void *desc;
+	uint64_t remote_buf;
+	size_t remote_key;
+
+	/* used by read context */
+	uint32_t read_id;
+	size_t seg_size;
 };
 
 enum efa_rdm_rma_context_pkt_type {
-	EFA_RDM_RDMA_READ_CONTEX = 1,
-	EFA_RDM_RDMA_WRITE_CONTEX,
+	EFA_RDM_RDMA_READ_CONTEXT = 1,
+	EFA_RDM_RDMA_WRITE_CONTEXT,
 };
 
 void efa_rdm_pke_init_write_context(struct efa_rdm_pke *pkt_entry,
-				    struct efa_rdm_ope *txe);
+				    struct efa_rdm_ope *txe, void *local_buf,
+				    size_t seg_size, void *desc,
+				    uint64_t remote_buf, size_t remote_key);
 
 void efa_rdm_pke_init_read_context(struct efa_rdm_pke *pkt_entry,
 				   struct efa_rdm_ope *ope,
