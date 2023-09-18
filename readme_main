@@ -3,6 +3,7 @@ git remote add upstream https://github.com/ofiwg/libfabric.git
 git fetch upstream
 git merge upstream/main
 
+https://ofiwg.github.io/libfabric/v1.10.1/man/fabtests.7.html
 fabtests 测试, fabtests/README, fabtests/README.md
 使用 --with-libfabric=<directory> 选项告诉 Fabtests 在哪里可以找到已安装的 Libfabric 的头文件和库文件
 编译:

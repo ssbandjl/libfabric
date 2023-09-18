@@ -1,3 +1,11 @@
+<!--
+ * @Author: xb ssbandjl@163.com
+ * @Date: 2023-09-18 00:08:08
+ * @LastEditors: xb ssbandjl@163.com
+ * @LastEditTime: 2023-09-18 11:32:13
+ * @FilePath: /libfabric/fabtests/README
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+-->
 Introduction
 ============
 Fabtests provides a set of examples that uses libfabric - a high-performance
@@ -29,3 +37,44 @@ configure step.
 For more detailed build information see the project home page on Github:
 
 https://github.com/ofiwg/libfabric/tree/main/fabtests
+
+
+
+最佳测试
+Fabtests 提供了一组使用 libfabric（高性能结构软件库）的示例。
+
+笔记
+请注意，fabtests 套件是与特定版本的 libfabric 一起发布的。例如，libfabric v1.4 和 fabtests v1.4 一起发布。
+
+使用这些配对版本是测试给定版本的 libfabric 的最佳方法。使用版本不匹配的 libfabric/fabtests 对可能会产生意外的结果。
+
+构建最佳测试
+可以从 Github 发布选项卡获取分发 tarball。
+
+如果您从开发人员 Git 克隆构建 Fabtest，则必须首先运行该autogen.sh脚本。这将调用 GNU Autotools 来引导 Fabtests 的配置和构建机制。如果您从官方发行版 tarball 构建 Fabtests，则无需运行autogen.sh；Fabtests 发行版 tarball 已为您引导。
+
+Fabtests 依赖于能够找到 Libfabric 的已安装版本。在某些情况下，Libfabric 可能位于默认编译器/链接器搜索路径中，您无需告诉 Fabtests 在哪里可以找到它。--with-libfabric=<directory>在其他情况下，您可能需要使用如下所述的选项告诉 Fabtests 在哪里可以找到已安装的 Libfabric 的头文件和库文件 。
+
+配置选项
+该configure脚本有许多内置选项（请参阅 参考资料./configure --help）。一些有用的选项是：
+
+--prefix=<directory>
+默认情况下make install会将文件放置在/usr树中。该--prefix选项指定 Fabtests 文件应安装到 name 指定的树中<directory>。可执行文件将位于<directory>/bin.
+
+--with-libfabric=<directory>
+指定 Libfabric 库和头文件所在的目录。如果 Libfabric 安装在编译器和链接器默认情况下不会搜索的位置，则这是必要的。将在 中搜索 Libfabric 库<directory>/lib，并在 中搜索标头<directory>/include。
+
+--with-valgrind=<directory>
+valgrind 的安装目录。如果找到 valgrind，则启用 valgrind 注释。这可能会导致性能损失。
+
+例子
+考虑以下示例：
+
+$ ./configure --with-libfabric=/opt/libfabric --prefix=/opt/fabtests && make -j 32 && sudo make install
+这将告诉 Fabtest 在树中查找 Libfabric 库 /opt/libfabric，并在树中安装 Fabtest /opt/fabtests。
+
+或者：
+
+$ ./configure --prefix=/opt/fabtests && make -j 32 && sudo make install
+告诉 Fabtests 它应该能够在默认编译器/链接器搜索路径中找到 Libfabric 头文件和库（如果找不到它们，配置将中止），并在/opt/fabtests.
+

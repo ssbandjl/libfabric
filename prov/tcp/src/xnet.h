@@ -67,7 +67,6 @@
 #define _XNET_H_
 
 
-#define XNET_RDM_VERSION	0
 #define XNET_DEF_INJECT		128
 #define XNET_DEF_BUF_SIZE	16384
 #define XNET_MAX_EVENTS		128
@@ -154,6 +153,8 @@ union xnet_hdrs {
 	struct xnet_cq_data_hdr cq_data_hdr;
 	struct xnet_tag_data_hdr tag_data_hdr;
 	struct xnet_tag_hdr	tag_hdr;
+	struct xnet_tag_rts_hdr	tag_rts_hdr;
+	struct xnet_tag_rts_data_hdr tag_rts_data_hdr;
 	uint8_t			max_hdr[XNET_MAX_HDR];
 };
 
@@ -203,6 +204,9 @@ struct xnet_srx {
 int xnet_srx_context(struct fid_domain *domain, struct fi_rx_attr *attr,
 		     struct fid_ep **rx_ep, void *context);
 
+/* xnet_ep::util_ep::flags */
+#define XNET_EP_RENDEZVOUS (1 << 0)
+
 struct xnet_ep {
 	struct util_ep		util_ep;
 	struct ofi_bsock	bsock;
@@ -218,6 +222,8 @@ struct xnet_ep {
 	struct slist		need_ack_queue;
 	struct slist		async_queue;
 	struct slist		rma_read_queue;
+	struct ofi_byte_idx	rts_queue;
+	struct ofi_byte_idx	cts_queue;
 	struct xnet_saved_msg	*saved_msg;
 	int			rx_avail;
 	struct xnet_srx		*srx;
@@ -390,6 +396,7 @@ static inline void xnet_signal_progress(struct xnet_progress *progress)
 #define XNET_SAVED_XFER		BIT(8)
 #define XNET_COPY_RECV		BIT(9)
 #define XNET_CLAIM_RECV		BIT(10)
+#define XNET_NEED_CTS		BIT(11)
 #define XNET_MULTI_RECV		FI_MULTI_RECV /* BIT(16) */
 
 struct xnet_xfer_entry {
@@ -402,10 +409,14 @@ struct xnet_xfer_entry {
 	struct util_cntr	*cntr;
 	uint64_t		tag_seq_no;
 	uint64_t		tag;
-	uint64_t		ignore;
+	struct {
+		uint64_t	ignore;
+		size_t		rts_iov_cnt;
+	};
 	fi_addr_t		src_addr;
 	uint64_t		cq_flags;
 	uint32_t		ctrl_flags;
+	OFI_DBG_VAR(bool,	inuse)
 	uint32_t		async_index;
 	void			*context;
 	/* For RMA read requests, we track the request response so that
@@ -508,7 +519,6 @@ int xnet_endpoint(struct fid_domain *domain, struct fi_info *info,
 		  struct fid_ep **ep_fid, void *context);
 void xnet_ep_disable(struct xnet_ep *ep, int cm_err, void* err_data,
 		     size_t err_data_size);
-void xnet_flush_xfer_queue(struct xnet_progress *progress, struct slist *queue);
 
 static inline struct xnet_cq *xnet_ep_rx_cq(struct xnet_ep *ep)
 {
@@ -592,12 +602,14 @@ xnet_alloc_xfer(struct xnet_progress *progress)
 	if (!xfer)
 		return NULL;
 
+	assert(!xfer->inuse);
+	OFI_DBG_SET(xfer->inuse, true);
 	xfer->hdr.base_hdr.flags = 0;
 	xfer->cq_flags = 0;
 	xfer->cntr = NULL;
 	xfer->cq = NULL;
 	xfer->ctrl_flags = 0;
-	xfer->context = 0;
+	xfer->context = NULL;
 	xfer->user_buf = NULL;
 	return xfer;
 }
@@ -610,6 +622,8 @@ xnet_free_xfer(struct xnet_progress *progress, struct xnet_xfer_entry *xfer)
 	if (xfer->ctrl_flags & XNET_FREE_BUF)
 		free(xfer->user_buf);
 
+	assert(xfer->inuse);
+	OFI_DBG_SET(xfer->inuse, false);
 	ofi_buf_free(xfer);
 }
 
@@ -670,10 +684,21 @@ static inline bool xnet_has_unexp(struct xnet_ep *ep)
 	return ep->cur_rx.handler && !ep->cur_rx.entry;
 }
 
-void xnet_recv_saved(struct xnet_xfer_entry *saved_entry,
+void xnet_recv_saved(struct xnet_rdm *rdm,
+		     struct xnet_xfer_entry *saved_entry,
 		     struct xnet_xfer_entry *rx_entry);
 void xnet_complete_saved(struct xnet_xfer_entry *saved_entry,
 			 void *msg_data);
+
+static inline uint64_t xnet_msg_len(union xnet_hdrs *hdr)
+{
+	if (hdr->base_hdr.op == xnet_op_tag_rts) {
+		return hdr->base_hdr.flags & XNET_REMOTE_CQ_DATA ?
+		       hdr->tag_rts_data_hdr.size : hdr->tag_rts_hdr.size;
+	} else {
+		return hdr->base_hdr.size - hdr->base_hdr.hdr_size;
+	}
+}
 
 #define XNET_WARN_ERR(subsystem, log_str, err) \
 	FI_WARN(&xnet_prov, subsystem, log_str "%s (%d)\n", \

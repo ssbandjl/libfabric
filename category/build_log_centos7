@@ -1,0 +1,500 @@
++ autoreconf -ivf
+autoreconf: Entering directory `.'
+autoreconf: configure.ac: not using Gettext
+autoreconf: running: aclocal --force -I config
+autoreconf: configure.ac: tracing
+autoreconf: running: libtoolize --copy --force
+libtoolize: putting auxiliary files in AC_CONFIG_AUX_DIR, `config'.
+libtoolize: copying file `config/ltmain.sh'
+libtoolize: putting macros in AC_CONFIG_MACRO_DIR, `config'.
+libtoolize: copying file `config/libtool.m4'
+libtoolize: copying file `config/ltoptions.m4'
+libtoolize: copying file `config/ltsugar.m4'
+libtoolize: copying file `config/ltversion.m4'
+libtoolize: copying file `config/lt~obsolete.m4'
+autoreconf: running: /usr/bin/autoconf --force
+autoreconf: running: /usr/bin/autoheader --force
+autoreconf: running: automake --add-missing --copy --force-missing
+autoreconf: Leaving directory `.'
+checking for a BSD-compatible install... /bin/install -c
+checking whether build environment is sane... yes
+checking for a thread-safe mkdir -p... /bin/mkdir -p
+checking for gawk... gawk
+checking whether make sets $(MAKE)... yes
+checking whether make supports nested variables... yes
+checking how to create a pax tar archive... gnutar
+checking whether make supports nested variables... (cached) yes
+checking build system type... x86_64-unknown-linux-gnu
+checking host system type... x86_64-unknown-linux-gnu
+checking for style of include used by make... GNU
+checking for gcc... gcc
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking whether we are using the GNU C compiler... yes
+checking whether gcc accepts -g... yes
+checking for gcc option to accept ISO C89... none needed
+checking dependency style of gcc... gcc3
+checking dependency style of gcc... gcc3
+checking for ar... ar
+checking the archiver (ar) interface... ar
+checking for gcc... (cached) gcc
+checking whether we are using the GNU C compiler... (cached) yes
+checking whether gcc accepts -g... (cached) yes
+checking for gcc option to accept ISO C89... (cached) none needed
+checking dependency style of gcc... (cached) gcc3
+checking for gcc option to accept ISO C99... -std=gnu99
+checking whether gcc -std=gnu99 and cc understand -c and -o together... yes
+checking how to run the C preprocessor... gcc -std=gnu99 -E
+checking to see if compiler supports -Wextra... yes
+checking to see if compiler supports -Wno-unused-parameter... yes
+checking to see if compiler supports -Wno-sign-compare... yes
+checking to see if compiler supports -Wno-missing-field-initializers... yes
+checking to see if compiler supports -fstack-protector-strong... yes
+checking for grep that handles long lines and -e... /bin/grep
+checking for egrep... /bin/grep -E
+checking for ANSI C header files... yes
+checking for typeof syntax and keyword spelling... typeof
+checking how to print strings... printf
+checking for a sed that does not truncate output... /bin/sed
+checking for fgrep... /bin/grep -F
+checking for ld used by gcc -std=gnu99... /bin/ld
+checking if the linker (/bin/ld) is GNU ld... yes
+checking for BSD- or MS-compatible name lister (nm)... /bin/nm -B
+checking the name lister (/bin/nm -B) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 1572864
+checking whether the shell understands some XSI constructs... yes
+checking whether the shell understands "+="... yes
+checking how to convert x86_64-unknown-linux-gnu file names to x86_64-unknown-linux-gnu format... func_convert_file_noop
+checking how to convert x86_64-unknown-linux-gnu file names to toolchain format... func_convert_file_noop
+checking for /bin/ld option to reload object files... -r
+checking for objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for dlltool... no
+checking how to associate runtime and link libraries... printf %s\n
+checking for archiver @FILE support... @
+checking for strip... strip
+checking for ranlib... ranlib
+checking command to parse /bin/nm -B output from gcc -std=gnu99 object... ok
+checking for sysroot... no
+checking for mt... no
+checking if : is a manifest tool... no
+checking for sys/types.h... yes
+checking for sys/stat.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for memory.h... yes
+checking for strings.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for unistd.h... yes
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if gcc -std=gnu99 supports -fno-rtti -fno-exceptions... no
+checking for gcc -std=gnu99 option to produce PIC... -fPIC -DPIC
+checking if gcc -std=gnu99 PIC flag -fPIC -DPIC works... yes
+checking if gcc -std=gnu99 static flag -static works... no
+checking if gcc -std=gnu99 supports -c -o file.o... yes
+checking if gcc -std=gnu99 supports -c -o file.o... (cached) yes
+checking whether the gcc -std=gnu99 linker (/bin/ld -m elf_x86_64) supports shared libraries... yes
+checking whether -lc should be explicitly linked in... no
+checking dynamic linker characteristics... GNU/Linux ld.so
+checking how to hardcode library paths into programs... immediate
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... yes
+checking whether to build static libraries... yes
+configure: creating ./config.lt
+config.lt: creating libtool
+checking for dlopen in -ldl... yes
+checking for pthread_mutex_init in -lpthread... yes
+checking for pthread_spin_init... yes
+checking for shm_open... no
+checking for library containing shm_open... -lrt
+checking for epoll_create... yes
+checking linux/perf_event.h usability... yes
+checking linux/perf_event.h presence... yes
+checking for linux/perf_event.h... yes
+checking whether __builtin_ia32_rdpmc is declared... yes
+checking compiler support for c11 atomics... no
+checking compiler support for c11 atomic `least` types... no
+checking compiler support for built-in atomics... yes
+checking for library containing __atomic_load_8... no
+checking compiler support for built-in memory model aware atomics... yes
+checking for __int128... yes
+checking compiler support for built-in memory model aware 128-bit atomics... no
+checking compiler support for cpuid... yes
+checking whether ld accepts --version-script... yes
+checking xpmem.h usability... no
+checking xpmem.h presence... no
+checking for xpmem.h... no
+checking for .symver assembler support... yes
+checking for __alias__ attribute support... yes
+checking for getifaddrs... yes
+checking ethtool support... yes
+checking whether ethtool_cmd_speed is declared... yes
+checking whether SPEED_UNKNOWN is declared... yes
+checking linux/userfaultfd.h usability... yes
+checking linux/userfaultfd.h presence... yes
+checking for linux/userfaultfd.h... yes
+checking whether __NR_userfaultfd is declared... yes
+checking for userfaultfd unmap support... yes
+checking for elf.h... yes
+checking for sys/auxv.h... yes
+checking for library containing clock_gettime... none required
+checking liburing.h usability... no
+checking liburing.h presence... no
+checking for liburing.h... no
+checking cuda_runtime.h usability... no
+checking cuda_runtime.h presence... no
+checking for cuda_runtime.h... no
+checking level_zero/ze_api.h usability... no
+checking level_zero/ze_api.h presence... no
+checking for level_zero/ze_api.h... no
+checking nrt/nrt.h usability... no
+checking nrt/nrt.h presence... no
+checking for nrt/nrt.h... no
+checking habanalabs/synapse_api.h usability... no
+checking habanalabs/synapse_api.h presence... no
+checking for habanalabs/synapse_api.h... no
+checking for __curbrk... yes
+checking for __clear_cache... yes
+checking linux/mman.h usability... yes
+checking linux/mman.h presence... yes
+checking for linux/mman.h... yes
+checking sys/syscall.h usability... yes
+checking sys/syscall.h presence... yes
+checking for sys/syscall.h... yes
+checking whether __syscall is declared... no
+checking for __syscall... no
+checking hsa/hsa_ext_amd.h usability... no
+checking hsa/hsa_ext_amd.h presence... no
+checking for hsa/hsa_ext_amd.h... no
+checking size of void *... 8
+configure: *** Configuring psm2 provider
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: configure: recheck psm2 without psm2_info_query.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: recheck psm2 without psm2_mq_ipeek_dequeue_multi.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: recheck psm2 without psm2_mq_fp_msg.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: recheck psm2 without psm2_am_register_handlers_2.
+checking psm2.h usability... no
+checking psm2.h presence... no
+checking for psm2.h... no
+configure: psm2 provider: disabled
+configure: *** Configuring psm3 provider
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking numa.h usability... yes
+checking numa.h presence... yes
+checking for numa.h... yes
+configure: looking for library without search path
+checking for numa_node_of_cpu in -lnuma... yes
+checking infiniband/verbs.h usability... yes
+checking infiniband/verbs.h presence... yes
+checking for infiniband/verbs.h... yes
+configure: looking for library without search path
+checking for ibv_get_device_list in -libverbs... yes
+checking uuid/uuid.h usability... yes
+checking uuid/uuid.h presence... yes
+checking for uuid/uuid.h... yes
+configure: looking for library without search path
+checking for uuid_parse in -luuid... yes
+checking for -msse4.2 support... yes
+checking for -mavx support... yes
+checking for -mavx2 support... yes
+checking for grep that handles long lines and -e... (cached) /bin/grep
+checking for -Wno-address-of-packed-member support... no
+checking rdma/rv_user_ioctls.h usability... no
+checking rdma/rv_user_ioctls.h presence... no
+checking for rdma/rv_user_ioctls.h... no
+checking linux/idxd.h usability... yes
+checking linux/idxd.h presence... yes
+checking for linux/idxd.h... yes
+checking for full Intel DSA support... yes
+configure: psm3 provider: include in libfabric
+configure: *** Configuring sockets provider
+checking sys/socket.h usability... yes
+checking sys/socket.h presence... yes
+checking for sys/socket.h... yes
+checking for shm_open... (cached) no
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking for getifaddrs... (cached) yes
+configure: sockets provider: include in libfabric
+configure: *** Configuring verbs provider
+checking infiniband/verbs.h usability... yes
+checking infiniband/verbs.h presence... yes
+checking for infiniband/verbs.h... yes
+configure: looking for library without search path
+checking for ibv_open_device in -libverbs... yes
+checking if libibverbs is linkable by libtool... yes
+checking rdma/rdma_cma.h usability... yes
+checking rdma/rdma_cma.h presence... yes
+checking for rdma/rdma_cma.h... yes
+configure: looking for library without search path
+checking for rdma_create_qp in -lrdmacm... yes
+checking rdma/rdma_cma.h usability... yes
+checking rdma/rdma_cma.h presence... yes
+checking for rdma/rdma_cma.h... yes
+configure: looking for library without search path
+checking for rdma_create_qp_ex in -lrdmacm... yes
+checking whether ibv_query_device_ex is declared... yes
+checking whether IBV_QPT_XRC_SEND is declared... yes
+checking whether rdma_establish is declared... yes
+checking whether ibv_reg_dmabuf_mr is declared... yes
+configure: verbs provider: include in libfabric
+configure: *** Configuring efa provider
+checking infiniband/verbs.h usability... yes
+checking infiniband/verbs.h presence... yes
+checking for infiniband/verbs.h... yes
+configure: looking for library without search path
+checking for ibv_open_device in -libverbs... yes
+checking if libibverbs is linkable by libtool... yes
+checking for GCC... yes
+checking infiniband/efadv.h usability... no
+checking infiniband/efadv.h presence... no
+checking for infiniband/efadv.h... no
+configure: WARNING: The EFA provider requires rdma-core v31 or newer.
+configure: efa provider: disabled
+configure: *** Configuring usnic provider
+checking for infiniband/verbs.h... (cached) yes
+checking infiniband/driver.h usability... no
+checking infiniband/driver.h presence... no
+checking for infiniband/driver.h... no
+checking if building usnic fake verbs driver... no
+configure: checking for libnl3
+checking for libnl3 prefix... /usr
+checking for /usr/include/libnl3... not found
+configure: checking for libnl
+configure: looking for header without includes
+checking netlink/netlink.h usability... no
+checking netlink/netlink.h presence... no
+checking for netlink/netlink.h... no
+checking netlink/netlink.h usability... no
+checking netlink/netlink.h presence... no
+checking for netlink/netlink.h... no
+configure: usnic provider: disabled
+checking for pkg-config... /bin/pkg-config
+checking pkg-config is at least version 0.9.0... yes
+configure: *** Configuring gni provider
+checking for CRAY_GNI_HEADERS... no
+configure: gni provider: disabled
+configure: *** Configuring udp provider
+checking for sys/socket.h... (cached) yes
+configure: udp provider: include in libfabric
+configure: *** Configuring tcp provider
+configure: tcp provider: include in libfabric
+configure: *** Configuring rxm provider
+configure: rxm provider: include in libfabric
+configure: *** Configuring mrail provider
+configure: mrail provider: include in libfabric
+configure: *** Configuring rxd provider
+configure: rxd provider: include in libfabric
+configure: *** Configuring bgq provider
+checking for direct bgq provider... no
+configure: bgq provider: disabled
+configure: *** Configuring shm provider
+checking for shm_open... (cached) no
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking accel-config/libaccel_config.h usability... no
+checking accel-config/libaccel_config.h presence... no
+checking for accel-config/libaccel_config.h... no
+checking whether HAVE_ATOMICS is declared... no
+checking whether HAVE_BUILTIN_MM_ATOMICS is declared... yes
+configure: shm provider: include in libfabric
+configure: *** Configuring sm2 provider
+checking for shm_open... (cached) no
+checking sys/mman.h usability... yes
+checking sys/mman.h presence... yes
+checking for sys/mman.h... yes
+configure: looking for library without search path
+checking for shm_open in -lrt... yes
+checking whether HAVE_ATOMICS is declared... (cached) no
+checking whether HAVE_BUILTIN_MM_ATOMICS is declared... (cached) yes
+configure: sm2 provider: include in libfabric
+configure: *** Configuring rstream provider
+configure: rstream provider: include in libfabric
+configure: *** Configuring ucx provider
+configure: ucx provider: disabled
+configure: *** Configuring perf provider
+configure: perf provider: include in libfabric
+configure: *** Configuring trace provider
+configure: trace provider: include in libfabric
+configure: *** Configuring profile provider
+configure: profile provider: include in libfabric
+configure: *** Configuring hook_debug provider
+configure: hook_debug provider: include in libfabric
+configure: *** Configuring hook_hmem provider
+configure: hook_hmem provider: include in libfabric
+configure: *** Configuring dmabuf_peer_mem provider
+configure: dmabuf_peer_mem provider: include in libfabric
+configure: *** Configuring opx provider
+checking for opx provider... checking uuid/uuid.h usability... yes
+checking uuid/uuid.h presence... yes
+checking for uuid/uuid.h... yes
+configure: looking for library without search path
+checking for uuid_parse in -luuid... yes
+checking numa.h usability... yes
+checking numa.h presence... yes
+checking for numa.h... yes
+configure: looking for library without search path
+checking for numa_node_of_cpu in -lnuma... yes
+checking rdma/hfi/hfi1_user.h usability... yes
+checking rdma/hfi/hfi1_user.h presence... yes
+checking for rdma/hfi/hfi1_user.h... yes
+configure: hfi1_user.h HFI1_CAP_TID_RDMA defined... yes
+checking whether HAVE_ATOMICS is declared... (cached) no
+configure: WARNING: "gcc (GCC) 4.8.5 20150623 (Red Hat 4.8.5-44)" doesn't support native atomics.  Disabling OPX provider.
+configure: opx provider: disabled
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating prov/psm3/psm3/psm2_hal_inlines_i.h
+config.status: creating prov/psm3/psm3/psm2_hal_inlines_d.h
+config.status: creating prov/psm3/src/psm3_revision.c
+config.status: creating libfabric.pc
+config.status: creating Makefile
+config.status: creating libfabric.spec
+config.status: creating libfabric.map
+config.status: creating config.h
+config.status: config.h is unchanged
+config.status: executing depfiles commands
+config.status: executing libtool commands
+***
+*** Built-in providers: dmabuf_peer_mem hook_hmem hook_debug profile trace perf rstream sm2 shm rxd mrail rxm tcp udp verbs sockets psm3 
+*** DSO providers:
+***
+  GEN      prov/psm3/src/psm3_src_chksum.h
+make  all-am
+make[1]: Entering directory `/home/xb/project/libfabric/libfabric'
+  GEN      prov/psm3/src/psm3_src_chksum.h
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_context.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_ep.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_mq.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_mq_recv.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_uffd.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_utils.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm_verbs_mr.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm2_hal.lo
+  CC       prov/psm3/psm3/prov_psm3_psm3_libpsm3i_la-psm2_hal_loopback.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_crc32.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_opp_path_rec.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_epstate.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_path_rec.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_am.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_connect.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_dump.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_expected.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_mq.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_proto_recv.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_scb.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ips_tidflow.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ptl.lo
+  CC       prov/psm3/psm3/ptl_ips/prov_psm3_psm3_libptl_ips_la-ptl_rcvthread.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_ep.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_hal.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_ptl_ips.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_rcvthread.lo
+  CC       prov/psm3/psm3/hal_verbs/prov_psm3_psm3_libhal_verbs_la-verbs_recvhdrq.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_ep.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_hal.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_proto.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_ptl_ips.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_rcvthread.lo
+  CC       prov/psm3/psm3/hal_sockets/prov_psm3_psm3_libhal_sockets_la-sockets_recvhdrq.lo
+  CC       prov/psm3/src/libpsm3_la-psm3_revision.lo
+  CCLD     prov/psm3/psm3/libhal_verbs.la
+  CCLD     prov/psm3/psm3/libptl_ips.la
+  CCLD     prov/psm3/psm3/libhal_sockets.la
+  CCLD     prov/psm3/psm3/libpsm3i.la
+  CCLD     libpsm3.la
+  CCLD     src/libfabric.la
+copying selected object files to avoid basename conflicts...
+  CCLD     util/fi_info
+  CCLD     util/fi_strerror
+  CCLD     util/fi_pingpong
+make[1]: Leaving directory `/home/xb/project/libfabric/libfabric'
+  GEN      prov/psm3/src/psm3_src_chksum.h
+make  install-am
+make[1]: Entering directory `/home/xb/project/libfabric/libfabric'
+  GEN      prov/psm3/src/psm3_src_chksum.h
+make[2]: Entering directory `/home/xb/project/libfabric/libfabric'
+  GEN      prov/psm3/src/psm3_src_chksum.h
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/lib'
+ /bin/sh ./libtool   --mode=install /bin/install -c   src/libfabric.la '/home/xb/project/libfabric/libfabric/build/lib'
+libtool: install: /bin/install -c src/.libs/libfabric.so.1.22.0 /home/xb/project/libfabric/libfabric/build/lib/libfabric.so.1.22.0
+libtool: install: (cd /home/xb/project/libfabric/libfabric/build/lib && { ln -s -f libfabric.so.1.22.0 libfabric.so.1 || { rm -f libfabric.so.1 && ln -s libfabric.so.1.22.0 libfabric.so.1; }; })
+libtool: install: (cd /home/xb/project/libfabric/libfabric/build/lib && { ln -s -f libfabric.so.1.22.0 libfabric.so || { rm -f libfabric.so && ln -s libfabric.so.1.22.0 libfabric.so; }; })
+libtool: install: /bin/install -c src/.libs/libfabric.lai /home/xb/project/libfabric/libfabric/build/lib/libfabric.la
+libtool: install: /bin/install -c src/.libs/libfabric.a /home/xb/project/libfabric/libfabric/build/lib/libfabric.a
+libtool: install: chmod 644 /home/xb/project/libfabric/libfabric/build/lib/libfabric.a
+libtool: install: ranlib /home/xb/project/libfabric/libfabric/build/lib/libfabric.a
+libtool: finish: PATH="/root/.vscode-server/bin/74f6148eb9ea00507ec113ec51c489d6ffb4b771/bin/remote-cli:/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/opt/h3c/bin:/opt/h3c/sbin:/opt/h3c/zookeeper/bin:/opt/h3c/bin:/opt/h3c/sbin:/opt/h3c/zookeeper/bin:/root/bin:/opt/h3c/bin:/opt/h3c/sbin:/opt/h3c/zookeeper/bin:/sbin" ldconfig -n /home/xb/project/libfabric/libfabric/build/lib
+----------------------------------------------------------------------
+Libraries have been installed in:
+   /home/xb/project/libfabric/libfabric/build/lib
+
+If you ever happen to want to link against installed libraries
+in a given directory, LIBDIR, you must either use libtool, and
+specify the full pathname of the library, or use the `-LLIBDIR'
+flag during linking and do at least one of the following:
+   - add LIBDIR to the `LD_LIBRARY_PATH' environment variable
+     during execution
+   - add LIBDIR to the `LD_RUN_PATH' environment variable
+     during linking
+   - use the `-Wl,-rpath -Wl,LIBDIR' linker flag
+   - have your system administrator add LIBDIR to `/etc/ld.so.conf'
+
+See any operating system documentation about shared libraries for
+more information, such as the ld(1) and ld.so(8) manual pages.
+----------------------------------------------------------------------
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/bin'
+  /bin/sh ./libtool   --mode=install /bin/install -c util/fi_info util/fi_strerror util/fi_pingpong '/home/xb/project/libfabric/libfabric/build/bin'
+libtool: install: /bin/install -c util/.libs/fi_info /home/xb/project/libfabric/libfabric/build/bin/fi_info
+libtool: install: /bin/install -c util/.libs/fi_strerror /home/xb/project/libfabric/libfabric/build/bin/fi_strerror
+libtool: install: /bin/install -c util/.libs/fi_pingpong /home/xb/project/libfabric/libfabric/build/bin/fi_pingpong
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/share/man/man1'
+ /bin/install -c -m 644 man/man1/fi_info.1 man/man1/fi_pingpong.1 man/man1/fi_strerror.1 '/home/xb/project/libfabric/libfabric/build/share/man/man1'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_atomic.3 man/man3/fi_av.3 man/man3/fi_av_set.3 man/man3/fi_cm.3 man/man3/fi_cntr.3 man/man3/fi_collective.3 man/man3/fi_control.3 man/man3/fi_cq.3 man/man3/fi_domain.3 man/man3/fi_endpoint.3 man/man3/fi_errno.3 man/man3/fi_eq.3 man/man3/fi_fabric.3 man/man3/fi_peer.3 man/man3/fi_provider.3 man/man3/fi_getinfo.3 man/man3/fi_mr.3 man/man3/fi_msg.3 man/man3/fi_nic.3 man/man3/fi_poll.3 man/man3/fi_rma.3 man/man3/fi_tagged.3 man/man3/fi_trigger.3 man/man3/fi_version.3 man/man3/fi_accept.3 man/man3/fi_alias.3 man/man3/fi_allgather.3 man/man3/fi_allreduce.3 man/man3/fi_alltoall.3 man/man3/fi_atomic_valid.3 man/man3/fi_atomicmsg.3 man/man3/fi_atomicv.3 man/man3/fi_av_bind.3 man/man3/fi_av_insert.3 man/man3/fi_av_insertsvc.3 man/man3/fi_av_lookup.3 man/man3/fi_av_open.3 man/man3/fi_av_remove.3 man/man3/fi_av_set_diff.3 man/man3/fi_av_set_insert.3 '/home/xb/project/libfabric/libfabric/build/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_av_set_intersect.3 man/man3/fi_av_set_remove.3 man/man3/fi_av_set_union.3 man/man3/fi_av_straddr.3 man/man3/fi_barrier.3 man/man3/fi_broadcast.3 man/man3/fi_cancel.3 man/man3/fi_close.3 man/man3/fi_cntr_add.3 man/man3/fi_cntr_open.3 man/man3/fi_cntr_read.3 man/man3/fi_cntr_set.3 man/man3/fi_cntr_wait.3 man/man3/fi_compare_atomic.3 man/man3/fi_compare_atomic_valid.3 man/man3/fi_compare_atomicmsg.3 man/man3/fi_compare_atomicv.3 man/man3/fi_connect.3 man/man3/fi_cq_open.3 man/man3/fi_cq_read.3 man/man3/fi_cq_readerr.3 man/man3/fi_cq_readfrom.3 man/man3/fi_cq_sread.3 man/man3/fi_cq_sreadfrom.3 man/man3/fi_cq_strerror.3 man/man3/fi_cq_signal.3 man/man3/fi_domain_bind.3 man/man3/fi_domain_query.3 man/man3/fi_dupinfo.3 man/man3/fi_enable.3 man/man3/fi_ep.3 man/man3/fi_ep_bind.3 man/man3/fi_eq_open.3 man/man3/fi_eq_read.3 man/man3/fi_eq_readerr.3 man/man3/fi_eq_sread.3 man/man3/fi_eq_strerror.3 man/man3/fi_eq_write.3 man/man3/fi_fetch_atomic.3 man/man3/fi_fetch_atomic_valid.3 '/home/xb/project/libfabric/libfabric/build/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_fetch_atomicmsg.3 man/man3/fi_fetch_atomicv.3 man/man3/fi_freeinfo.3 man/man3/fi_getname.3 man/man3/fi_getopt.3 man/man3/fi_getpeer.3 man/man3/fi_inject.3 man/man3/fi_injectdata.3 man/man3/fi_inject_atomic.3 man/man3/fi_inject_write.3 man/man3/fi_inject_writedata.3 man/man3/fi_join.3 man/man3/fi_join_collective.3 man/man3/fi_leave.3 man/man3/fi_listen.3 man/man3/fi_mr_bind.3 man/man3/fi_mr_desc.3 man/man3/fi_mr_key.3 man/man3/fi_mr_reg.3 man/man3/fi_mr_regattr.3 man/man3/fi_mr_regv.3 man/man3/fi_open.3 man/man3/fi_open_ops.3 man/man3/fi_passive_ep.3 man/man3/fi_pep_bind.3 man/man3/fi_poll_add.3 man/man3/fi_poll_del.3 man/man3/fi_poll_open.3 man/man3/fi_query_atomic.3 man/man3/fi_query_collective.3 man/man3/fi_read.3 man/man3/fi_readmsg.3 man/man3/fi_readv.3 man/man3/fi_recv.3 man/man3/fi_recvmsg.3 man/man3/fi_recvv.3 man/man3/fi_reduce_scatter.3 man/man3/fi_reject.3 man/man3/fi_rx_addr.3 man/man3/fi_rx_size_left.3 '/home/xb/project/libfabric/libfabric/build/share/man/man3'
+ /bin/install -c -m 644 man/man3/fi_scalable_ep_bind.3 man/man3/fi_send.3 man/man3/fi_senddata.3 man/man3/fi_sendmsg.3 man/man3/fi_sendv.3 man/man3/fi_setname.3 man/man3/fi_setopt.3 man/man3/fi_shutdown.3 man/man3/fi_strerror.3 man/man3/fi_tinject.3 man/man3/fi_tinjectdata.3 man/man3/fi_tostr.3 man/man3/fi_trecv.3 man/man3/fi_trecvmsg.3 man/man3/fi_trecvv.3 man/man3/fi_trywait.3 man/man3/fi_tsend.3 man/man3/fi_tsenddata.3 man/man3/fi_tsendmsg.3 man/man3/fi_tsendv.3 man/man3/fi_tx_size_left.3 man/man3/fi_wait.3 man/man3/fi_wait_open.3 man/man3/fi_write.3 man/man3/fi_writedata.3 man/man3/fi_writemsg.3 man/man3/fi_writev.3 '/home/xb/project/libfabric/libfabric/build/share/man/man3'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/share/man/man7'
+ /bin/install -c -m 644 man/man7/fabric.7 man/man7/fi_arch.7 man/man7/fi_direct.7 man/man7/fi_guide.7 man/man7/fi_hook.7 man/man7/fi_intro.7 man/man7/fi_provider.7 man/man7/fi_setup.7 man/man7/fi_sockets.7 man/man7/fi_udp.7 man/man7/fi_verbs.7 man/man7/fi_psm3.7 man/man7/fi_rxm.7 man/man7/fi_mrail.7 man/man7/fi_shm.7 man/man7/fi_tcp.7 man/man7/fi_rstream.7 '/home/xb/project/libfabric/libfabric/build/share/man/man7'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/lib/pkgconfig'
+ /bin/install -c -m 644 libfabric.pc '/home/xb/project/libfabric/libfabric/build/lib/pkgconfig'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/include/rdma/providers'
+ /bin/install -c -m 644 ./include/rdma/providers/fi_log.h ./include/rdma/providers/fi_peer.h ./include/rdma/providers/fi_prov.h '/home/xb/project/libfabric/libfabric/build/include/rdma/providers'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/include/rdma'
+ /bin/install -c -m 644 ./include/rdma/fabric.h ./include/rdma/fi_atomic.h ./include/rdma/fi_cm.h ./include/rdma/fi_collective.h ./include/rdma/fi_domain.h ./include/rdma/fi_eq.h ./include/rdma/fi_ext.h ./include/rdma/fi_rma.h ./include/rdma/fi_endpoint.h ./include/rdma/fi_errno.h ./include/rdma/fi_tagged.h ./include/rdma/fi_trigger.h '/home/xb/project/libfabric/libfabric/build/include/rdma'
+make[2]: Leaving directory `/home/xb/project/libfabric/libfabric'
+make[1]: Leaving directory `/home/xb/project/libfabric/libfabric'
+fi_info
+You have mail in /var/spool/mail/root
+[root@node63 libfabric]# 

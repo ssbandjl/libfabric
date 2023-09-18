@@ -57,7 +57,7 @@ xnet_alloc_send(struct xnet_ep *ep)
 	assert(xnet_progress_locked(xnet_ep2_progress(ep)));
 	send_entry = xnet_alloc_tx(ep);
 	if (send_entry) {
-		send_entry->hdr.base_hdr.op = ofi_op_msg;
+		send_entry->hdr.base_hdr.op = xnet_op_msg;
 		send_entry->cntr = ep->util_ep.cntrs[CNTR_TX];
 	}
 
@@ -73,7 +73,7 @@ xnet_alloc_tsend(struct xnet_ep *ep)
 	send_entry = xnet_alloc_tx(ep);
 	if (send_entry) {
 		assert(ep->srx);
-		send_entry->hdr.base_hdr.op = ofi_op_tagged;
+		send_entry->hdr.base_hdr.op = xnet_op_tag;
 		send_entry->cntr = ep->util_ep.cntrs[CNTR_TX];
 	}
 
@@ -145,6 +145,47 @@ xnet_init_tx_iov(struct xnet_xfer_entry *tx_entry, size_t hdr_len,
 			       count * sizeof(struct iovec));
 		}
 	}
+}
+
+/* If the transfer should use rendezvous protocol
+ * (ready-to-send-> + <-clear-to-send + data->),
+ * reformat for RTS-CTS flow.
+ */
+static int
+xnet_rts_check(struct xnet_ep *ep, struct xnet_xfer_entry *tx_entry)
+{
+	uint64_t msg_len, hdr_size;
+	uint8_t rts_ctx;
+
+	assert(xnet_progress_locked(xnet_ep2_progress(ep)));
+	assert(tx_entry->hdr.base_hdr.op == xnet_op_tag);
+
+	if ((tx_entry->hdr.base_hdr.size <= xnet_max_saved_size) ||
+	    !(ep->util_ep.flags & XNET_EP_RENDEZVOUS))
+		return 0;
+
+	/* User data is iov[1+] */
+	assert(tx_entry->iov_cnt > 1);
+	assert(tx_entry->iov[0].iov_len == tx_entry->hdr.base_hdr.hdr_size);
+
+	rts_ctx = ofi_byte_idx_insert(&ep->rts_queue, tx_entry);
+	if (!rts_ctx)
+		return -FI_EAGAIN;
+
+	msg_len = xnet_msg_len(&tx_entry->hdr);
+	hdr_size = tx_entry->hdr.base_hdr.hdr_size;
+	*(uint64_t *) (((uint8_t *) &tx_entry->hdr) + hdr_size) = msg_len;
+
+	tx_entry->hdr.base_hdr.op = xnet_op_tag_rts;
+	tx_entry->hdr.base_hdr.op_data = rts_ctx;
+	tx_entry->hdr.base_hdr.hdr_size += sizeof(msg_len);
+	tx_entry->hdr.base_hdr.size = tx_entry->hdr.base_hdr.hdr_size;
+
+	tx_entry->iov[0].iov_len = tx_entry->hdr.base_hdr.size;
+	tx_entry->rts_iov_cnt = tx_entry->iov_cnt;
+	tx_entry->iov_cnt = 1;
+	tx_entry->ctrl_flags |= XNET_NEED_CTS;
+	return 0;
 }
 
 static inline bool
@@ -482,7 +523,7 @@ xnet_tsendmsg(struct fid_ep *fid_ep, const struct fi_msg_tagged *msg,
 	struct xnet_ep *ep;
 	struct xnet_xfer_entry *tx_entry;
 	size_t hdr_len;
-	ssize_t ret = 0;
+	ssize_t ret;
 
 	ep = container_of(fid_ep, struct xnet_ep, util_ep.ep_fid);
 
@@ -495,7 +536,7 @@ xnet_tsendmsg(struct fid_ep *fid_ep, const struct fi_msg_tagged *msg,
 
 	if (flags & FI_REMOTE_CQ_DATA) {
 		tx_entry->hdr.base_hdr.flags |= XNET_REMOTE_CQ_DATA;
-		tx_entry->hdr.tag_data_hdr.cq_data_hdr.cq_data = msg->data;
+		tx_entry->hdr.tag_data_hdr.cq_data = msg->data;
 		tx_entry->hdr.tag_data_hdr.tag = msg->tag;
 		hdr_len = sizeof(tx_entry->hdr.tag_data_hdr);
 	} else {
@@ -509,7 +550,9 @@ xnet_tsendmsg(struct fid_ep *fid_ep, const struct fi_msg_tagged *msg,
 	xnet_set_ack_flags(tx_entry, flags);
 	tx_entry->context = msg->context;
 
-	xnet_tx_queue_insert(ep, tx_entry);
+	ret = xnet_rts_check(ep, tx_entry);
+	if (!ret)
+		xnet_tx_queue_insert(ep, tx_entry);
 unlock:
 	ofi_genlock_unlock(&xnet_ep2_progress(ep)->ep_lock);
 	return ret;
@@ -521,7 +564,7 @@ xnet_tsend(struct fid_ep *fid_ep, const void *buf, size_t len,
 {
 	struct xnet_ep *ep;
 	struct xnet_xfer_entry *tx_entry;
-	ssize_t ret = 0;
+	ssize_t ret;
 
 	ep = container_of(fid_ep, struct xnet_ep, util_ep.ep_fid);
 
@@ -540,7 +583,9 @@ xnet_tsend(struct fid_ep *fid_ep, const void *buf, size_t len,
 			     FI_TAGGED | FI_SEND;
 	xnet_set_ack_flags(tx_entry, ep->util_ep.tx_op_flags);
 
-	xnet_tx_queue_insert(ep, tx_entry);
+	ret = xnet_rts_check(ep, tx_entry);
+	if (!ret)
+		xnet_tx_queue_insert(ep, tx_entry);
 unlock:
 	ofi_genlock_unlock(&xnet_ep2_progress(ep)->ep_lock);
 	return ret;
@@ -552,7 +597,7 @@ xnet_tsendv(struct fid_ep *fid_ep, const struct iovec *iov, void **desc,
 {
 	struct xnet_ep *ep;
 	struct xnet_xfer_entry *tx_entry;
-	ssize_t ret = 0;
+	ssize_t ret;
 
 	ep = container_of(fid_ep, struct xnet_ep, util_ep.ep_fid);
 
@@ -571,7 +616,9 @@ xnet_tsendv(struct fid_ep *fid_ep, const struct iovec *iov, void **desc,
 			     FI_TAGGED | FI_SEND;
 	xnet_set_ack_flags(tx_entry, ep->util_ep.tx_op_flags);
 
-	xnet_tx_queue_insert(ep, tx_entry);
+	ret = xnet_rts_check(ep, tx_entry);
+	if (!ret)
+		xnet_tx_queue_insert(ep, tx_entry);
 unlock:
 	ofi_genlock_unlock(&xnet_ep2_progress(ep)->ep_lock);
 	return ret;
@@ -613,7 +660,7 @@ xnet_tsenddata(struct fid_ep *fid_ep, const void *buf, size_t len, void *desc,
 {
 	struct xnet_ep *ep;
 	struct xnet_xfer_entry *tx_entry;
-	ssize_t ret = 0;
+	ssize_t ret;
 
 	ep = container_of(fid_ep, struct xnet_ep, util_ep.ep_fid);
 
@@ -626,7 +673,7 @@ xnet_tsenddata(struct fid_ep *fid_ep, const void *buf, size_t len, void *desc,
 
 	tx_entry->hdr.base_hdr.flags |= XNET_REMOTE_CQ_DATA;
 	tx_entry->hdr.tag_data_hdr.tag = tag;
-	tx_entry->hdr.tag_data_hdr.cq_data_hdr.cq_data = data;
+	tx_entry->hdr.tag_data_hdr.cq_data = data;
 
 	xnet_init_tx_buf(tx_entry, sizeof(tx_entry->hdr.tag_data_hdr),
 			 buf, len);
@@ -635,7 +682,9 @@ xnet_tsenddata(struct fid_ep *fid_ep, const void *buf, size_t len, void *desc,
 			     FI_TAGGED | FI_SEND;
 	xnet_set_ack_flags(tx_entry, ep->util_ep.tx_op_flags);
 
-	xnet_tx_queue_insert(ep, tx_entry);
+	ret = xnet_rts_check(ep, tx_entry);
+	if (!ret)
+		xnet_tx_queue_insert(ep, tx_entry);
 unlock:
 	ofi_genlock_unlock(&xnet_ep2_progress(ep)->ep_lock);
 	return ret;
@@ -660,7 +709,7 @@ xnet_tinjectdata(struct fid_ep *fid_ep, const void *buf, size_t len,
 
 	tx_entry->hdr.base_hdr.flags |= XNET_REMOTE_CQ_DATA;
 	tx_entry->hdr.tag_data_hdr.tag = tag;
-	tx_entry->hdr.tag_data_hdr.cq_data_hdr.cq_data = data;
+	tx_entry->hdr.tag_data_hdr.cq_data = data;
 
 	xnet_init_tx_inject(tx_entry, sizeof(tx_entry->hdr.tag_data_hdr),
 			    buf, len);

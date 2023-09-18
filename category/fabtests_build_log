@@ -1,0 +1,392 @@
+[root@node63 fabtests]# ./configure --with-libfabric=/home/xb/project/libfabric/libfabric/build --prefix=/home/xb/project/libfabric/libfabric/build/fabtest
+s
+checking for a BSD-compatible install... /bin/install -c
+checking whether build environment is sane... yes
+checking for a thread-safe mkdir -p... /bin/mkdir -p
+checking for gawk... gawk
+checking whether make sets $(MAKE)... yes
+checking whether make supports nested variables... yes
+checking how to create a pax tar archive... gnutar
+checking whether make supports nested variables... (cached) yes
+checking build system type... x86_64-unknown-linux-gnu
+checking host system type... x86_64-unknown-linux-gnu
+checking for style of include used by make... GNU
+checking for gcc... gcc
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking whether we are using the GNU C compiler... yes
+checking whether gcc accepts -g... yes
+checking for gcc option to accept ISO C89... none needed
+checking dependency style of gcc... gcc3
+checking for ar... ar
+checking the archiver (ar) interface... ar
+checking how to print strings... printf
+checking for a sed that does not truncate output... /bin/sed
+checking for grep that handles long lines and -e... /bin/grep
+checking for egrep... /bin/grep -E
+checking for fgrep... /bin/grep -F
+checking for ld used by gcc... /bin/ld
+checking if the linker (/bin/ld) is GNU ld... yes
+checking for BSD- or MS-compatible name lister (nm)... /bin/nm -B
+checking the name lister (/bin/nm -B) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 1572864
+checking whether the shell understands some XSI constructs... yes
+checking whether the shell understands "+="... yes
+checking how to convert x86_64-unknown-linux-gnu file names to x86_64-unknown-linux-gnu format... func_convert_file_noop
+checking how to convert x86_64-unknown-linux-gnu file names to toolchain format... func_convert_file_noop
+checking for /bin/ld option to reload object files... -r
+checking for objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for dlltool... no
+checking how to associate runtime and link libraries... printf %s\n
+checking for archiver @FILE support... @
+checking for strip... strip
+checking for ranlib... ranlib
+checking command to parse /bin/nm -B output from gcc object... ok
+checking for sysroot... no
+checking for mt... no
+checking if : is a manifest tool... no
+checking how to run the C preprocessor... gcc -E
+checking for ANSI C header files... yes
+checking for sys/types.h... yes
+checking for sys/stat.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for memory.h... yes
+checking for strings.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for unistd.h... yes
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if gcc supports -fno-rtti -fno-exceptions... no
+checking for gcc option to produce PIC... -fPIC -DPIC
+checking if gcc PIC flag -fPIC -DPIC works... yes
+checking if gcc static flag -static works... no
+checking if gcc supports -c -o file.o... yes
+checking if gcc supports -c -o file.o... (cached) yes
+checking whether the gcc linker (/bin/ld -m elf_x86_64) supports shared libraries... yes
+checking whether -lc should be explicitly linked in... no
+checking dynamic linker characteristics... GNU/Linux ld.so
+checking how to hardcode library paths into programs... immediate
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... yes
+checking whether to build static libraries... yes
+checking for gcc... (cached) gcc
+checking whether we are using the GNU C compiler... (cached) yes
+checking whether gcc accepts -g... (cached) yes
+checking for gcc option to accept ISO C89... (cached) none needed
+checking dependency style of gcc... (cached) gcc3
+checking whether gcc and cc understand -c and -o together... yes
+checking for library containing clock_gettime... none required
+checking for pthread_create in -lpthread... yes
+checking for fi_getinfo in -lfabric... yes
+checking for ANSI C header files... (cached) yes
+checking rdma/fabric.h usability... yes
+checking rdma/fabric.h presence... yes
+checking for rdma/fabric.h... yes
+checking for dlopen in -ldl... yes
+checking level_zero/ze_api.h usability... no
+checking level_zero/ze_api.h presence... no
+checking for level_zero/ze_api.h... no
+checking infiniband/verbs.h usability... yes
+checking infiniband/verbs.h presence... yes
+checking for infiniband/verbs.h... yes
+checking for ibv_reg_dmabuf_mr in -libverbs... yes
+checking for fi_trywait support... yes
+checking for epoll_create1... yes
+checking for __int128... yes
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating Makefile
+config.status: creating fabtests.spec
+config.status: creating config.h
+config.status: executing depfiles commands
+config.status: executing libtool commands
+You have mail in /var/spool/mail/root
+[root@node63 fabtests]# make
+make  all-am
+make[1]: Entering directory `/home/xb/project/libfabric/libfabric/fabtests'
+  CC       common/shared.lo
+  CC       common/hmem.lo
+  CC       common/hmem_cuda.lo
+  CC       common/hmem_rocr.lo
+  CC       common/hmem_ze.lo
+  CC       common/hmem_neuron.lo
+  CCLD     libfabtests.la
+  CC       functional/av_xfer.o
+  CCLD     functional/fi_av_xfer
+  CC       functional/msg.o
+  CCLD     functional/fi_msg
+  CC       functional/stream_msg.o
+  CCLD     functional/fi_stream_msg
+  CC       functional/msg_sockets.o
+  CCLD     functional/fi_msg_sockets
+  CC       functional/rdm.o
+  CCLD     functional/fi_rdm
+  CC       functional/rdm_rma_event.o
+  CCLD     functional/fi_rdm_rma_event
+  CC       functional/rdm_rma_trigger.o
+  CCLD     functional/fi_rdm_rma_trigger
+  CC       functional/rdm_deferred_wq.o
+  CCLD     functional/fi_rdm_deferred_wq
+  CC       functional/dgram.o
+  CCLD     functional/fi_dgram
+  CC       functional/mcast.o
+  CCLD     functional/fi_mcast
+  CC       functional/dgram_waitset.o
+  CCLD     functional/fi_dgram_waitset
+  CC       functional/rdm_tagged_peek.o
+  CCLD     functional/fi_rdm_tagged_peek
+  CC       functional/cq_data.o
+  CCLD     functional/fi_cq_data
+  CC       functional/poll.o
+  CCLD     functional/fi_poll
+  CC       functional/scalable_ep.o
+  CCLD     functional/fi_scalable_ep
+  CC       functional/shared_ctx.o
+  CCLD     functional/fi_shared_ctx
+  CC       functional/msg_epoll.o
+  CCLD     functional/fi_msg_epoll
+  CC       functional/rdm_shared_av.o
+  CCLD     functional/fi_rdm_shared_av
+  CC       functional/cm_data.o
+  CCLD     functional/fi_cm_data
+  CC       functional/multi_mr.o
+  CCLD     functional/fi_multi_mr
+  CC       functional/rdm_multi_domain.o
+  CCLD     functional/fi_rdm_multi_domain
+  CC       functional/multi_ep.o
+  CCLD     functional/fi_multi_ep
+  CC       functional/recv_cancel.o
+  CCLD     functional/fi_recv_cancel
+  CC       functional/unexpected_msg.o
+  CCLD     functional/fi_unexpected_msg
+  CC       functional/unmap_mem.o
+  CCLD     functional/fi_unmap_mem
+  CC       functional/inject_test.o
+  CCLD     functional/fi_inject_test
+  CC       functional/resmgmt_test.o
+  CCLD     functional/fi_resmgmt_test
+  CC       functional/rdm_atomic.o
+  CCLD     functional/fi_rdm_atomic
+  CC       functional/rdm_stress.o
+functional/rdm_stress.c: In function ‘rpc_hello’:
+functional/rdm_stress.c:310:9: warning: missing braces around initializer [-Wmissing-braces]
+  struct rpc_hello_msg msg = {0};
+         ^
+functional/rdm_stress.c:310:9: warning: (near initialization for ‘msg.hdr’) [-Wmissing-braces]
+  CCLD     functional/fi_rdm_stress
+  CC       functional/multi_recv.o
+  CCLD     functional/fi_multi_recv
+  CC       functional/bw.o
+  CCLD     functional/fi_bw
+  CC       functional/rdm_multi_client.o
+In file included from functional/rdm_multi_client.c:43:0:
+functional/rdm_multi_client.c: In function ‘main’:
+./include/shared.h:72:6: warning: ‘ret’ may be used uninitialized in this function [-Wmaybe-uninitialized]
+  int absret = ret < 0 ? -ret : ret;
+      ^
+functional/rdm_multi_client.c:183:10: note: ‘ret’ was declared here
+  int op, ret, i;
+          ^
+  CCLD     functional/fi_rdm_multi_client
+  CC       functional/loopback.o
+  CCLD     functional/fi_loopback
+  CC       benchmarks/msg_pingpong.o
+  CC       benchmarks/benchmark_shared.o
+benchmarks/benchmark_shared.c: In function ‘bandwidth_rma’:
+benchmarks/benchmark_shared.c:401:10: warning: ‘offset’ may be used uninitialized in this function [-Wmaybe-uninitialized]
+   offset += opts.transfer_size;
+          ^
+  CCLD     benchmarks/fi_msg_pingpong
+  CC       benchmarks/msg_bw.o
+  CCLD     benchmarks/fi_msg_bw
+  CC       benchmarks/rma_bw.o
+  CCLD     benchmarks/fi_rma_bw
+  CC       benchmarks/rdm_cntr_pingpong.o
+  CCLD     benchmarks/fi_rdm_cntr_pingpong
+  CC       benchmarks/dgram_pingpong.o
+  CCLD     benchmarks/fi_dgram_pingpong
+  CC       benchmarks/rdm_pingpong.o
+  CCLD     benchmarks/fi_rdm_pingpong
+  CC       benchmarks/rdm_tagged_pingpong.o
+  CCLD     benchmarks/fi_rdm_tagged_pingpong
+  CC       benchmarks/rdm_tagged_bw.o
+  CCLD     benchmarks/fi_rdm_tagged_bw
+  CC       unit/eq_test.o
+  CC       unit/common.o
+  CCLD     unit/fi_eq_test
+  CC       unit/cq_test.o
+  CCLD     unit/fi_cq_test
+  CC       unit/mr_test.o
+  CCLD     unit/fi_mr_test
+  CC       unit/mr_cache_evict.o
+  CCLD     unit/fi_mr_cache_evict
+  CC       unit/cntr_test.o
+  CCLD     unit/fi_cntr_test
+  CC       unit/av_test.o
+  CCLD     unit/fi_av_test
+  CC       unit/dom_test.o
+  CCLD     unit/fi_dom_test
+  CC       unit/getinfo_test.o
+  CCLD     unit/fi_getinfo_test
+  CC       unit/setopt_test.o
+  CCLD     unit/fi_setopt_test
+  CC       ubertest/ofi_atomic.o
+  CC       ubertest/uber.o
+  CC       ubertest/connect.o
+  CC       ubertest/cq.o
+  CC       ubertest/config.o
+  CC       ubertest/domain.o
+  CC       ubertest/ep.o
+  CC       ubertest/xfer.o
+  CC       ubertest/verify.o
+  CC       ubertest/test_ctrl.o
+  CCLD     ubertest/fi_ubertest
+  CC       multinode/src/multinode_fi_multinode-harness.o
+multinode/src/harness.c: In function ‘main’:
+multinode/src/harness.c:365:5: warning: ‘ret’ may be used uninitialized in this function [-Wmaybe-uninitialized]
+  if (ret < 0) {
+     ^
+  CC       multinode/src/multinode_fi_multinode-pattern.o
+  CC       multinode/src/multinode_fi_multinode-core.o
+  CC       multinode/src/multinode_fi_multinode-timing.o
+  CCLD     multinode/fi_multinode
+  CC       multinode/src/multinode_fi_multinode_coll-harness.o
+multinode/src/harness.c: In function ‘main’:
+multinode/src/harness.c:365:5: warning: ‘ret’ may be used uninitialized in this function [-Wmaybe-uninitialized]
+  if (ret < 0) {
+     ^
+  CC       multinode/src/multinode_fi_multinode_coll-core_coll.o
+  CCLD     multinode/fi_multinode_coll
+  CC       component/component_sock_test-sock_test.o
+  CCLD     component/sock_test
+  CC       regression/regression_sighandler_test-sighandler_test.o
+  CCLD     regression/sighandler_test
+  CC       common/check_hmem.o
+  CCLD     common/check_hmem
+  CC       prov/efa/src/rdm_rnr_read_cq_error.o
+  CC       prov/efa/src/efa_rnr_shared.o
+  CCLD     prov/efa/src/fi_efa_rnr_read_cq_error
+  CC       prov/efa/src/rdm_rnr_queue_resend.o
+  CCLD     prov/efa/src/fi_efa_rnr_queue_resend
+  CC       prov/efa/src/efa_info_test.o
+  CCLD     prov/efa/src/fi_efa_info_test
+make[1]: Leaving directory `/home/xb/project/libfabric/libfabric/fabtests'
+[root@node63 fabtests]# make install
+make[1]: Entering directory `/home/xb/project/libfabric/libfabric/fabtests'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/bin'
+  /bin/sh ./libtool   --mode=install /bin/install -c functional/fi_av_xfer functional/fi_msg functional/fi_stream_msg functional/fi_msg_sockets functional/fi_rdm functional/fi_rdm_rma_event functional/fi_rdm_rma_trigger functional/fi_rdm_deferred_wq functional/fi_dgram functional/fi_mcast functional/fi_dgram_waitset functional/fi_rdm_tagged_peek functional/fi_cq_data functional/fi_poll functional/fi_scalable_ep functional/fi_shared_ctx functional/fi_msg_epoll functional/fi_rdm_shared_av functional/fi_cm_data functional/fi_multi_mr functional/fi_rdm_multi_domain functional/fi_multi_ep functional/fi_recv_cancel functional/fi_unexpected_msg functional/fi_unmap_mem functional/fi_inject_test functional/fi_resmgmt_test functional/fi_rdm_atomic functional/fi_rdm_stress functional/fi_multi_recv functional/fi_bw functional/fi_rdm_multi_client functional/fi_loopback benchmarks/fi_msg_pingpong benchmarks/fi_msg_bw benchmarks/fi_rma_bw benchmarks/fi_rdm_cntr_pingpong benchmarks/fi_dgram_pingpong benchmarks/fi_rdm_pingpong benchmarks/fi_rdm_tagged_pingpong benchmarks/fi_rdm_tagged_bw unit/fi_eq_test unit/fi_cq_test unit/fi_mr_test unit/fi_mr_cache_evict unit/fi_cntr_test unit/fi_av_test unit/fi_dom_test unit/fi_getinfo_test unit/fi_setopt_test ubertest/fi_ubertest multinode/fi_multinode multinode/fi_multinode_coll component/sock_test regression/sighandler_test common/check_hmem prov/efa/src/fi_efa_rnr_read_cq_error prov/efa/src/fi_efa_rnr_queue_resend prov/efa/src/fi_efa_info_test '/home/xb/project/libfabric/libfabric/build/fabtests/bin'
+libtool: install: /bin/install -c functional/fi_av_xfer /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_av_xfer
+libtool: install: /bin/install -c functional/fi_msg /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_msg
+libtool: install: /bin/install -c functional/fi_stream_msg /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_stream_msg
+libtool: install: /bin/install -c functional/fi_msg_sockets /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_msg_sockets
+libtool: install: /bin/install -c functional/fi_rdm /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm
+libtool: install: /bin/install -c functional/fi_rdm_rma_event /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_rma_event
+libtool: install: /bin/install -c functional/fi_rdm_rma_trigger /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_rma_trigger
+libtool: install: /bin/install -c functional/fi_rdm_deferred_wq /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_deferred_wq
+libtool: install: /bin/install -c functional/fi_dgram /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_dgram
+libtool: install: /bin/install -c functional/fi_mcast /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_mcast
+libtool: install: /bin/install -c functional/fi_dgram_waitset /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_dgram_waitset
+libtool: install: /bin/install -c functional/fi_rdm_tagged_peek /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_tagged_peek
+libtool: install: /bin/install -c functional/fi_cq_data /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_cq_data
+libtool: install: /bin/install -c functional/fi_poll /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_poll
+libtool: install: /bin/install -c functional/fi_scalable_ep /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_scalable_ep
+libtool: install: /bin/install -c functional/fi_shared_ctx /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_shared_ctx
+libtool: install: /bin/install -c functional/fi_msg_epoll /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_msg_epoll
+libtool: install: /bin/install -c functional/fi_rdm_shared_av /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_shared_av
+libtool: install: /bin/install -c functional/fi_cm_data /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_cm_data
+libtool: install: /bin/install -c functional/fi_multi_mr /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_multi_mr
+libtool: install: /bin/install -c functional/fi_rdm_multi_domain /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_multi_domain
+libtool: install: /bin/install -c functional/fi_multi_ep /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_multi_ep
+libtool: install: /bin/install -c functional/fi_recv_cancel /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_recv_cancel
+libtool: install: /bin/install -c functional/fi_unexpected_msg /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_unexpected_msg
+libtool: install: /bin/install -c functional/fi_unmap_mem /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_unmap_mem
+libtool: install: /bin/install -c functional/fi_inject_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_inject_test
+libtool: install: /bin/install -c functional/fi_resmgmt_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_resmgmt_test
+libtool: install: /bin/install -c functional/fi_rdm_atomic /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_atomic
+libtool: install: /bin/install -c functional/fi_rdm_stress /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_stress
+libtool: install: /bin/install -c functional/fi_multi_recv /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_multi_recv
+libtool: install: /bin/install -c functional/fi_bw /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_bw
+libtool: install: /bin/install -c functional/fi_rdm_multi_client /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_multi_client
+libtool: install: /bin/install -c functional/fi_loopback /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_loopback
+libtool: install: /bin/install -c benchmarks/fi_msg_pingpong /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_msg_pingpong
+libtool: install: /bin/install -c benchmarks/fi_msg_bw /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_msg_bw
+libtool: install: /bin/install -c benchmarks/fi_rma_bw /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rma_bw
+libtool: install: /bin/install -c benchmarks/fi_rdm_cntr_pingpong /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_cntr_pingpong
+libtool: install: /bin/install -c benchmarks/fi_dgram_pingpong /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_dgram_pingpong
+libtool: install: /bin/install -c benchmarks/fi_rdm_pingpong /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_pingpong
+libtool: install: /bin/install -c benchmarks/fi_rdm_tagged_pingpong /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_tagged_pingpong
+libtool: install: /bin/install -c benchmarks/fi_rdm_tagged_bw /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rdm_tagged_bw
+libtool: install: /bin/install -c unit/fi_eq_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_eq_test
+libtool: install: /bin/install -c unit/fi_cq_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_cq_test
+libtool: install: /bin/install -c unit/fi_mr_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_mr_test
+libtool: install: /bin/install -c unit/fi_mr_cache_evict /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_mr_cache_evict
+libtool: install: /bin/install -c unit/fi_cntr_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_cntr_test
+libtool: install: /bin/install -c unit/fi_av_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_av_test
+libtool: install: /bin/install -c unit/fi_dom_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_dom_test
+libtool: install: /bin/install -c unit/fi_getinfo_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_getinfo_test
+libtool: install: /bin/install -c unit/fi_setopt_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_setopt_test
+libtool: install: /bin/install -c ubertest/fi_ubertest /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_ubertest
+libtool: install: /bin/install -c multinode/fi_multinode /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_multinode
+libtool: install: /bin/install -c multinode/fi_multinode_coll /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_multinode_coll
+libtool: install: /bin/install -c component/sock_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/sock_test
+libtool: install: /bin/install -c regression/sighandler_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/sighandler_test
+libtool: install: /bin/install -c common/check_hmem /home/xb/project/libfabric/libfabric/build/fabtests/bin/check_hmem
+libtool: install: /bin/install -c prov/efa/src/fi_efa_rnr_read_cq_error /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_efa_rnr_read_cq_error
+libtool: install: /bin/install -c prov/efa/src/fi_efa_rnr_queue_resend /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_efa_rnr_queue_resend
+libtool: install: /bin/install -c prov/efa/src/fi_efa_info_test /home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_efa_info_test
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/bin'
+ /bin/install -c scripts/runfabtests.sh scripts/runfabtests.py scripts/runmultinode.sh scripts/rft_yaml_to_junit_xml '/home/xb/project/libfabric/libfabric/build/fabtests/bin'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/man/man1'
+ /bin/install -c -m 644 man/man1/fi_av_xfer.1 man/man1/fi_cm_data.1 man/man1/fi_cq_data.1 man/man1/fi_dgram.1 man/man1/fi_dgram_waitset.1 man/man1/fi_inj_complete.1 man/man1/fi_mcast.1 man/man1/fi_msg.1 man/man1/fi_msg_epoll.1 man/man1/fi_msg_sockets.1 man/man1/fi_multi_ep.1 man/man1/fi_multi_mr.1 man/man1/fi_poll.1 man/man1/fi_rdm.1 man/man1/fi_rdm_atomic.1 man/man1/fi_rdm_deferred_wq.1 man/man1/fi_rdm_multi_domain.1 man/man1/fi_multi_recv.1 man/man1/fi_rdm_rma_event.1 man/man1/fi_rdm_rma_trigger.1 man/man1/fi_rdm_shared_av.1 man/man1/fi_rdm_tagged_peek.1 man/man1/fi_rdm_stress.1 man/man1/fi_recv_cancel.1 man/man1/fi_resmgmt_test.1 man/man1/fi_scalable_ep.1 man/man1/fi_shared_ctx.1 man/man1/fi_unexpected_msg.1 man/man1/fi_unmap_mem.1 man/man1/fi_dgram_pingpong.1 man/man1/fi_msg_bw.1 man/man1/fi_msg_pingpong.1 man/man1/fi_rdm_cntr_pingpong.1 man/man1/fi_rdm_pingpong.1 man/man1/fi_rdm_tagged_bw.1 man/man1/fi_rdm_tagged_pingpong.1 man/man1/fi_rma_bw.1 man/man1/fi_av_test.1 man/man1/fi_cntr_test.1 man/man1/fi_cq_test.1 '/home/xb/project/libfabric/libfabric/build/fabtests/share/man/man1'
+ /bin/install -c -m 644 man/man1/fi_dom_test.1 man/man1/fi_eq_test.1 man/man1/fi_getinfo_test.1 man/man1/fi_mr_test.1 man/man1/fi_bw.1 man/man1/fi_rdm_multi_client.1 man/man1/fi_ubertest.1 man/man1/fi_efa_ep_rnr_retry.1 '/home/xb/project/libfabric/libfabric/build/fabtests/share/man/man1'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/man/man7'
+ /bin/install -c -m 644 man/man7/fabtests.7 '/home/xb/project/libfabric/libfabric/build/fabtests/share/man/man7'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/udp'
+ /bin/install -c -m 644  test_configs/udp/all.test test_configs/udp/lat_bw.test test_configs/udp/quick.test test_configs/udp/functional.test test_configs/udp/udp.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/udp'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/sm2'
+ /bin/install -c -m 644  pytest/sm2/conftest.py pytest/sm2/sm2_common.py pytest/sm2/test_rdm.py pytest/sm2/test_av.py pytest/sm2/test_cntr.py pytest/sm2/test_cq.py pytest/sm2/test_dom.py pytest/sm2/test_eq.py pytest/sm2/test_mr.py pytest/sm2/test_sighandler.py pytest/sm2/test_ubertest.py '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/sm2'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/ofi_rxd'
+ /bin/install -c -m 644  test_configs/ofi_rxd/udp.test test_configs/ofi_rxd/verbs.test test_configs/ofi_rxd/ofi_rxd.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/ofi_rxd'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/sm2'
+ /bin/install -c -m 644  test_configs/sm2/quick.test test_configs/sm2/verify.test '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/sm2'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/shm'
+ /bin/install -c -m 644  pytest/shm/conftest.py pytest/shm/shm_common.py pytest/shm/test_av.py pytest/shm/test_cntr.py pytest/shm/test_cq.py pytest/shm/test_dom.py pytest/shm/test_eq.py pytest/shm/test_getinfo.py pytest/shm/test_mr.py pytest/shm/test_multi_recv.py pytest/shm/test_rdm.py pytest/shm/test_rma_bw.py pytest/shm/test_ubertest.py pytest/shm/test_unexpected_msg.py pytest/shm/test_sighandler.py '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/shm'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/default'
+ /bin/install -c -m 644  pytest/default/test_av.py pytest/default/test_cm.py pytest/default/test_cntr.py pytest/default/test_cq.py pytest/default/test_dgram.py pytest/default/test_dom.py pytest/default/test_eq.py pytest/default/test_getinfo.py pytest/default/test_mr.py pytest/default/test_inject_test.py pytest/default/test_msg.py pytest/default/test_multinode.py pytest/default/test_multi_recv.py pytest/default/test_poll.py pytest/default/test_rdm.py pytest/default/test_recv_cancel.py pytest/default/test_rma_bw.py pytest/default/test_scalable_ep.py pytest/default/test_shared_ctx.py pytest/default/test_ubertest.py pytest/default/test_unexpected_msg.py pytest/default/test_sighandler.py '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/default'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/sockets'
+ /bin/install -c -m 644  test_configs/sockets/all.test test_configs/sockets/quick.test test_configs/sockets/complete.test test_configs/sockets/verify.test test_configs/sockets/sockets.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/sockets'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/shm'
+ /bin/install -c -m 644  test_configs/shm/all.test test_configs/shm/shm.exclude test_configs/shm/quick.test test_configs/shm/verify.test '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/shm'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/verbs'
+ /bin/install -c -m 644  test_configs/verbs/all.test test_configs/verbs/quick.test test_configs/verbs/verbs.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/verbs'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest'
+ /bin/install -c -m 644  pytest/pytest.ini pytest/options.yaml pytest/conftest.py pytest/common.py '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/psm2'
+ /bin/install -c -m 644  test_configs/psm2/all.test test_configs/psm2/verify.test test_configs/psm2/psm2.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/psm2'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/usnic'
+ /bin/install -c -m 644  test_configs/usnic/all.test test_configs/usnic/quick.test '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/usnic'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/psm3'
+ /bin/install -c -m 644  test_configs/psm3/all.test test_configs/psm3/verify.test test_configs/psm3/psm3.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/psm3'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/ucx'
+ /bin/install -c -m 644  test_configs/ucx/all.test test_configs/ucx/quick.test test_configs/ucx/ucx.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/ucx'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/tcp'
+ /bin/install -c -m 644  test_configs/tcp/all.test test_configs/tcp/tcp.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/tcp'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs'
+ /bin/install -c -m 644  test_configs/osx.exclude test_configs/eq_cq.test test_configs/lat_bw.test '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/efa'
+ /bin/install -c -m 644  pytest/efa/conftest.py pytest/efa/efa_common.py pytest/efa/test_flood_peer.py pytest/efa/test_from_default.py pytest/efa/test_av.py pytest/efa/test_cq.py pytest/efa/test_setopt.py pytest/efa/test_dgram.py pytest/efa/test_rdm.py pytest/efa/test_rma_bw.py pytest/efa/test_unexpected_msg.py pytest/efa/test_multi_recv.py pytest/efa/test_rnr.py pytest/efa/test_efa_info.py pytest/efa/test_efa_protocol_selection.py pytest/efa/test_efa_device_selection.py pytest/efa/test_runt.py pytest/efa/test_fork_support.py pytest/efa/test_mr.py pytest/efa/test_efa_shm_addr.py pytest/efa/test_env.py '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/pytest/efa'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/ofi_rxm'
+ /bin/install -c -m 644  test_configs/ofi_rxm/tcp.test test_configs/ofi_rxm/verbs.test test_configs/ofi_rxm/ofi_rxm.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/ofi_rxm'
+ /bin/mkdir -p '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/efa'
+ /bin/install -c -m 644  test_configs/efa/efa-neuron.exclude test_configs/efa/efa.exclude '/home/xb/project/libfabric/libfabric/build/fabtests/share/fabtests/test_configs/efa'
+make[1]: Leaving directory `/home/xb/project/libfabric/libfabric/fabtests'
+[root@node63 fabtests]# 
