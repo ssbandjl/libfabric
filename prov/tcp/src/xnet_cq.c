@@ -104,8 +104,8 @@ static void xnet_get_cq_info(struct xnet_xfer_entry *entry, uint64_t *flags,
 	if (entry->hdr.base_hdr.flags & XNET_REMOTE_CQ_DATA) {
 		*data = entry->hdr.cq_data_hdr.cq_data;
 
-		if ((entry->hdr.base_hdr.op == ofi_op_tagged) ||
-		    (entry->hdr.base_hdr.flags & XNET_TAGGED)) {
+		if (entry->hdr.base_hdr.op == xnet_op_tag ||
+		    entry->hdr.base_hdr.op == xnet_op_tag_rts) {
 			*flags |= FI_REMOTE_CQ_DATA | FI_TAGGED;
 			*tag = entry->hdr.tag_data_hdr.tag;
 		} else {
@@ -113,8 +113,8 @@ static void xnet_get_cq_info(struct xnet_xfer_entry *entry, uint64_t *flags,
 			*tag = 0;
 		}
 
-	} else if ((entry->hdr.base_hdr.op == ofi_op_tagged) ||
-		   (entry->hdr.base_hdr.flags & XNET_TAGGED)) {
+	} else if (entry->hdr.base_hdr.op == xnet_op_tag ||
+		   entry->hdr.base_hdr.op == xnet_op_tag_rts) {
 		*flags |= FI_TAGGED;
 		*data = 0;
 		*tag = entry->hdr.tag_hdr.tag;
@@ -150,13 +150,11 @@ void xnet_report_success(struct xnet_xfer_entry *xfer_entry)
 
 	flags = xfer_entry->cq_flags & ~FI_COMPLETION;
 	if (flags & FI_RECV) {
-		len = xfer_entry->hdr.base_hdr.size -
-		      xfer_entry->hdr.base_hdr.hdr_size;
+		len = xnet_msg_len(&xfer_entry->hdr);
 		xnet_get_cq_info(xfer_entry, &flags, &data, &tag);
 	} else if (flags & FI_REMOTE_CQ_DATA) {
 		assert(flags & FI_REMOTE_WRITE);
-		len = xfer_entry->hdr.base_hdr.size -
-		      xfer_entry->hdr.base_hdr.hdr_size;
+		len = xnet_msg_len(&xfer_entry->hdr);
 		tag = 0;
 		data = xfer_entry->hdr.cq_data_hdr.cq_data;
 	} else {
