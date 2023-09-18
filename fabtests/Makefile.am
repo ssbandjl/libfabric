@@ -279,6 +279,10 @@ functional_fi_rdm_deferred_wq_SOURCES = \
 	functional/rdm_deferred_wq.c
 functional_fi_rdm_deferred_wq_LDADD = libfabtests.la
 
+functional_fi_example_msg_SOURCES = \
+	functional/example_msg.c
+functional_fi_example_msg_LDADD = libfabtests.la
+
 functional_fi_dgram_SOURCES = \
 	functional/dgram.c
 functional_fi_dgram_LDADD = libfabtests.la
