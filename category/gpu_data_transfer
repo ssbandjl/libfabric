@@ -1,0 +1,19 @@
+rdmabw-xe.c
+rdmabw-xe -m host -S 1 -t write 182.200.29.63
+
+fi-rdmabw-xe.c
+
+需要安装依赖包:
+if HAVE_ZE_DEVEL
+if HAVE_VERBS_DEVEL
+bin_PROGRAMS += \
+	component/dmabuf-rdma/xe_rdmabw \
+	component/dmabuf-rdma/xe_mr_reg
+endif HAVE_VERBS_DEVEL
+bin_PROGRAMS += \
+	component/dmabuf-rdma/fi_xe_rdmabw \
+	component/dmabuf-rdma/fi_xe_mr_reg \
+	component/dmabuf-rdma/xe_memcopy
+endif HAVE_ZE_DEVEL
+
+

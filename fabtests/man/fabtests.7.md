@@ -610,3 +610,290 @@ This will run all fabtests using
 	- print test output for all the tests
 
 For detailed usage options: runfabtests.sh -h
+
+
+
+
+Libfabric 程序员手册
+fabtests(7) Fabtests 程序员手册
+姓名
+最佳测试
+
+概要
+Fabtests 是面向结构提供商的一组示例，演示了 libfabric-高性能结构软件库的各种功能。
+
+概述
+Libfabric 定义了结构提供商可以支持的接口集。Fabtests 示例的目的是演示一些主要功能。目标是让用户熟悉 libfabric 提供的不同功能以及如何使用它们。尽管大多数测试都会报告性能数据，但它们旨在测试功能而不是性能。基准测试和 ubertest 是例外。
+
+测试分为以下几类。除了单元测试之外，所有测试都是客户端-服务器测试。并非所有提供商都会支持每项测试。
+
+测试名称试图表明每个测试正在验证的功能类型。尽管某些测试适用于任何端点类型，但许多测试仅限于验证单个端点类型。这些测试通常包括端点类型作为测试名称的一部分，例如 dgram、msg 或 rdm。
+
+功能性
+这些测试是非常基本的功能测试的组合，显示了 libfabric 的主要功能。
+
+fi_av_xfer
+当在本地地址向量中插入和删除地址时，测试未连接端点的通信。
+fi_cm_数据
+验证交换 CM 数据作为连接端点的一部分。
+fi_cq_数据
+使用 CQ 数据传输消息。
+fi_dgram
+基本数据报端点示例。
+fi_dgram_waitset
+使用等待集传输数据报以获取完成通知。
+fi_inj_complete
+使用 FI_INJECT_COMPLETE 操作标志发送消息。
+广播电视
+一个简单的多播测试。
+fi_msg
+基本消息端点示例。
+fi_msg_epoll
+使用配置为使用文件描述符作为等待对象的完成队列传输消息。文件描述符由程序检索并直接与 Linux epoll API 一起使用。
+fi_msg_sockets
+验证分配给无源端点的地址是否可以转换为主动端点。这是需要 RDMA 实现上的套接字 API 语义（例如 rsockets）的应用程序所必需的。
+fi_multi_ep
+在多个端点上并行执行数据传输。
+fi_multi_mr
+使用入站写入的完成计数器作为通知机制，向多个内存区域发出 RMA 写入操作。
+网络投票
+使用轮询集通过 RDM 端点交换数据以驱动完成通知。
+fi_rdm
+基本 RDM 端点示例。
+fi_rdm_atomic
+测试和验证 RDM 端点上的原子操作。
+fi_rdm_deferred_wq
+测试触发操作和延迟工作队列支持。
+fi_rdm_多域
+在多个端点上执行数据传输，每个端点属于不同的开放域。
+fi_rdm_multi_recv
+通过 RDM 端点传输多个消息，这些消息接收到单个缓冲区中，并使用 FI_MULTI_RECV 标志发布。
+fi_rdm_rma_simple
+通过 RDM 端点的简单 RMA 写入示例。
+fi_rdm_rma_trigger
+对 RMA 写入操作进行排队的基本示例，该操作在触发完成时启动。与 RDM 端点配合使用。
+fi_rdm_shared_av
+生成子进程来验证与 RDM 端点一起使用共享地址向量的基本功能。
+fi_rdm_tagged_peek
+使用带有标记消息的 FI_PEEK 操作标志的基本测试。与 RDM 端点配合使用。
+fi_recv_取消
+测试取消已标记消息的已发布接收。
+fi_resmgmt_测试
+测试资源管理启用功能。这将验证提供程序是否可以防止应用程序超出本地和远程命令队列以及完成队列。这对应于将域属性resource_mgmt设置为FI_RM_ENABLED。
+fi_scalable_ep
+在可扩展端点、与多个传输和接收上下文关联的端点上执行数据传输。
+fi_shared_ctx
+在多个端点之间执行数据传输，其中端点共享传输和/或接收上下文。
+fi_unexpected_msg
+测试意外标记消息的发送和接收处理。
+fi_unmap_mem
+测试数据传输，其中传输缓冲区在每次传输之间进行映射和取消映射，但传输缓冲区的虚拟地址尝试保持相同。此测试用于验证内存注册缓存的正确行为。
+fi_bw
+执行单侧带宽测试，并提供数据验证选项。可以启用接收方的睡眠时间，以便发送方领先于接收方。
+基准测试
+客户端和服务器以 ping-pong 方式交换消息（对于 pingpong 命名测试），或者以单向传输消息（对于 bw 命名测试）。这些测试可以传输各种大小的消息，控制测试使用哪些功能，并报告性能数据。测试是根据 OSU MPI 提供的基准构建的。他们不保证提供给定提供商或系统可能实现的最佳延迟或带宽性能数字。
+
+fi_dgram_pingpong
+数据报端点的延迟测试
+fi_msg_bw
+连接 (MSG) 端点的消息传输带宽测试。
+fi_msg_pingpong
+连接 (MSG) 端点的消息传输延迟测试。
+fi_rdm_cntr_pingpong
+使用计数器作为完成机制的可靠数据报 (RDM) 端点的消息传输延迟测试。
+fi_rdm_乒乓球
+可靠数据报 (RDM) 端点的消息传输延迟测试。
+fi_rdm_tagged_bw
+可靠数据报 (RDM) 端点的标记消息带宽测试。
+fi_rdm_tagged_pingpong
+可靠数据报 (RDM) 端点的标记消息延迟测试。
+fi_rma_bw
+针对可靠（MSG 和 RDM）端点的 RMA 读写带宽测试。
+单元
+这些是简单的单方面单元测试，用于验证 API 的基本行为。由于这些是不执行数据传输的单一系统测试，因此其测试范围受到限制。
+
+fi_av_测试
+验证地址向量接口。
+fi_cntr_测试
+测试对抗创造和破坏。
+fi_cq_测试
+测试完成队列的创建和销毁。
+fi_dom_测试
+测试域的创建和销毁。
+fi_eq_测试
+测试事件队列的创建、销毁和功能。
+fi_getinfo_test
+使用不同的提示测试提供程序对 fi_getinfo 调用的响应。
+fi_mr_测试
+测试内存注册。
+fi_资源_释放
+分配并关闭结构资源以检查是否进行了正确的清理。
+多节点
+此测试对多种格式和模式运行一系列测试，以帮助大规模验证。这些模式是全对全、一对全、全对一和环。这些测试还跨多种功能运行，例如消息、rma、原子和标记消息。目前，还没有独立运行这些功能和模式的选项，但测试时间足够短，可以一次全部运行。
+
+优步测试
+这是一项全面的延迟、带宽和功能测试，可以处理各种测试配置。该测试能够通过迭代大量测试变量来运行大量测试。因此，完整的 ubertest 运行可能需要大量时间。由于 ubertest 迭代输入变量，因此它依赖于测试配置文件进行控制，而不是其他 fabtest 使用的大量命令行选项。必须为每个提供者构建一个配置文件。示例测试配置位于 test_configs。
+
+fi_uber测试
+此测试采用配置文件作为输入。该文件包含要迭代的变量及其值的列表。该测试将针对给定的提供商运行一组延迟、带宽和功能测试。它将对所有变量的每一种可能的组合执行一次执行。例如，如果有 8 个测试变量，其中 6 个有 2 个可能值，2 个有 3 个可能值，则 ubertest 将执行每个测试的总共 576 次迭代。
+配置文件选项
+配置文件中可以使用以下键和相应的键值。
+
+省名
+确定要测试的提供商。例如 udp、tcp、动词、ofi_rxm；动词；ofi_rxd；udp。
+测试类型
+FT_TEST_LATENCY、FT_TEST_BANDWIDTH、FT_TEST_UNIT
+测试类
+FT_CAP_MSG、FT_CAP_TAGGED、FT_CAP_RMA、FT_CAP_ATOMIC
+类函数
+对于 FT_CAP_MSG 和 FT_CAP_TAGGED：FT_FUNC_SEND、FT_FUNC_SENDV、FT_FUNC_SENDMSG、FT_FUNC_INJECT、FT_FUNC_INJECTDATA、FT_FUNC_SENDDATA
+对于 FT_CAP_RMA：FT_FUNC_WRITE、FT_FUNC_WRITEV、FT_FUNC_WRITEMSG、FT_FUNC_WRITEDATA、FT_FUNC_INJECT_WRITE、FT_FUNC_INJECT_WRITEDATA FT_FUNC_READ、FT_FUNC_READV、FT_FUNC_READMSG
+
+对于 FT_CAP_ATOMIC：FT_FUNC_ATOMIC、FT_FUNC_ATOMICV、FT_FUNC_ATOMICMSG、FT_FUNC_INJECT_ATOMIC、FT_FUNC_FETCH_ATOMIC、FT_FUNC_FETCH_ATOMICV、FT_FUNC_FETCH_ATOMICMSG、FT_FUNC_COMPARE_ATOMIC、FT_FUNC_COMPARE _ATOMICV，FT_FUNC_COMPARE_ATOMICMSG
+
+Constant_caps - 值或运算在一起
+FI_RMA、FI_MSG、FI_SEND、FI_RECV、FI_READ、FI_WRITE、FI_REMOTE_READ、FI_REMOTE_WRITE、FI_TAGGED、FI_DIRECTED_RECV
+mode - 值或运算在一起
+FI_上下文、FI_RX_CQ_数据
+EP_类型
+FI_EP_MSG、FI_EP_DGRAM、FI_EP_RDM
+补偿类型
+FT_COMP_QUEUE、FT_COMP_CNTR、FT_COMP_ALL
+AV类型
+FI_AV_MAP、FI_AV_TABLE
+eq_wait_obj
+FI_WAIT_NONE、FI_WAIT_UNSPEC、FI_WAIT_FD、FI_WAIT_MUTEX_COND
+cq_wait_obj
+FI_WAIT_NONE、FI_WAIT_UNSPEC、FI_WAIT_FD、FI_WAIT_MUTEX_COND
+cntr_等待_obj
+FI_WAIT_NONE、FI_WAIT_UNSPEC、FI_WAIT_FD、FI_WAIT_MUTEX_COND
+线程
+FI_THREAD_UNSPEC、FI_THREAD_SAFE、FI_THREAD_FID、FI_THREAD_DOMAIN、FI_THREAD_COMPLETION、FI_THREAD_ENDPOINT
+进步
+FI_PROGRESS_MANUAL、FI_PROGRESS_AUTO、FI_PROGRESS_UNSPEC
+先生模式
+（值“或”在一起）FI_MR_LOCAL、FI_MR_VIRT_ADDR、FI_MR_ALLOCATED、FI_MR_PROV_KEY
+操作
+对于 FT_CAP_ATOMIC：FI_MIN、FI_MAX、FI_SUM、FI_PROD、FI_LOR、FI_LAND、FI_BOR、FI_BAND、FI_LXOR、FI_BXOR、FI_ATOMIC_READ、FI_ATOMIC_WRITE、FI_CSWAP、FI_CSWAP_NE、FI_CSWAP_LE、FI_CSWAP_LT、 FI_CSWAP_GE、FI_CSWAP_GT、FI_MSWAP
+数据类型
+对于 FT_CAP_ATOMIC：FI_INT8、FI_UINT8、FI_INT16、FI_UINT16、FI_INT32、FI_UINT32、FI_INT64、FI_UINT64、FI_FLOAT、FI_DOUBLE、FI_FLOAT_COMPLEX、FI_DOUBLE_COMPLEX、FI_LONG_DOUBLE、FI_LONG_DOU BLE_COMPLE
+msg_flags - 值或运算在一起
+对于 FT_FUNC_XXXMSG：FI_REMOTE_CQ_DATA、FI_COMPLETION
+rx_cq_bind_flags - 值或运算在一起
+FI_SELECTIVE_COMPLETION
+tx_cq_bind_flags - 值或运算在一起
+FI_SELECTIVE_COMPLETION
+rx_op_flags - 值或运算在一起
+FI_COMPLETION
+tx_op_flags - 值或运算在一起
+FI_COMPLETION
+test_flags - 值或运算在一起
+FT_FLAG_QUICKTEST
+如何运行测试
+(1) Fabtests 要求系统上安装 libfabric，并且至少有一个可用的提供程序。
+
+(2) 在系统上安装fabtests。默认情况下，除非另有指定，所有测试可执行文件都安装在 /usr/bin 目录中。
+
+(3) 所有客户端-服务器测试都有以下使用模型：
+
+fi_<testname> [OPTIONS]		start server
+fi_<testname> <host>		connect to server
+命令行选项
+测试在适当的情况下共享命令行选项。以下命令行选项可用于一项或多项测试。要查看哪些选项适用于给定测试，您可以使用“-h”帮助选项来查看可用于该测试的列表。
+
+-H
+显示测试的帮助输出。
+*-F*
+将测试限制为指定的结构名称。
+*-d*
+将测试限制到指定的域名。
+*-p*
+将测试限制为指定的提供者名称。
+*-e*
+使用指定的端点类型进行测试。有效选项包括 msg、dgram 和 rdm。默认端点类型是 rdm。
+-a <地址向量名称>
+共享地址向量的名称。此选项仅适用于支持共享地址向量的测试。
+*-B*
+指定本地端点的端口号，覆盖默认值。
+*-P*
+指定对等端点的端口号，覆盖默认值。
+-s <地址>
+指定本地端点的地址。
+-b[=oob_端口]
+启用带外（通过套接字）地址交换和测试同步。带外连接的端口可以指定为该选项的一部分以覆盖默认值。
+-E[=oob_端口]
+仅启用带外（通过套接字）地址交换。带外连接的端口可以指定为该选项的一部分以覆盖默认值。不能与“-b”选项一起使用。
+*-我*
+数据传输迭代次数。
+*-w*
+预热数据传输迭代次数。
+*-S*
+数据传输大小或全范围大小的“全部”。默认情况下，将测试选定数量的尺寸。
+-l
+如果指定，发送和接收缓冲区的起始地址将沿页边界对齐。
+-m
+使用机器可读的输出。这对于使用脚本对测试输出进行后处理非常有用。
+*-t*
+指定要使用的完成机制的类型。有效值为队列和计数器。默认是使用完成队列。
+*-C*
+指示用于检查已完成操作的处理类型。有效值为 spin、sread 和 fd。默认设置是忙等待（旋转），直到所需的操作完成。sread 选项指示应用程序将调用 libfabric 中的阻塞读取调用，例如 fi_cq_sread。Fd 指示应用程序将检索本机操作系统等待对象（文件描述符），并使用 poll() 或 select() 进行阻塞，直到收到 fd 信号为止，然后再检查完成情况。
+*-o*
+对于基于 RMA 的测试，指定要执行的 RMA 操作的类型。有效值为读、写和写数据。写操作是默认操作。
+*-M*
+对于多播测试，指定要加入的多播组的地址。
+-v
+在数据传输中添加数据验证检查。
+使用示例
+一个简单的例子
+run server: <test_name> -p <provider_name> -s <source_addr>
+	e.g.	fi_msg_rma -p sockets -s 192.168.0.123
+run client: <test_name> <server_addr> -p <provider_name>
+	e.g.	fi_msg_rma 192.168.0.123 -p sockets
+具有各种选项的示例
+run server: fi_rdm_atomic -p psm -s 192.168.0.123 -I 1000 -S 1024
+run client: fi_rdm_atomic 192.168.0.123 -p psm -I 1000 -S 1024
+这将为所有原子操作运行“fi_rdm_atomic”
+
+- PSM provider
+- 1000 iterations
+- 1024 bytes message size
+- server node as 123.168.0.123
+运行多节点测试
+Server and clients are invoked with the same command: 
+	fi_multinode -n <number of processes> -s <server_addr> -C <mode>
+
+A process on the server must be started before any of the clients can be started 
+succesfully. -C lists the mode that the tests will run in. Currently the options are   for rma and msg. If not provided, the test will default to msg. 
+运行 fi_ubertest
+run server: fi_ubertest
+run client: fi_ubertest -u /usr/share/fabtests/test_configs/sockets/quick.test 192.168.0.123
+这将运行“fi_ubertest”
+
+- sockets provider
+- configurations defined in /usr/share/fabtests/test_configs/sockets/quick.test
+- server node as 192.168.0.123
+/test_configs 中为套接字、动词、udp 和 usnic 提供程序提供了配置文件，并随 fabtests 安装一起分发。
+
+有关更多使用选项：fi_ubertest -h
+
+运行整个 fabtests 套件
+提供了一个 runscript scripts/runfabtests.sh，用于运行 fabtests 中的所有测试并报告通过/失败/未运行的数量。
+
+Usage: runfabtests.sh [OPTIONS] [provider] [host] [client]
+默认情况下，如果未提供任何选项，它将使用以下命令运行所有测试
+
+- sockets provider
+- 127.0.0.1 as both server and client address
+- for small number of optiond and iterations
+可以使用各种选项来选择提供程序、要运行的子集测试、详细级别等。
+
+runfabtests.sh -vvv -t all psm 192.168.0.123 192.168.0.124
+这将使用以下命令运行所有 fabtests
+
+- psm provider
+- for different options and larger iterations
+- server node as 192.168.0.123 and client node as 192.168.0.124
+- print test output for all the tests
+有关详细使用选项：runfabtests.sh -h
+
+© 2023 OpenFabrics 接口工作组在Jekyll Bootstrap 和Twitter Bootstrap的帮助下

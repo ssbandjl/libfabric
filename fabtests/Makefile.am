@@ -22,6 +22,7 @@ bin_PROGRAMS = \
 	functional/fi_rdm_rma_trigger \
 	functional/fi_rdm_deferred_wq \
 	functional/fi_dgram \
+	functional/fi_example_msg \
 	functional/fi_mcast \
 	functional/fi_dgram_waitset \
 	functional/fi_rdm_tagged_peek \
@@ -279,13 +280,14 @@ functional_fi_rdm_deferred_wq_SOURCES = \
 	functional/rdm_deferred_wq.c
 functional_fi_rdm_deferred_wq_LDADD = libfabtests.la
 
-functional_fi_example_msg_SOURCES = \
-	functional/example_msg.c
-functional_fi_example_msg_LDADD = libfabtests.la
 
 functional_fi_dgram_SOURCES = \
 	functional/dgram.c
 functional_fi_dgram_LDADD = libfabtests.la
+
+functional_fi_example_msg_SOURCES = \
+	functional/example_msg.c
+functional_fi_example_msg_LDADD = libfabtests.la
 
 functional_fi_mcast_SOURCES = \
 	functional/mcast.c
