@@ -429,3 +429,9 @@ enum ft_comp_method {
 	FT_COMP_YIELD,
 };
 
+
+
+header:
+远程内存访问: include/rdma/fi_rma.h
+
+
