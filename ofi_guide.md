@@ -6,8 +6,9 @@ tagline: Libfabric (v1.4) Programmer's Guide
 {% include JB/setup %}
 
 参考: 
-
-https://ofiwg.github.io/libfabric/v1.15.2/man/fi_av.3.html
+开发指南(设计思想): https://github.com/ofiwg/ofi-guide/blob/master/OFIGuide.md
+地址向量: https://ofiwg.github.io/libfabric/v1.15.2/man/fi_av.3.html
+编程指南: https://ofiwg.github.io/libfabric/main/man/fi_guide.7.html
 
 
 
@@ -23,7 +24,7 @@ The goal of OFI, and libfabric specifically, is to define interfaces that enable
 
 This guide describes the libfabric architecture and interfaces.  It provides insight into the motivation for its design, and aims to instruct developers on how the features of libfabric may best be employed.
 
-OpenFabrics 接口或 OFI 是一个专注于将结构通信服务导出到应用程序的框架。 OFI 专为满足在紧密耦合的网络环境中运行的高性能计算 (HPC) 应用程序（例如 MPI、SHMEM、PGAS、DBMS 和企业应用程序）的性能和可扩展性要求而设计。 OFI 的关键组件是：应用程序接口、提供程序库、内核服务、守护程序和测试应用程序(如ping_pong)。
+OpenFabrics 接口或 OFI 是一个专注于将结构通信服务导出到应用程序的框架。 OFI 专为满足在紧密耦合的网络环境中运行的高性能计算 (HPC) 应用程序（例如 MPI、SHMEM、PGAS、DBMS 和企业应用程序）的性能和可扩展性要求而设计。 OFI 的关键组件是：应用程序接口、提供程序库、内核服务、守护程序和测试应用程序(如ping_pong, fabtests目录下的测试集)。
 
 Libfabric 是 OFI 的核心组件。它是定义和导出 OFI 的用户空间 API 的库，通常是应用程序直接处理的唯一软件。 Libfabric 与底层网络协议以及网络设备的实现无关。
 
@@ -31,13 +32,13 @@ OFI 的目标，特别是 libfabric，是定义接口，在应用程序和底层
 
 本指南描述了 libfabric 架构和接口。它提供了对其设计动机的洞察，旨在指导开发人员如何最好地利用 libfabric 的特性。
 
-# Review of Sockets Communication
+# Review of Sockets Communication 套接字通信回顾
 
 The sockets API is a widely used networking API.  This guide assumes that a reader has a working knowledge of programming to sockets.  It makes reference to socket based communications throughout in an effort to help explain libfabric concepts and how they relate or differ from the socket API. To be clear, there is no intent to criticize the socket API.  The objective is to use sockets as a starting reference point in order to explain certain network features or limitations.  The following sections provide a high-level overview of socket semantics for reference.
 
 套接字 API 是一种广泛使用的网络 API。 本指南假定读者具有套接字编程的工作知识。 它在整个过程中都引用了基于套接字的通信，以帮助解释 libfabric 概念以及它们与套接字 API 的关系或不同之处。 需要明确的是，没有批评套接字 API 的意图。 目的是使用套接字作为起始参考点，以解释某些网络功能或限制。 以下部分提供了套接字语义的高级概述以供参考。
 
-## Connected (TCP) Communication
+## Connected (TCP) Communication 面向连接的TCP通信
 
 The most widely used type of socket is SOCK_STREAM.  This sort of socket usually runs over TCP/IP, and as a result is often referred to as a 'TCP' socket.  TCP sockets are connection-oriented, requiring an explicit connection setup before data transfers can occur.  **A TCP socket can only transfer data to a single peer socket**.
 
@@ -288,7 +289,7 @@ Note that even though we want the application to own the network buffers, we wou
 
 请注意，即使我们希望应用程序拥有网络缓冲区，我们仍然希望避免应用程序实现复杂网络协议的情况。 权衡是应用程序向网络堆栈提供数据缓冲区，但网络堆栈继续处理流量控制、可靠性以及分段和重组等事情。
 
-### Resource Management
+### Resource Management 资源管理
 
 We define resource management to mean properly allocating network resources in order to avoid overrunning data buffers or queues.  Flow control is a common aspect of resource management.  Without proper flow control, a sender can overrun a slow or busy receiver.  This can result in dropped packets, re-transmissions, and increased network congestion.  Significant research and development has gone into implementing flow control algorithms.  Because of its complexity, it is not something that an application developer should need to deal with.  That said, there are some applications where flow control simply falls out of the network protocol.  For example, a request-reply protocol naturally has flow control built in.
 
@@ -316,7 +317,7 @@ An alternative mechanism for supporting asynchronous operations is to write even
 
 支持异步操作的另一种机制是在操作完成时将事件写入某种完成队列。这提供了一种在数据传输完成时向应用程序指示的方法，并让应用程序控制何时以及如何处理已完成的请求。例如，它可以批量处理请求以提高代码局部性和性能。
 
-### Interrupts and Signals 中断和轮训
+### Interrupts and Signals 中断和信号
 
 Interrupts are a natural extension to supporting asynchronous operations.  However, when dealing with an asynchronous API, they can negatively impact performance.  Interrupts, even when directed to a kernel agent, can interfere with application processing.
 
@@ -336,7 +337,7 @@ As outlined above, there are performance advantages to having an API that report
 
 如上所述，使用事件队列报告完成或提供其他类型通知的 API 具有性能优势。 一种非常简单的事件队列仅跟踪已完成的操作。 当数据被接收或发送完成时，一个条目被写入事件队列。
 
-## Direct Hardware Access 直接内存访问
+## Direct Hardware Access 直接硬件访问
 
 When discussing the network layer, most software implementations refer to kernel modules responsible for implementing the necessary transport and network protocols.  However, if we want network latency to approach sub-microsecond speeds, then we need to remove as much software between the application and its access to the hardware as possible.  One way to do this is for the application to have direct access to the network interface controller's command queues.  Similarly, the NIC requires direct access to the application's data buffers and control structures, such as the above mentioned completion queues.
 
@@ -346,17 +347,17 @@ Note that when we speak about an application having direct access to network har
 
 请注意，当我们谈到应用程序可以直接访问网络硬件时，我们指的是应用程序进程。自然，应用程序开发人员极不可能为特定的硬件 NIC 编写代码。这项工作将留给某种专门针对 NIC 的网络库。实现网络传输的实际网络层可以是网络库的一部分，也可以卸载到 NIC 的硬件或固件上。
 
-### Kernel Bypass
+### Kernel Bypass 绕过内核
 
 Kernel bypass is a feature that allows the application to avoid calling into the kernel for data transfer operations.  This is possible when it has direct access to the NIC hardware.  Complete kernel bypass is impractical because of security concerns and resource management constraints.  However, it is possible to avoid kernel calls for what are called 'fast-path' operations, such as send or receive.
 
 For security and stability reasons, operating system kernels cannot rely on data that comes from user space applications.  As a result, even a simple kernel call often requires acquiring and releasing locks, coupled with data verification checks.  If we can limit the effects of a poorly written or malicious application to its own process space, we can avoid the overhead that comes with kernel validation without impacting system stability.
 
-内核绕过是一项允许应用程序避免调用内核进行数据传输操作的功能。 当它可以直接访问 NIC 硬件时，这是可能的。 由于安全问题和资源管理限制，完全绕过内核是不切实际的。 但是，可以避免内核调用所谓的“快速路径”操作，例如发送或接收。
+绕过内核是一项允许应用程序避免调用内核进行数据传输操作的功能。 当它可以直接访问 NIC 硬件时，这是可能的。 由于安全问题和资源管理限制，完全绕过内核是不切实际的。 但是，可以避免内核调用所谓的“快速路径”操作，例如发送或接收。
 
 出于安全和稳定性的原因，操作系统内核不能依赖来自用户空间应用程序的数据。 因此，即使是简单的内核调用也经常需要获取和释放锁，再加上数据验证检查。 如果我们可以将编写不佳或恶意应用程序的影响限制在它自己的进程空间中，我们就可以避免内核验证带来的开销，而不会影响系统稳定性。
 
-### Direct Data Placement 直接内存放置
+### Direct Data Placement 直接数据放置
 
 Direct data placement means avoiding data copies when sending and receiving data, plus placing received data into the correct memory buffer where needed.  On a broader scale, it is part of having direct hardware access, with the application and NIC communicating directly with shared memory buffers and queues.
 
@@ -370,7 +371,7 @@ The main advantages of supporting direct data placement is avoiding memory copie
 
 支持直接数据放置的主要优点是避免内存复制和最小化处理开销。
 
-# Designing Interfaces for Performance
+# Designing Interfaces for Performance 为性能设计API
 
 We want to design a network interface that can meet the requirements outlined above.  Moreover, we also want to take into account the performance of the interface itself.  It is often not obvious how an interface can adversely affect performance, versus performance being a result of the underlying implementation.  The following sections describe how interface choices can impact performance.  Of course, when we begin defining the actual APIs that an application will use, we will need to trade off raw performance for ease of use where it makes sense.
 
@@ -419,7 +420,7 @@ Data operations, on the other hand, may be called hundreds to millions of times 
 
 另一方面，数据操作在应用程序的生命周期中可能会被调用数百到数百万次。它们直接或间接地处理通过网络传输或接收数据。数据操作可以分为两组。快速路径调用与网络堆栈交互以立即发送或接收数据。为了实现高带宽和低延迟，这些操作需要尽可能快。仍然处理数据传输的非快速路径操作是那些调用，虽然仍然经常被应用程序调用，但对性能的要求并不高。例如，select() 和 poll() 调用用于阻塞应用程序线程，直到套接字准备好。因为这些调用会暂停线程执行，所以性能是一个不太关心的问题。 （这些操作的性能仍然是一个问题，但是执行操作系统调度程序的成本通常会超过除了最实质性的性能提升之外的任何东西。）
 
-## Call Setup Costs
+## Call Setup Costs 连接建立/初始化设置的开销
 
 The amount of work that an application needs to perform before issuing a data transfer operation can affect performance, especially message rates.  Obviously, the more parameters an application must push on the stack to call a function increases its instruction count.  However, replacing stack variables with a single data structure does not help to reduce the setup costs.
 
@@ -433,7 +434,7 @@ Even though all other send functions can be replaced by sendmsg(), it is useful 
 
 尽管所有其他发送函数都可以用 sendmsg() 代替，但有多种方式让应用程序发出发送请求还是很有用的。其他调用不仅更易于阅读和使用（这降低了软件维护成本），而且还可以提高性能。
 
-## Branches and Loops
+## Branches and Loops 分支和循环
 
 When designing an API, developers rarely consider how the API impacts the underlying implementation.  However, the selection of API parameters can require that the underlying implementation add branches or use control loops.  Consider the difference between the write() and writev() calls.  The latter passes in an array of I/O vectors, which may be processed using a loop such as this:
 
@@ -462,7 +463,7 @@ Overall, the sockets API is well designed considering these performance implicat
 
 总体而言，考虑到这些性能影响，套接字 API 设计得很好。它在需要的地方提供复杂的调用，并提供更简单的功能，可以避免其他调用中固有的一些开销。
 
-## Command Formatting
+## Command Formatting 命令格式
 
 The ultimate objective of invoking a network function is to transfer or receive data from the network.  In this section, we're dropping to the very bottom of the software stack to the component responsible for directly accessing the hardware.  This is usually referred to as the network driver, and its implementation is often tied to a specific piece of hardware, or a series of NICs by a single hardware vendor.
 
@@ -484,7 +485,7 @@ As an example, a NIC needs to have the destination address as part of a send ope
 
 例如，NIC 需要将目标地址作为发送操作的一部分。如果应用程序正在发送到单个对等点，则该信息可以被缓存并成为预先格式化的网络标头的一部分。这只有在 NIC 驱动程序知道目标在发送之间不会改变的情况下才有可能。驱动程序离应用程序越近，优化的机会就越大。一种最佳方法是让驱动程序成为完全在应用程序进程空间内执行的库的一部分。
 
-## Memory Footprint
+## Memory Footprint 内存占用
 
 Memory footprint concerns are most notable among high-performance computing (HPC) applications that communicate with thousands of peers.  Excessive memory consumption impacts application scalability, limiting the number of peers that can operate in parallel to solve problems.  There is often a trade-off between minimizing the memory footprint needed for network communication, application performance, and ease of use of the network interface.
 
@@ -525,7 +526,7 @@ The main issue with this sort of address reduction is that it is difficult to ac
 
 这种地址减少的主要问题是难以实现。它要求每个应用程序检查并处理地址压缩，将应用程序暴露给网络堆栈使用的寻址格式。应该记住，TCP/IP 和 UDP/IP 地址是逻辑地址，而不是物理地址。在以太网上运行时，出现在链路层的地址是 MAC 地址，而不是 IP 地址。 IP 到 MAC 地址的关联由网络软件管理。我们希望为应用程序提供简单易用的寻址，但同时可以提供最小的内存占用。
 
-## Communication Resources
+## Communication Resources 通讯资源
 
 We need to take a brief detour in the discussion in order to delve deeper into the network problem and solution space.  Instead of continuing to think of a socket as a single entity, with both send and receive capabilities, we want to consider its components separately. A network socket can be viewed as three basic constructs: a transport level address, a send or transmit queue, and a receive queue.  Because our discussion will begin to pivot away from pure socket semantics, we will refer to our network 'socket' as an endpoint.
 
@@ -555,7 +556,7 @@ A commonly used technique used to handle this situation is to implement one appl
 
 用于处理这种情况的常用技术是为较小的消息实现一个应用程序级协议，并为大于某个给定阈值的传输使用单独的协议。这将允许应用程序发布一堆较小的消息，例如 4 KB，以接收数据。对于大于 4 KB 的传输，使用不同的通信协议，可能通过不同的套接字或端点。
 
-### Shared Receive Queues
+### Shared Receive Queues 共享接收队列(SRQ)
 
 If an application pre-posts receive buffers to a network queue, it needs to balance the size of each buffer posted, the number of buffers that are posted to each queue, and the number of queues that are in use.  With a socket like approach, each socket would maintain an independent receive queue where data is placed.  If an application is using 1000 endpoints and posts 100 buffers, each 4 KB, that results in 400 MB of memory space being consumed to receive data.  (We can start to realize that by eliminating memory copies, one of the trade offs is increased memory consumption.)  While 400 MB seems like a lot of memory, there is less than half a megabyte allocated to a single receive queue.  At today's networking speeds, that amount of space can be consumed within milliseconds.  The result is that if only a few endpoints are in use, the application will experience long delays where flow control will kick in and back the transfers off.
 
@@ -569,7 +570,7 @@ A shared receive queue is a network queue that can receive data for many differe
 
 共享接收队列是一个网络队列，可以同时接收许多不同端点的数据。使用共享接收队列，我们不再将接收队列与特定传输地址相关联。相反，网络数据将针对特定的端点地址。当数据到达时，端点将从共享接收队列中删除一个条目，将数据放入应用程序的发布缓冲区，并将其返回给用户。共享接收队列可以大大减少应用程序所需的缓冲区空间量。在前面的示例中，如果使用共享接收队列，应用程序可以发布 10 倍的缓冲区（总共 1000 个），但仍然消耗 100 倍的内存（总共 4 MB）。这更具可扩展性。缺点是应用程序现在必须知道接收队列和共享接收队列，而不是仅在套接字级别考虑网络。
 
-### Multi-Receive Buffers
+### Multi-Receive Buffers 多个接收缓冲区
 
 Shared receive queues greatly improve application scalability; however, it still results in some inefficiencies as defined so far.  We've only considered the case of posting a series of fixed sized memory buffers to the receive queue.  As mentioned, determining the size of each buffer is challenging.  Transfers larger than the fixed size require using some other protocol in order to complete.  If transfers are typically much smaller than the fixed size, then the extra buffer space goes unused.
 
@@ -591,7 +592,7 @@ When combined with shared receive queues, multi-receive buffers help support opt
 
 当与共享接收队列结合使用时，多接收缓冲区有助于支持最佳接收端缓冲和处理。支持多接收缓冲区的主要缺点是应用程序不一定预先知道有多少消息可能与单个发布的内存缓冲区相关联。这对于应用程序来说很少是一个问题。
 
-## Optimal Hardware Allocation
+## Optimal Hardware Allocation 最佳硬件分配
 
 As part of scalability considerations, we not only need to consider the processing and memory resources of the host system, but also the allocation and use of the NIC hardware.  We've referred to network endpoints as combination of transport addressing, transmit queues, and receive queues.  The latter two queues are often implemented as hardware command queues.  Command queues are used to signal the NIC to perform some sort of work.  A transmit queue indicates that the NIC should transfer data.  A transmit command often contains information such as the address of the buffer to transmit, the length of the buffer, and destination addressing data.  The actual format and data contents vary based on the hardware implementation.
 
@@ -605,7 +606,7 @@ NIC 的资源有限。只有最具可扩展性的高性能应用程序才可能�
 
 支持希望充分利用硬件的应用程序需要向应用程序公开与硬件相关的抽象。这种抽象不需要特定的硬件实现，必须注意确保生成的 API 仍然可供不熟悉处理此类低级细节的开发人员使用。公开诸如共享接收队列之类的概念是让应用程序更好地控制硬件资源使用方式的一个示例。
 
-### Sharing Command Queues
+### Sharing Command Queues 共享命令队列
 
 By exposing the transmit and receive queues to the application, we open the possibility for the application that makes use of multiple endpoints to determine how those queues might be shared.  We talked about the benefits of sharing a receive queue among endpoints.  The benefits of sharing transmit queues are not as obvious.
 
@@ -619,13 +620,13 @@ From the perspective of a software API, sharing transmit or receive queues impli
 
 从软件 API 的角度来看，共享传输或接收队列意味着将这些构造暴露给应用程序，并允许它们与不同的端点地址相关联。
 
-### Multiple Queues
+### Multiple Queues 多队列
 
 The opposite of a shared command queue are endpoints that have multiple queues.  An application that can take advantage of multiple transmit or receive queues can increase parallel handling of messages without synchronization constraints.  Being able to use multiple command queues through a single endpoint has advantages over using multiple endpoints.  Multiple endpoints require separate addresses, which increases memory use.  A single endpoint with multiple queues can continue to expose a single address, while taking full advantage of available NIC resources.
 
 与共享命令队列相反的是具有多个队列的端点。 可以利用多个传输或接收队列的应用程序可以增加对消息的并行处理而没有同步限制。 能够通过单个端点使用多个命令队列比使用多个端点具有优势。 多个端点需要单独的地址，这会增加内存使用。 具有多个队列的单个端点可以继续公开单个地址，同时充分利用可用的 NIC 资源。
 
-## Progress Model Considerations 模型注意事项
+## Progress Model Considerations 进展模型注意事项
 
 One aspect of the sockets programming interface that developers often don't consider is the location of the protocol implementation.  This is usually managed by the operating system kernel.  The network stack is responsible for handling flow control messages, timing out transfers, re-transmitting unacknowledged transfers, processing received data, and sending acknowledgments.  This processing requires that the network stack consume CPU cycles.  Portions of that processing can be done within the context of the application thread, but much must be handled by kernel threads dedicated to network processing.
 
@@ -639,7 +640,7 @@ More generally, progress is the ability of the underlying network implementation
 
 更一般地说，进度是底层网络实现完成异步请求处理的能力。在许多情况下，异步请求的处理需要使用主机处理器。出于性能原因，提供者可能不希望为此目的分配一个线程，这将与应用程序线程竞争。如果应用程序线程可用于对请求进行前向处理，我们可以避免线程上下文切换——检查确认、重试超时操作等。这样做需要应用程序定期调用网络堆栈。
 
-## Ordering
+## Ordering 排序
 
 Network ordering is a complex subject.  With TCP sockets, data is sent and received in the same order.  Buffers are re-usable by the application immediately upon returning from a function call.  As a result, ordering is simple to understand and use.  UDP sockets complicate things slightly.  With UDP sockets, messages may be received out of order from how they were sent.  In practice, this often doesn't occur, particularly, if the application only communicates over a local area network, such as Ethernet.
 
@@ -649,7 +650,7 @@ With our evolving network API, there are situations where exposing different ord
 
 随着我们不断发展的网络 API，在某些情况下公开不同的顺序语义可以提高性能。 这些细节将在下面进一步讨论。
 
-### Messages
+### Messages 消息
 
 UDP sockets allow messages to arrive out of order because each message is routed from the sender to the receiver independently.  This allows packets to take different network paths, to avoid congestion or take advantage of multiple network links for improved bandwidth.  We would like to take advantage of the same features in those cases where the application doesn't care in which order messages arrive.
 
@@ -671,7 +672,7 @@ UDP 套接字允许消息无序到达，因为每条消息都是从发送方独�
 
 消息排序越宽松，网络堆栈可以用来传输数据的优化就越多。但是，应用程序必须了解消息排序语义，并且能够根据需要选择所需的语义。就本节而言，消息指的是传输层操作，包括 RDMA 和类似操作（其中一些尚未讨论）。
 
-### Data
+### Data 数据
 
 Data ordering refers to the receiving and placement of data both _within and between_ messages.  Data ordering is most important to messages that can update the same target memory buffer.  For example, imagine an application that writes a series of database records directly into a peer memory location.  Data ordering, combined with message ordering, ensures that the data from the second write updates memory after the first write completes.  The result is that the memory location will contain the records carried in the second write.
 
@@ -681,7 +682,7 @@ Enforcing data ordering between messages requires that the messages themselves b
 
 强制消息之间的数据排序要求消息本身是有序的。数据排序也可以应用在单个消息中，尽管这种排序级别通常对应用程序不太重要。消息内数据排序表示按顺序接收单个消息的数据。一些应用程序使用此功能来“旋转”读取接收缓冲区的最后一个字节。一旦字节发生变化，应用程序就知道操作已经完成并且所有之前的数据都已经收到。 （请注意，虽然这种行为对于基准测试来说很有趣，但强烈建议不要以这种方式使用这种功能。它不能在网络或平台之间移植。）
 
-### Completions
+### Completions 完成
 
 Completion ordering refers to the sequence that asynchronous operations report their completion to the application.  Typically, unreliable data transfer will naturally complete in the order that they are submitted to a transmit queue.  Each operation is transmitted to the network, with the completion occurring immediately after.  For reliable data transfers, an operation cannot complete until it has been acknowledged by the peer.  Since ack packets can be lost or possibly take different paths through the network, operations can be marked as completed out of order.  Out of order acks is more likely if messages can be processed out of order.
 
@@ -1146,7 +1147,7 @@ fi_info 结构引用了几个不同的属性，这些属性对应于应用程序
 
 
 
-### Capabilities
+### Capabilities 网卡能力
 
 The fi_info caps field is used to specify the features and services that the application requires of the network.  This field is a bit-mask of desired capabilities.  There are capability bits for each of the data transfer services mentioned above: FI_MSG, FI_TAGGED, FI_RMA, and FI_ATOMIC.  Applications should set each bit for each set of operations that it will use.  These bits are often the only bits set by an application.
 
@@ -1797,7 +1798,7 @@ max_order_xxx_size 字段指示在仍实现数据排序的同时消息可能有�
 
 因为读取或写入操作的大小可能是千兆字节，所以延迟写入可能会增加显着的延迟，并且缓冲读取响应可能是不切实际的。 max_order_xxx_size 字段指示在仍保持排序的情况下背靠背操作可能有多大。在许多情况下，写后读以及写和读顺序可能会受到很大限制，但仍可用于实现特定算法，例如全局锁定机制。
 
-## Rx/Tx Context Attributes
+## Rx/Tx Context Attributes 发送/接收的上下文属性
 
 The endpoint attributes define the overall abilities for the endpoint; however, attributes that apply specifically to receive or transmit contexts are defined by struct fi_rx_attr and fi_tx_attr, respectively:
 

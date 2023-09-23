@@ -1,0 +1,11 @@
+https://www.rdmamojo.com/2013/01/26/ibv_post_send/
+
+描述 WR 的属性。 它是 0 或以下一个或多个标志的按位或：
+IBV_SEND_FENCE - 设置此 WR 的栅栏指示器。 这意味着该 WR 的处理将被阻止，直到所有先前发布的 RDMA 读取和原子 WR 完成为止。 仅对传输服务类型 IBV_QPT_RC 的 QP 有效
+IBV_SEND_SIGNALED - 设置此 WR 的完成通知指示器。 这意味着，如果 QP 是使用 sq_sig_all=0 创建的，则当该 WR 的处理结束时，将生成工作完成。 如果 QP 是使用 sq_sig_all=1 创建的，则该标志不会有任何影响
+IBV_SEND_SOLICITED - 设置此 WR 的请求事件指示符。 这意味着当该WR中的消息将在远程QP中结束时，将为其创建请求事件，并且如果在远程端用户正在等待请求事件，则它将被唤醒。 仅与带有立即操作码的发送和 RDMA 写入相关
+IBV_SEND_INLINE - sg_list 中指定的内存缓冲区将内联放置在发送请求中。 这意味着低级驱动程序（即 CPU）将读取数据，而不是 RDMA 设备。 这意味着 L_Key 不会被检查，实际上这些内存缓冲区甚至不需要注册，它们可以在 ibv_post_send() 结束后立即重用。 仅对发送和 RDMA 写入操作码有效
+
+
+
+

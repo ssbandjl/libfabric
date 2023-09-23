@@ -85,7 +85,7 @@ pingpong/fi_*
 fabtests/pytest/__pycache__
 fabtests/pytest/*/__pycache__
 
-.vscode
+# .vscode
 prov/efa/docs/doxygen/html
 prov/efa/docs/doxygen/latex
 

@@ -1,0 +1,91 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "example_msg",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "/home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_example_msg",
+      // "args": ["--mountpoint=/tmp/sxb", "--pool=sxb", "--cont=sxb", "-f"],
+      "stopAtEntry": false,
+      "cwd": "/home/xb/project/libfabric/libfabric/build/fabtests/bin/",
+      "environment": [
+        {
+            "name": "FI_LOG_LEVEL",
+            "value": "debug"
+        }],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/bin/gdb",
+      "setupCommands": [
+          {
+              "description": "Enable pretty-printing for gdb",
+              "text": "-enable-pretty-printing", // GDB更好的输出
+              "ignoreFailures": true
+          },
+          {
+              "description": "Set Disassembly Flavor to Intel",
+              "text": "-gdb-set disassembly-flavor intel", // GDB 将使用 Intel 反汇编样式
+              "ignoreFailures": true
+          }
+      ]
+    },
+    {
+      "name": "server_fabtests/benchmarks/rma_bw.c",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "/home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rma_bw",
+      "args": ["-e", "rdm", "-o", "write", "-I", "5", "-p", "verbs"],
+      "stopAtEntry": false,
+      "cwd": "/home/xb/project/libfabric/libfabric/build/fabtests/bin/",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/bin/gdb",
+      "setupCommands": [
+          {
+              "description": "Enable pretty-printing for gdb",
+              "text": "-enable-pretty-printing",
+              "ignoreFailures": true
+          },
+          {
+              "description": "Set Disassembly Flavor to Intel",
+              "text": "-gdb-set disassembly-flavor intel",
+              "ignoreFailures": true
+          }
+      ]
+    },
+    {
+      "name": "client_fabtests/benchmarks/rma_bw.c",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "/home/xb/project/libfabric/libfabric/build/fabtests/bin/fi_rma_bw",
+      "args": ["-e", "rdm", "-o", "write", "-I", "5", "-p", "verbs", "172.17.29.63"],
+      "stopAtEntry": false,
+      "cwd": "/home/xb/project/libfabric/libfabric/build/fabtests/bin/",
+      "environment": [
+        {
+            "name": "FI_LOG_LEVEL",
+            "value": "debug"
+        }],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/bin/gdb",
+      "setupCommands": [
+          {
+              "description": "Enable pretty-printing for gdb",
+              "text": "-enable-pretty-printing",
+              "ignoreFailures": true
+          },
+          {
+              "description": "Set Disassembly Flavor to Intel",
+              "text": "-gdb-set disassembly-flavor intel",
+              "ignoreFailures": true
+          }
+      ]
+    },
+  ]
+}

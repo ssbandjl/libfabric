@@ -3,6 +3,20 @@ git remote add upstream https://github.com/ofiwg/libfabric.git
 git fetch upstream
 git merge upstream/main
 
+订阅: https://www.openfabrics.org/subscriptions-at-ofa/
+归档的历史讨论: https://lists.openfabrics.org/pipermail/ofiwg/
+程序员手册: https://ofiwg.github.io/libfabric/
+开发指南手册: https://github.com/ofiwg/ofi-guide/blob/master/OFIGuide.md
+设计要点:
+允许立即重用数据缓冲区, send() 将应用程序的数据复制到内部缓冲区中。然后从该缓冲区发出数据传输，这允许在失败的情况下重试操作。在这种情况下，send() 调用不会被阻塞，但是所有通过网络的数据都会导致内存复制到本地缓冲区，即使没有任何错误, 为了避免发送方的内存复制，我们需要将应用程序数据直接放到网络上。如果我们还想避免阻塞发送应用程序，我们需要一些方法让网络层在缓冲区可以安全重用时与应用程序通信。这将允许在需要重新传输数据的情况下重新使用缓冲区。这导致我们设计了一个异步行为的网络接口。应用程序需要发出请求，然后在请求完成时收到某种通知
+
+Libfabric 将等待对象与队列分开
+
+fi_trywait 实现负责处理可能导致应用程序丢失事件或挂起的潜在竞争条件
+
+
+
+
 https://ofiwg.github.io/libfabric/v1.10.1/man/fabtests.7.html
 fabtests 测试, fabtests/README, fabtests/README.md
 使用 --with-libfabric=<directory> 选项告诉 Fabtests 在哪里可以找到已安装的 Libfabric 的头文件和库文件
@@ -116,7 +130,8 @@ MAKEWORD(2,2)就是调用2.2版
 client:
 fi_pingpong -p sockets "192.168.1.6" -v
 
-export PATH=/root/github/storage/daos/libfabric/util:$PATH
+export PATH=/root/github/storage/daos/libfabric/util:/home/xb/project/libfabric/libfabric/build/fabtests/bin:$PATH
+s63: export PATH=/home/xb/project/libfabric/libfabric/build/fabtests/bin:$PATH
 util/pingpong.c
 
 server:
@@ -201,8 +216,14 @@ rxm_ep_do_progress
 recv_list
 
 
-HG_Progress -> NA_Progress -> na_ofi_progress -> ofi_cq_readfrom -> ofi_cq_progress -> rxm_ep_progress -> rxm_ep_do_progress -> rxm_handle_comp -> rxm_finish_eager_send -> rxm_cq_write_tx_comp -> rxm_cq_write -> print_stacktrace  -> HG -> na_ofi_cq_read
-
+HG_Progress
+  NA_Progress
+    na_ofi_progress
+      ofi_cq_readfrom -> ofi_cq_progress -> rxm_ep_progress -> rxm_ep_do_progress -> rxm_handle_comp ->     rxm_finish_eager_send -> rxm_cq_write_tx_comp -> rxm_cq_write -> print_stacktrace  -> HG -> na_ofi_cq_read
+      ssize_t ofi_cq_readfrom(struct fid_cq *cq_fid, void *buf, size_t count, fi_addr_t *src_addr)  
+        cq->progress(cq) -> void ofi_cq_progress(struct util_cq *cq) -> fi_cq_read -> vrb_flush_cq
+          ibv_poll_cq -> cq转eq -> vrb_eq_read_event
+      return ofi_cq_read_entries(cq, buf, count, src_addr)
 server: NA_CB_RECV_UNEXPECTED CQ event 非预期接收
 
 
@@ -259,7 +280,7 @@ na_ofi_initialize
 
 
 
-rdma write, 单边写, 
+rdma write, 单边写, 写bulk, 写消息
 NA_Put
 na_ofi_put
 na_ofi_rma fi_writemsg = fi_rma_op   .writemsg =    -> include/rdma/fi_rma.h -> fi_writemsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uint64_t flags)
@@ -376,9 +397,6 @@ fi_fabric -> .fabric = rxm_fabric | vrb_fabric -> int ofi_fabric_init ->
 vrb_fabric -> ofi_fabric_init 
 
 
-fi_domain -> ibv_alloc_pd
-
-
 fi_tsend
   rxm_tsend
     
@@ -433,5 +451,183 @@ enum ft_comp_method {
 
 header:
 远程内存访问: include/rdma/fi_rma.h
+文档: man/fi_rma.3.md
+fi_rma_bw, 带宽测试
+
+def test_rma_bw
+fabtests/common：添加 HMEM 选项解析支持，此提交负责为 ubertest 添加 HMEM 选项支持。 创建了一个单独的函数 ft_parse_hmem_opts() 将 HMEM 选项与其他选项分开，以便于处理
+server: fi_rma_bw -e msg -o write -I 5
+client: fi_rma_bw -e msg -o write -I 5 any_ip
+
+推荐端点类型选择连接更少的可靠数据报类型
+server: fi_rma_bw -e rdm -o write -I 5 -p verbs
+client: fi_rma_bw -e rdm -o write -I 5 -p verbs 172.17.29.63
+
+gdb --args ./fi_rma_bw -e rdm -o write -I 5 -p verbs
+server: fabtests/benchmarks/rma_bw.c -> main
+opts.options |= FT_OPT_BW
+fi_allocinfo
+hints->ep_attr->type = FI_EP_RDM
+hints->domain_attr->mr_mode = opts.mr_mode
+hints->tx_attr->tclass = FI_TC_BULK_DATA
+ret = run() -> static int run(void)
+  ret = ft_init_fabric()
+    ft_init_oob() -> fabtests：仅允许更改 OOB 地址 如果提供程序使用带有 -F 标志的 FI_ADDR_STR，则它可能不是 IP 地址，因此它不能用于与套接字的带外通信。 这会添加一个“-O”标志来选择带外地址，使其兼容
+    ft_open_fabric_res
+      fi_eq_open -> int ofi_eq_create(struct fid_fabric *fabric_fid, struct fi_eq_attr *attr, struct fid_eq **eq_fid, void *context)
+        eq = calloc(1, sizeof(*eq))
+        ret = ofi_eq_init(fabric_fid, attr, &eq->eq_fid, context)
+          util_verify_eq_attr
+            case FI_WAIT_YIELD -> 释放cpu
+          util_eq_init
+            ret = fi_wait_open(fabric, &wait_attr, &wait) -> int ofi_wait_fd_open
+              ...
+              wait->wait_obj = FI_WAIT_FD
+              pollset->poll_fid.fid.fclass = FI_CLASS_POLL -> 类型
+              pollset->poll_fid.fid.ops = &util_poll_fi_ops
+              pollset->poll_fid.ops = &util_poll_ops
+              ...
+              wait->util_wait.signal = util_wait_fd_signal;
+	            wait->util_wait.wait_try = util_wait_fd_try;
+              ...
+              ret = socketpair(AF_UNIX, SOCK_STREAM, 0, signal->fd)
+              static inline int ofi_epoll_create -> *ep = epoll_create(4)
+              ret = ofi_epoll_add(wait_fd->epoll_fd, fd, ofi_poll_to_epoll(events), context)
+                static inline int ofi_epoll_add
+                  event.events = events
+                  ret = epoll_ctl(ep, EPOLL_CTL_ADD, fd, &event)
+              wait->util_wait.wait_fid.fid.ops = &util_wait_fd_fi_ops;
+	            wait->util_wait.wait_fid.ops = &util_wait_fd_ops;
+            ret = fi_poll_add(&eq->wait->pollset->poll_fid -> 在添加到等待集之前，EQ 必须完全运行
+              fid_list_insert(&pollset->fid_list, &pollset->lock, event_fid)
+
+...
+ret = ft_init_av()
+  int ft_init_av_dst_addr
+    ret = ft_get_rx_comp(rx_seq)
+      ft_get_cq_comp(rxcq, &rx_cq_cntr, total, timeout)
+        ft_read_cq(cq, cur, total, timeout, ft_tag)
+          ft_spin_for_comp(cq, cur, total, timeout, tag)
+            do loop -> fi_cq_read(cq, &comp, 1) -> 读完成队列, 检查时间
+              ... ssize_t ofi_cq_readfrom ...
+    ret = ft_post_rx(ep, rx_size, &rx_ctx)  
+      FT_POST(fi_recv, ft_progress, rxcq, rx_seq, &rx_cq_cntr
+    ret = (int) ft_tx(ep, *remote_addr, 1, &tx_ctx)
+      ft_post_tx
+        FT_POST(fi_send, ft_progress, txcq, tx_seq -> 触发客户端 ret = ft_init_av() 收到消息, 继续执行, 交换key的逻辑: ft_exchange_keys(&remote)
+  ret = ft_exchange_keys(&remote)
+    ret = fi_mr_raw_attr(mr, &addr, NULL, &key_size, 0)
+    ret = ft_tx(ep, remote_fi_addr, len + ft_tx_prefix_size(), &tx_ctx)
+    ret = ft_get_rx_comp(rx_seq)
+  ft_post_rma_inject -> fabtests/benchmarks：修复注入大小设置 基准测试的“-j”选项允许用户指定注入大小的上限。 例如，可以通过将注入大小设置为 0 来禁用注入调用。该值通过提示传递给 fi_getinfo()。 但是，某些提供程序（例如 rxm）可能会报告比提示中要求的注入大小更高的注入大小。 当使用“-j”选项来尊重用户输入时，从提示中获取值
+  基准测试：将注入操作作为 pingpong 的一部分 允许在输入上指定注入大小，并让 pingpong 测试在消息符合条件时使用注入。 删除inject_pingpong 测试，因为它现在已集成为其他基准测试的一部分。 在hints结构中设置注入值，然后使用输出fi_info结构提供的值
+ft_free_res()
+
+提交接收后立即progress
+FT_POST(fi_recv, ft_progress, rxcq, rx_seq, &rx_cq_cntr
+
+
+client: gdb --args fi_rma_bw -e rdm -o write -I 5 -p verbs 172.17.29.63
+...
+ret = ft_init_av() -> av: 18446744073709551615
+  fi_av_insert -> static int rxm_av_insert
+    ofi_ip_av_insert(av_fid, addr, count, fi_addr, flags, context)
+      entry = ofi_ibuf_alloc(av->av_entry_pool)
+      HASH_ADD(hh, av->hash, data, av->addrlen, entry) -> 插入hash表
+    ret = rxm_av_add_peers(av, addr, count, fi_addr)
+
+...
+init_test(&opts, test_name, sizeof(test_name))
+ret = bandwidth_rma(opts.rma_op, &remote)
+  ret = ft_post_rma_inject(FT_RMA_WRITE, tx_buf + offset -> 发送数据, static void rxm_init_infos(void), buffer_size, 从历史上看，“buffer_size”是为急切消息大小指定的名称。 保留名称以实现向后兼容性, prov/rxm：缓冲区、eager 和数据包大小的单独定义 rxm_buffer_size 和 rxm_eager_limit 在整个代码中使用，具有特定含义。 特别是， eager_limit 可以表示 eager 消息协议的最大大小或反弹缓冲区的大小（相对于用户）。 后者令人困惑，因为 buffer_size 具有类似的含义，但其值不合适。 buffer_size 等于 eager_limit + rxm_pkt 的大小。 将 buffer_size 更新为等于分配的缓冲区的大小。 Eager 大小将与 Eager 协议相关的大小相对应。 并添加一个新的 packet_size 变量来记录分配的数据包的完整大小。 更新代码以引用提供有关如何使用值的最佳含义的变量。 这将允许未来的补丁允许这些值有所不同。 例如， eager_limit 和 buffer_size 不需要匹配
+
+
+...
+ret = ft_post_rma(FT_RMA_WRITE, tx_buf + offset
+  static ssize_t rxm_ep_write
+    struct fi_rma_iov rma_iov
+    rxm_ep_generic_writemsg(ep_fid, &msg, rxm_ep->util_ep.tx_op_flags)
+      vrb_msg_ep_rma_writemsg
+        struct ibv_send_wr wr = {
+          .wr_id = (uintptr_t)msg->context,
+          .wr.rdma.remote_addr = msg->rma_iov->addr,
+          .wr.rdma.rkey = (uint32_t)msg->rma_iov->key,
+        };
+        wr.opcode = IBV_WR_RDMA_WRITE
+        ...
+        wr->sg_list = alloca(sizeof(*wr->sg_list) * count)
+        if (wr->send_flags & IBV_SEND_INLINE)
+        ret = ofi_copy_from_hmem_iov(bounce_buf, len, iface, device, iov, count, 0)
+          ofi_iov_bytes_to_copy
+        wr->sg_list[0] = vrb_init_sge(bounce_buf, len, NULL)
+        wr->num_sge = 1
+        wr->wr_id = VERBS_COMP_FLAGS(ep, flags, wr->wr_id)
+        if (flags & FI_FENCE) -> 设置FENCE标签
+          wr->send_flags |= IBV_SEND_FENCE
+        ssize_t vrb_post_send
+        ...    
+fi_domain
+  rxm_domain_open -> vrb_domain
+    vrb_open_device_by_name
+      ev_list = rdma_get_devices(NULL) -> 获取所有的rdma设备
+      for (i = 0; dev_list[i] && ret; i++) -> 遍历设备列表
+        const char *rdma_name = ibv_get_device_name(dev_list[i]->device)
+    _domain->pd = ibv_alloc_pd(_domain->verbs)
+    vrb_odp_flag
+      ret = ibv_query_device_ex(verbs, &input, &attr)
+    _domain->util_domain.domain_fid.fid.ops = &vrb_fid_ops; -> 
+	  _domain->util_domain.domain_fid.mr = &vrb_mr_ops; -> 注册内存
+    _domain->cache.add_region = vrb_mr_cache_add_region
+    _domain->cache.delete_region = vrb_mr_cache_delete_region
+    ret = ofi_mr_cache_init(&_domain->util_domain, memory_monitors, &_domain->cache)
+      ofi_rbmap_init
+      ofi_bufpool_create
+        pool->entry_size = ofi_get_aligned_size(entry_sz, pool->attr.alignment)
+    ret = vrb_init_progress(&_domain->progress, _domain->verbs)
+
+
+
+
+
+
+
+
+
+    lock, enum ofi_lock_type, 初始化锁: int ofi_genlock_init, 
+    core/lock：添加完全禁用同步锁的功能 同步锁支持无操作选项，该选项禁用锁定以支持单线程环境。 但是，它仍然在调试模式下使用互斥体来验证锁是否被正确使用。 此选项不适用于 tcp rdm 提供程序，因为使用更高级别的锁来避免进一步嵌套的锁定问题。 嵌套锁被转换为无操作，但可能会递归地“获取”（这就是它们被禁用的原因）。 更改 OFI_LOCK_NONE 选项以指示不需要锁定并且应禁用调试检查。 添加新的 OFI_LOCK_NOOP 来指示需要锁定，但应该是无操作
+
+    核心：添加通用锁实现抽象提供一个锁，可以根据调用者的需要在互斥锁或自旋锁（或无锁）之间进行转换。 此抽象将取代 CQ 使用的锁抽象，并可由其他 util 类使用
+
+
+
+#define DEFAULT_CONF_FILE_PATH "libfabric.conf" -> 默认配置文件
+定义参数:
+rxm_buffer_size 16KB
+RXM_INI
+{
+	fi_param_define(&rxm_prov, "buffer_size", FI_PARAM_SIZE_T,
+			"Defines the allocated buffer size used for bounce "
+			"buffers, including buffers posted at the receive side "
+			"to handle unexpected messages.  This value "
+			"corresponds to the rxm inject limit, and is also "
+			"typically used as the eager message size. "
+			"(default %zu)", rxm_buffer_size);
+comp_per_progress: 每轮一个
+sar_limit: 分割与重组, prov/rxm：允许指定与缓冲区大小分开的急切大小 对于 rxm + tcp，急切大小和缓冲区大小可以不同。 Tcp 允许直接使用 tcp 发布用户缓冲区，从而避免发送端副本。 在接收端，只有在意外消息的情况下才需要缓冲区大小，我们可以单独处理。 （在后续补丁中）。 此更改将使我们能够避免在常见情况下不使用的缓冲区分配，从而减少通过 tcp 运行时的内存占用
+enable_passthru: 直通, 启用 passthru 优化。Passthru 允许 rxm 将所有数据传输调用直接传递到核心提供程序，从而消除 rxm 协议和相关开销。Passthru 是到 tcp 提供程序的优化路径，具体取决于 应用程序请求的功能,
+
+
+rdma发送标记:
+enum ibv_send_flags {
+	IBV_SEND_FENCE		= 1 << 0,
+	IBV_SEND_SIGNALED	= 1 << 1,
+	IBV_SEND_SOLICITED	= 1 << 2,
+	IBV_SEND_INLINE		= 1 << 3,
+	IBV_SEND_IP_CSUM	= 1 << 4
+};
+
+
+
+
 
 

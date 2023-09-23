@@ -1,0 +1,7 @@
+{
+  "files.associations": {
+    "shared.h": "c",
+    "*.tcc": "c",
+    "cstdlib": "c"
+  }
+}

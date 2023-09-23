@@ -99,6 +99,7 @@ int main(int argc, char **argv)
 
 	while ((op = getopt_long(argc, argv, "Uh" CS_OPTS INFO_OPTS API_OPTS
 			    BENCHMARK_OPTS, long_opts, &lopt_idx)) != -1) {
+		printf("\033[1;32m op:%d, optarg:%s \033[0m\n", op, optarg);
 		switch (op) {
 		default:
 			if (!ft_parse_long_opts(op, optarg))

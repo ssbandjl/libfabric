@@ -347,7 +347,7 @@ int bandwidth_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote)
 		}
 		switch (rma_op) {
 		case FT_RMA_WRITE:
-			if (opts.transfer_size < inject_size) {
+			if (opts.transfer_size > inject_size) {
 				ret = ft_post_rma_inject(FT_RMA_WRITE, tx_buf + offset,
 						opts.transfer_size, remote);
 			} else {

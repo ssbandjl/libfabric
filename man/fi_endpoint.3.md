@@ -646,14 +646,20 @@ desired.  Supported types are:
   Message boundaries are maintained, but the maximum message size may
   be limited to the fabric MTU.  Flow control is not guaranteed.
 
+  DGRAM 支持无连接、不可靠的数据报通信端点。 消息边界得到维护，但最大消息大小可能受限于结构 MTU。 无法保证流量控制
+
 *FI_EP_MSG*
 : Provides a reliable, connection-oriented data transfer service with
   flow control that maintains message boundaries.
+
+  MSG 消息端点, 提供可靠、面向连接的数据传输服务，并具有维护消息边界的流控制
 
 *FI_EP_RDM*
 : Reliable datagram message.  Provides a reliable, connectionless data
   transfer service with flow control that maintains message
   boundaries.
+
+  RDM 可靠的数据报消息端点。 提供可靠的无连接数据传输服务，并具有维护消息边界的流控制, mercury默认使用该模式, 参考代码: hints->ep_attr->type = FI_EP_RDM
 
 *FI_EP_SOCK_DGRAM*
 : A connectionless, unreliable datagram endpoint with UDP socket-like
