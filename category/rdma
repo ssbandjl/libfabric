@@ -12,15 +12,15 @@ rdma_resolve_route -> RDMA_CM_EVENT_ROUTE_RESOLVED -> rxm_send_connect -> fi_con
 分配RDMA结构
 ibv_query_device <- fi_getinfo -> vrb_getinfo -> ibv_query_device
 ibv_alloc_pd <- fi_domain -> rxm_domain_open -> ibv_alloc_pd
-ibv_create_comp_channel
-ibv_create_cq
-ibv_req_notify_cq
-rdma_create_qp
-ibv_reg_mr
+ibv_create_comp_channel -> na_ofi_eq_open -> fi_cq_open -> vrb_cq_open -> ibv_create_comp_channel
+ibv_create_cq -> na_ofi_eq_open -> fi_cq_open -> vrb_cq_open -> ibv_create_cq
+ibv_req_notify_cq -> na_ofi_poll_try_wait -> fi_trywait -> vrb_trywait -> vrb_cq_trywait
+rdma_create_qp -> na_ofi_context_create -> fi_enable -> rdma_create_qp
+ibv_reg_mr -> NA_Mem_register -> na_ofi_mem_register -> fi_mr_regv -> ibv_reg_mr
 ------------------
-ibv_poll_cq
-ibv_post_recv
-rdma_connect -> server -> RDMA_CM_EVENT_CONNECT_REQUEST
+ibv_poll_cq -> na_ofi_msg_send_unexpected -> fi_senddata -> fi_send -> vrb_flush_cq -> ibv_poll_cq
+ibv_post_recv -> rxm_open_conn -> ibv_post_recv | na_ofi_tag_recv, na_ofi_msg_multi_recv -> fi_trecv -> ibv_post_recv
+rdma_connect -> server -> RDMA_CM_EVENT_CONNECT_REQUEST, -> fi_senddata -> rxm_get_conn -> rdma_connect
 
 server:
 case RDMA_CM_EVENT_CONNECT_REQUEST
@@ -41,7 +41,7 @@ ibv_post_send
 
 clinet:
 RDMA_CM_EVENT_ESTABLISHED
-ibv_post_send
+ibv_post_send -> na_ofi_msg_send_unexpected -> ibv_post_send
 
 
 server:
