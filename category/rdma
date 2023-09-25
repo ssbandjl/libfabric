@@ -1,17 +1,17 @@
 server:
-rdma_create_event_channel
-rdma_create_id
-rdma_listen
+rdma_create_event_channel <- vrb_eq_open <- fi_eq_open
+rdma_create_id <- vrb_create_ep <- vrb_open_ep <- fi_endpoint
+rdma_listen -> fi_listen -> .listen = vrb_pep_listen -> vrb_pep_listen -> rdma_listen
 
 client:
 rdma_create_event_channel
 rdma_create_id
-rdma_resolve_addr -> RDMA_CM_EVENT_ADDRESS_RESOLVED
-rdma_resolve_route -> RDMA_CM_EVENT_ROUTE_RESOLVED
+rdma_resolve_addr -> RDMA_CM_EVENT_ADDRESS_RESOLVED ->  rxm_open_conn -> fi_endpoint (vrb_open_ep) -> rdma_resolve_addr
+rdma_resolve_route -> RDMA_CM_EVENT_ROUTE_RESOLVED -> rxm_send_connect -> fi_connect -> rdma_resolve_route
 ------------------ 
 分配RDMA结构
-ibv_query_device
-ibv_alloc_pd
+ibv_query_device <- fi_getinfo -> vrb_getinfo -> ibv_query_device
+ibv_alloc_pd <- fi_domain -> rxm_domain_open -> ibv_alloc_pd
 ibv_create_comp_channel
 ibv_create_cq
 ibv_req_notify_cq

@@ -379,7 +379,7 @@ fi_listen -> .listen = vrb_pep_listen -> vrb_pep_listen -> rdma_listen
 
 fi_eq_read -> .read = vrb_eq_read -> vrb_eq_read -> vrb_eq_cm_process_event -> RDMA_CM_EVENT_CONNECT_REQUEST
 
-vrb_create_ep
+
 
 
 RDMA_CM_EVENT_ADDR_RESOLVED
@@ -409,7 +409,8 @@ fi_eq_open
 
 fi_endpoint
   vrb_open_ep
-    rdma_create_id
+    vrb_create_ep(ep, vrb_get_port_space(info->addr_format), &ep->id)
+      rdma_create_id(NULL, id, NULL, ps))
 
 
 fi_eq_read

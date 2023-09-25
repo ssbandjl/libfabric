@@ -2,6 +2,7 @@
   "files.associations": {
     "shared.h": "c",
     "*.tcc": "c",
-    "cstdlib": "c"
+    "cstdlib": "c",
+    "merucry_bulk_libfabric": "c"
   }
 }
