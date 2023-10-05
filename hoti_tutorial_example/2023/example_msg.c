@@ -40,7 +40,6 @@
 
 //Build with
 //gcc -o example_msg example_msg.c -L<path to libfabric lib> -I<path to libfabric include> -lfabric
-//gcc -o example_msg example_msg.c -L/home/xb/project/libfabric/libfabric/build/lib -I/home/xb/project/libfabric/libfabric/build/include -I/home/xb/project/libfabric/libfabric/build/include -lfabric
 
 #define BUF_SIZE 64
 
@@ -164,7 +163,6 @@ static int start_server(void)
 	 * The flag FI_SOURCE is set for the server to indicate that the address/port refer to source
 	 * information. This is not set for the client because the fields refer to the server, not
 	 * the caller (client). */
-	/* 初始化时发生的第一个 OFI 调用是 fi_getinfo，它查询 libfabric 并返回满足提示要求的任何适当的提供程序。 任何适用的提供程序都将作为 fi_info 结构 (&info) 列表返回。 可以选择任何信息。 在此测试中，我们选择第一个 fi_info 结构。 假设所有提示均已正确设置，第一个 fi_info 应该是最合适的。 为服务器设置标志FI_SOURCE以指示地址/端口引用源信息。 这不是为客户端设置的，因为这些字段引用服务器，而不是调用者（客户端） */
 	ret = fi_getinfo(FI_VERSION(1,9), dst_addr, port, dst_addr ? 0 : FI_SOURCE,
 			 		hints, &fi_pep);
 	if (ret) {
@@ -176,7 +174,7 @@ static int start_server(void)
 	 * resources that access a single physical or virtual network. All network ports on a system
 	 * that can communicate with each other through their attached networks belong to the same fabric.
 	 */
-	ret = fi_fabric(fi_pep->fabric_attr, &fabric, NULL); // 打开fabric, 初始化任何资源前需要打开fabric
+	ret = fi_fabric(fi_pep->fabric_attr, &fabric, NULL);
 	if (ret) {
 		printf("fi_fabric error (%d)\n", ret);
 		return ret;
@@ -192,25 +190,25 @@ static int start_server(void)
 	 * In this application, we requested TCP and FI_EP_MSG.
 	 */
 
-    ret = fi_eq_open(fabric, &eq_attr, &eq, NULL); // 打开事件队列EQ, 一般用于建连, 收发数据产生的事件
+    ret = fi_eq_open(fabric, &eq_attr, &eq, NULL);
     if (ret) {
             printf("fi_eq_open: %d\n", ret);
             return ret;
     }
 
-    ret = fi_passive_ep(fabric, fi_pep, &pep, NULL); // 打开被动端点, 常用与服务端监听端口, 支持多个客户端domain连接进来
+    ret = fi_passive_ep(fabric, fi_pep, &pep, NULL);
     if (ret) {
         printf("fi_passive_ep: %d\n", ret);
         return ret;
     }
 
-    ret = fi_pep_bind(pep, &eq->fid, 0); // 为端点绑定事件队列
+    ret = fi_pep_bind(pep, &eq->fid, 0);
     if (ret) {
         printf("fi_pep_bind %d", ret);
         return ret;
     }
 
-    ret = fi_listen(pep); // 监听端点, 等待客户端连接请求
+    ret = fi_listen(pep);
     if (ret) {
         printf("fi_listen %d", ret);
         return ret;
@@ -222,7 +220,7 @@ static int start_server(void)
 static int complete_connection(void)
 {
 
-	rd = fi_eq_sread(eq, &event, &entry, sizeof(entry), -1, 0); // 等待读取客户端触发的服务端事件, 读取事件, 推动进展(驱动程序运转)
+	rd = fi_eq_sread(eq, &event, &entry, sizeof(entry), -1, 0);
     if (rd != sizeof entry) {
 	ret = (int) rd;
             printf("fi_eq_sread: %d", ret);
@@ -230,7 +228,7 @@ static int complete_connection(void)
 			goto err;
     }
 
-	ret = fi_domain(fabric, info, &domain, NULL); // domain域用于将资源分组, 可基于域来做管理
+	ret = fi_domain(fabric, info, &domain, NULL);
 	if (ret) {
 		printf("fi_domain: %d\n", ret);
 	        return ret;
@@ -261,7 +259,7 @@ static int complete_connection(void)
      * (which can be the same CQ).
 	*/
 
-	ret = fi_endpoint(domain, info, &ep, NULL); // 用于客户端, 主动端点, 发起建连
+	ret = fi_endpoint(domain, info, &ep, NULL);
         if (ret) {
                 printf("fi_endpoint: %d\n", ret);
                 return ret;
@@ -470,7 +468,7 @@ int main(int argc, char **argv)
 	int ret;
 
 	/* Hints are used to request support for specific features from a provider */
-	hints = fi_allocinfo(); // 
+	hints = fi_allocinfo();
 	if (!hints)
 		return EXIT_FAILURE;
 
@@ -482,15 +480,14 @@ int main(int argc, char **argv)
 
 	/* Request FI_EP_MSG (reliable datagram) endpoint which will allow us
 	 * to reliably send messages to peers without having to listen/connect/accept. */
-	hints->ep_attr->type = FI_EP_MSG; // 可靠数据报端点, 类似socket, 但无须执行listen/connect/accept
+	hints->ep_attr->type = FI_EP_MSG; // 类似socket的, 面向连接的消息类型端点
 
 	/* Request basic messaging capabilities from the provider (no tag matching,
 	 * no RMA, no atomic operations) */
 	hints->caps = FI_MSG;
 
 	/* Specifically request the tcp provider for the simple test */
-	// hints->fabric_attr->prov_name = "tcp"; // 类似socket的, 面向连接的消息类型端点
- 	hints->fabric_attr->prov_name = "ofi_rxm;verbs";
+	hints->fabric_attr->prov_name = "tcp";
 
 	/* Specifically request SOCKADDR_IN address format to simplify addressing for test */
 	hints->addr_format = FI_SOCKADDR_IN;
@@ -498,7 +495,6 @@ int main(int argc, char **argv)
 	/* Default to FI_DELIVERY_COMPLETE which will make sure completions do not get generated
 	 * until our message arrives at the destination. Otherwise, the client might get a completion
 	 * and exit before the server receives the message. This is to make the test simpler */
-	/* 默认为 FI_DELIVERY_COMPLETE，这将确保在我们的消息到达目的地之前不会生成完成(等待)。 否则，客户端可能会在服务器收到消息之前完成并退出。 这是为了让测试更简单 */
 	hints->tx_attr->op_flags = FI_DELIVERY_COMPLETE;
 
 //Done setting hints

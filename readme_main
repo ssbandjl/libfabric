@@ -563,7 +563,7 @@ ret = ft_post_rma(FT_RMA_WRITE, tx_buf + offset
         wr->sg_list[0] = vrb_init_sge(bounce_buf, len, NULL)
         wr->num_sge = 1
         wr->wr_id = VERBS_COMP_FLAGS(ep, flags, wr->wr_id)
-        if (flags & FI_FENCE) -> 设置FENCE标签
+        if (flags & FI_FENCE) -> 设置 FENCE标签
           wr->send_flags |= IBV_SEND_FENCE
         ssize_t vrb_post_send
         ...    
