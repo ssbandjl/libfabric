@@ -388,9 +388,10 @@ RDMA_CM_EVENT_ADDR_RESOLVED
 RDMA_CM_EVENT_ROUTE_RESOLVED
 
 
-client:
+ofi_epoll_wait
+client: fi_eq_sread fi_cq_sread
 .sread = vrb_eq_sread -> vrb_eq_sread -> vrb_eq_read -> vrb_eq_cm_process_event -> rdma_connect
-
+epoll_wait
 
 fi_fabric -> .fabric = rxm_fabric | vrb_fabric -> int ofi_fabric_init -> 
 

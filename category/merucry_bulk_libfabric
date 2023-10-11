@@ -2,7 +2,7 @@
  * @Author: xb ssbandjl@163.com
  * @Date: 2023-09-19 08:19:04
  * @LastEditors: xb ssbandjl@163.com
- * @LastEditTime: 2023-09-25 09:36:57
+ * @LastEditTime: 2023-10-11 17:32:00
  * @FilePath: /mercury/category/libfabric
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -393,3 +393,17 @@ na_ofi_rma_common(struct na_ofi_class *na_ofi_class,
 #24 0x0000000000407741 in main (argc=<optimized out>, argv=<optimized out>) at /home/xb/project/mercury/Examples/src/server.c:69              
 
 
+
+
+hg_core_progress -> 中断模式和轮训模式自动切换
+  if (hg_core_poll_try_wait(context)) { -> 如果完成队列不为空, 表示有网络事件, 则返回false, 开启轮训模式, 反之开启轮训模式
+    safe_wait = HG_TRUE; -> 中断模式
+  if (safe_wait) {  -> 中断模式
+      ret = hg_core_poll_wait(context, poll_timeout, &progressed);
+      HG_CHECK_SUBSYS_HG_ERROR(poll, error, ret,
+          "Could not make blocking progress on context");
+  } else { -> 轮训模式
+      ret = hg_core_poll(context, poll_timeout, &progressed);
+      HG_CHECK_SUBSYS_HG_ERROR(poll, error, ret,
+          "Could not make non-blocking progress on context");
+  }
