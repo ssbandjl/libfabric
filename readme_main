@@ -403,15 +403,92 @@ fi_tsend
     
 
 fi_eq_open
-  vrb_eq_open
-    rdma_create_event_channel
+    vrb_eq_open
+        switch (attr->wait_obj)
+        ofi_rbmap_init(&_eq->xrc.sidr_conn_rbmap, vrb_sidr_conn_compare) -> struct ofi_rbmap	sidr_conn_rbmap -> 红黑树
+        ofi_epoll_create(&_eq->epollfd) -> *ep = epoll_create(4)
+        _eq->channel = rdma_create_event_channel() -> 创建事件通道
+        ret = fi_fd_nonblock(_eq->channel->fd) -> 非阻塞
+        ofi_epoll_add(_eq->epollfd, _eq->channel->fd, OFI_EPOLL_IN, NULL) -> 事件通道上的FD加入epoll_fd
+        _eq->eq_fid.fid.ops = &vrb_eq_fi_ops
+        _eq->eq_fid.ops = &vrb_eq_ops
+
+
+
+static struct fi_ops vrb_eq_fi_ops = {
+	.size = sizeof(struct fi_ops),
+	.close = vrb_eq_close,
+	.bind = fi_no_bind,
+	.control = vrb_eq_control,
+	.ops_open = fi_no_ops_open,
+};
+
+static struct fi_ops_eq vrb_eq_ops = {
+	.size = sizeof(struct fi_ops_eq),
+	.read = vrb_eq_read,
+	.readerr = vrb_eq_readerr,
+	.write = vrb_eq_write,
+	.sread = vrb_eq_sread,
+	.strerror = vrb_eq_strerror
+};
+
+
+
 
 
 
 fi_endpoint
   vrb_open_ep
+    vrb_check_ep_attr
+        ofi_check_ep_attr
+            ofi_check_ep_type
+        ofi_check_tx_attr
+        vrb_check_rx_attr
+        vrb_alloc_init_ep
+            ofi_endpoint_init vrb_util_ep_progress_noop
+                ep->progress = progress
+                ofi_genlock_init(&ep->lock -> 支持不同的锁类型
+                util_coll_init_cid_mask(ep->coll_cid_mask)
+                    ofi_bitmask_create
+                    ofi_bitmask_set_all
+                    ofi_bitmask_unset
+    vrb_ep_save_info_attr(ep, info)
+    switch (info->ep_attr->type) -> 端点类型
+    ...                            
     vrb_create_ep(ep, vrb_get_port_space(info->addr_format), &ep->id)
-      rdma_create_id(NULL, id, NULL, ps))
+        vrb_get_rdma_rai
+            vrb_get_rdmacm_rai
+                vrb_set_rai
+                rdma_getaddrinfo
+                    ucma_getaddrinfo
+                        ucma_convert_to_rai
+        rdma_create_id(NULL, id, NULL, ps))
+        rdma_resolve_addr
+    ep->util_ep.ep_fid.fid.ops = &vrb_ep_ops
+    ep->util_ep.ep_fid.ops = &vrb_ep_base_ops
+
+
+
+static struct fi_ops vrb_ep_ops = {
+	.size = sizeof(struct fi_ops),
+	.close = vrb_ep_close,
+	.bind = vrb_ep_bind,
+	.control = vrb_ep_control,
+	.ops_open = fi_no_ops_open,
+};
+
+
+static struct fi_ops_ep vrb_ep_base_ops = {
+	.size = sizeof(struct fi_ops_ep),
+	.cancel = fi_no_cancel,
+	.getopt = vrb_ep_getopt,
+	.setopt = vrb_ep_setopt,
+	.tx_ctx = fi_no_tx_ctx,
+	.rx_ctx = fi_no_rx_ctx,
+	.rx_size_left = fi_no_rx_size_left,
+	.tx_size_left = fi_no_tx_size_left,
+};
+
 
 
 fi_eq_read
@@ -429,7 +506,7 @@ fi_connect
 info->tx_attr->size, max_send_wr, 
 
 
-test: fabtests
+test: fabtests, libfabric rdma dma
 fabtests/component/dmabuf-rdma/fi-rdmabw-xe.c
 
 
@@ -629,7 +706,55 @@ enum ibv_send_flags {
 };
 
 
+event_queue 事件队列
+struct vrb_eq
+    struct fid_eq		eq_fid
+    struct rdma_event_channel *channel;
+    ofi_epoll_t		epollfd
 
 
+
+端口协议:
+/* Endpoint protocol
+ * If two providers support the same protocol, then they shall interoperate
+ * when the protocol capabilities match.
+ */
+enum {
+	FI_PROTO_UNSPEC,
+	FI_PROTO_RDMA_CM_IB_RC,
+	FI_PROTO_IWARP,
+	FI_PROTO_IB_UD,
+	/*  PSMX provider is deprecated.
+	 *  We will keep this value in order to save binary compatibility.
+	 */
+	FI_PROTO_PSMX,
+	FI_PROTO_UDP,
+	FI_PROTO_SOCK_TCP,
+	/*  MXM provider is deprecated.
+	 *  We will keep this value in order to save binary compatibility.
+	 */
+	FI_PROTO_MXM,
+	FI_PROTO_IWARP_RDM,
+	FI_PROTO_IB_RDM,
+	FI_PROTO_GNI,
+	FI_PROTO_RXM,
+	FI_PROTO_RXD,
+	FI_PROTO_MLX,
+	FI_PROTO_NETWORKDIRECT,
+	FI_PROTO_PSMX2,
+	FI_PROTO_SHM,
+	FI_PROTO_MRAIL,
+	FI_PROTO_RSTREAM,
+	FI_PROTO_RDMA_CM_IB_XRC,
+	FI_PROTO_EFA,
+	FI_PROTO_PSMX3,
+	FI_PROTO_RXM_TCP,
+	FI_PROTO_OPX,
+	FI_PROTO_CXI,
+	FI_PROTO_XNET,
+	FI_PROTO_COLL,
+	FI_PROTO_UCX,
+	FI_PROTO_SM2,
+};
 
 
