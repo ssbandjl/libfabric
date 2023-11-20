@@ -758,3 +758,38 @@ enum {
 };
 
 
+gpu:
+fabtests/component/dmabuf-rdma/fi-rdmabw-xe.c -> main
+zeMemAllocHost
+init_buf
+init_ofi
+init_nic
+    fi_domain
+    fi_endpoint
+    fi_cq_open
+    if (ep_type == FI_EP_RDM) -> 可靠数据报不需要建连, 通过地址向量管理通信地址
+        fi_av_open
+        fi_ep_bind
+    if (ep_type == FI_EP_MSG) -> 消息需要建连
+        fi_connect
+        fi_accept
+
+
+type - 端点类型, https://ofiwg.github.io/libfabric/v1.20.0/man/fi_endpoint.3.html
+如果指定，则指示所需的结构接口通信类型。支持的类型有：
+
+FI_EP_DGRAM
+支持无连接、不可靠的数据报通信。消息边界得到维护，但最大消息大小可能受限于结构 MTU。无法保证流量控制。
+FI_EP_MSG
+提供可靠、面向连接的数据传输服务，并具有维护消息边界的流控制。
+FI_EP_RDM
+可靠的数据报消息。提供可靠的无连接数据传输服务，并具有维护消息边界的流控制。
+FI_EP_SOCK_DGRAM
+具有类似 UDP 套接字语义的无连接、不可靠的数据报端点。FI_EP_SOCK_DGRAM 对于围绕使用 UDP 套接字设计的应用程序最有用。有关适用于数据报套接字端点的其他详细信息和限制，请参阅 SOCKET ENDPOINT 部分。
+FI_EP_SOCK_STREAM
+具有 TCP 套接字语义的数据流端点。提供可靠、面向连接的数据传输服务，不维护消息边界。FI_EP_SOCK_STREAM 对于围绕使用 TCP 套接字设计的应用程序最有用。有关适用于流端点的其他详细信息和限制，请参阅 SOCKET ENDPOINT 部分。
+FI_EP_UNSPEC
+未指定端点的类型。这通常作为输入提供，端点的其他属性或提供者选择类型。
+
+
+
