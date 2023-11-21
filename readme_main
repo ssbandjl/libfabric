@@ -612,8 +612,24 @@ ret = ft_init_av() -> av: 18446744073709551615
   fi_av_insert -> static int rxm_av_insert
     ofi_ip_av_insert(av_fid, addr, count, fi_addr, flags, context)
       entry = ofi_ibuf_alloc(av->av_entry_pool)
+        ofi_bufpool_grow
       HASH_ADD(hh, av->hash, data, av->addrlen, entry) -> 插入hash表
     ret = rxm_av_add_peers(av, addr, count, fi_addr)
+        peer = util_get_peer(av, cur_addr)
+	        node = ofi_rbmap_find(&av->addr_map, (void *) addr);
+                map->compare(map, key, node->data)
+            rxm_alloc_peer
+                ofi_ibuf_alloc
+                ofi_rbmap_insert(&av->addr_map, &peer->addr, peer, &peer->node)
+        ofi_av_lookup_fi_addr(&av->util_av, cur_addr);
+            ofi_av_lookup_fi_addr_unsafe
+                HASH_FIND(hh, av->hash, addr, av->addrlen, entry)
+        rxm_set_av_context
+        rxm_put_peer_addr
+            rxm_set_av_context(av, fi_addr, NULL)
+
+
+
 
 ...
 init_test(&opts, test_name, sizeof(test_name))
@@ -768,11 +784,35 @@ init_nic
     fi_endpoint
     fi_cq_open
     if (ep_type == FI_EP_RDM) -> 可靠数据报不需要建连, 通过地址向量管理通信地址
-        fi_av_open
+        fi_av_open -> rxm_av_open
+            rxm_util_av_open -> 所有对等地址，无论是已插入 AV 还是端点与其有活动连接，都存储在 addr_map 中。 对等点是从缓冲池中分配的，并使用该池分配本地索引。 所有rxm端点都维护一个与peer_pool对齐的连接数组。 从技术上讲，我们只需要在 AV 本身中存储每个对等点的索引。 “util_av”基本上可以被 ofi_index_map 替换。 然而，太多现有代码依赖于现有的 util_av 并存储 AV 地址。 未来的清理工作是删除 util_av 的使用，并使 rxm_av 实现独立
+                ofi_bufpool_create(&av->peer_pool
+                ofi_bufpool_create(&av->conn_pool
+                ofi_rbmap_init(&av->addr_map, rxm_addr_compare)
+                ofi_av_init(domain, attr, &util_attr, &av->util_av, context)
+                    ofi_av_init_lightweight
+                        util_verify_av_attr
+                    util_av_init -> UDP：添加具有通用实现的 UDP 提供程序 这引入了 UDP 套接字提供程序以及实用程序“库”。 UDP 提供程序是基于 DGRAM 的提供程序，用于发送和接收 UDP 数据包。 它应该与 usnic 提供商兼容，但我还没有测试过。 UDP 提供程序是使用基本提供程序构建块（实用程序“库”）构建的。 引入 UDP 提供程序的原因是它提供了最低级别的功能，可以在该功能上构建其他功能并将其添加到实用程序库中。 该实用程序库有两个目的。 第一个是提供所有提供商都可以使用的通用构建块。 这将使我们能够集中精力优化任何提供商都可以使用的各种功能的单一实现。 例如，实用程序代码提供了 libfabric 对象的基本定义，以便处理引用计数、检查属性等。它还提供了 CQ、EQ、轮询集、AV 等的软件实现......我预计开发人员会迭代实用程序库 代码作为提供者更新以使用它。 该实用程序库基于套接字和 psm 提供商的现有代码。 性能是主要关注点，因此期望提供者特定的代码段。 例如，EP 和 CQ 代码几乎完全是特定于提供商的。 目的是扩展实用程序库以实现额外的 libfabric 功能（例如标记接口、多接收支持等），并构建一个可以自动升级现有提供程序的功能集的实用程序提供程序
+                        util_verify_av_util_attr
+                        roundup_power_of_two
+                        ofi_bufpool_create_attr
+            fi_av_open
         fi_ep_bind
     if (ep_type == FI_EP_MSG) -> 消息需要建连
         fi_connect
-        fi_accept
+        fi_accept -> .accept = vrb_msg_ep_accept
+            fi_control(&ep->fid, FI_ENABLE, NULL)
+            vrb_msg_ep_prepare_cm_data
+            vrb_ep_prepare_rdma_cm_param
+                conn_param->responder_resources = RDMA_MAX_RESP_RES;
+                conn_param->initiator_depth = RDMA_MAX_INIT_DEPTH;
+                conn_param->flow_control = 1; -> 流控
+                conn_param->rnr_retry_count = 7; -> 重试次数
+            rdma_accept(_ep->id, &conn_param)
+        or wait_connected
+            fi_eq_sread
+                rdma_connect
+
 
 
 type - 端点类型, https://ofiwg.github.io/libfabric/v1.20.0/man/fi_endpoint.3.html
@@ -792,4 +832,33 @@ FI_EP_UNSPEC
 未指定端点的类型。这通常作为输入提供，端点的其他属性或提供者选择类型。
 
 
+
+地址向量:
+struct rxm_av {
+	struct util_av util_av;
+	struct ofi_rbmap addr_map;
+	struct ofi_bufpool *peer_pool;
+	struct ofi_bufpool *conn_pool;
+	struct fid_peer_av peer_av;
+	struct fid_av *util_coll_av;
+	struct fid_av *offload_coll_av;
+};
+
+常用计算, math, libfabric/include/ofi.h
+
+向上取powerof2
+static inline uint64_t roundup_power_of_two(uint64_t n)
+{
+	if (!n || !(n & (n - 1)))
+		return n;
+	n--;
+	n |= n >> 1;
+	n |= n >> 2;
+	n |= n >> 4;
+	n |= n >> 8;
+	n |= n >> 16;
+	n |= n >> 32;
+	n++;
+	return n;
+}
 
