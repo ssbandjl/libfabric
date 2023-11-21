@@ -923,6 +923,15 @@ static int rxm_ep_ctrl(struct fid *fid, int command, void *arg)
                 rxm_rx_buf_alloc
                 rxm_post_recv(rx_buf)
                     fi_recv
+                        .recv = rxm_recv -> rxm_recv_common
+                            if (op_flags & FI_MULTI_RECV)
+                                rxm_post_mrecv
+                                    rxm_recv_entry_get(ep, &cur_iov, desc, 1, FI_ADDR_UNSPEC, 0, 0, context, op_flags, &ep->recv_queue) -> 接收队列
+                                    rxm_get_unexp_msg
+                                    rxm_handle_rx_buf
+                                        case rxm_ctrl_eager
+                                            rx_buf->ep->eager_ops->handle_rx(rx_buf)
+                                        
         ret = rxm_start_listen(ep)
             fi_listen(ep->msg_pep)
             fi_getname(&ep->msg_pep->fid, &ep->addr, &addr_len)
@@ -940,4 +949,7 @@ rxm_use_srx
 core_info->ep_attr->rx_ctx_cnt
 
 
-
+progress:
+ssize_t rxm_handle_comp
+    rxm_handle_recv_comp
+        
