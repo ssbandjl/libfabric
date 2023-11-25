@@ -154,7 +154,10 @@ FI_WARN(&core_prov, FI_LOG_CORE, "iov:%p\n", iov);
 
 tcpx_tx_queue_insert -> 
 
-fi_tsend -> rxm_ep_tsend -> rxm_get_conn -> rxm_send_common -> rxm_send_eager -> rxm_msg_tsend -> tcpx_tx_queue_insert -> rxm_cq_write 发完后写完成队列 -> ofi_cq_write
+fi_tsend -> 
+    rxm_ep_tsend -> rxm_get_conn -> 
+    rxm_send_common -> 
+        rxm_send_eager -> rxm_msg_tsend -> tcpx_tx_queue_insert -> rxm_cq_write 发完后写完成队列 -> ofi_cq_write
 
 
 断点: rxm_ep_tsend
@@ -163,7 +166,8 @@ fi_tsend -> rxm_ep_tsend -> rxm_get_conn -> rxm_send_common -> rxm_send_eager ->
 rxm_get_conn
   ofi_av_addr_context
     ofi_av_get_addr
-      ofi_bufpool_get_ibuf
+      ofi_bufpool_get_ibuf ->缓存池
+        pool->region_table[(size_t)(index / pool->attr.chunk_cnt)]->mem_region + (index % pool->attr.chunk_cnt) * pool->entry_size
   rxm_add_conn
     ofi_idm_lookup
     rxm_alloc_conn
@@ -756,5 +760,16 @@ enum {
 	FI_PROTO_UCX,
 	FI_PROTO_SM2,
 };
+
+
+异步向量IO
+FI_ASYNC_IOV
+
+
+模式转字符串:
+ofi_tostr_mode
+
+字符串转模式
+str2mode
 
 
