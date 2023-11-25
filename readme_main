@@ -969,3 +969,7 @@ progress:
 ssize_t rxm_handle_comp
     rxm_handle_recv_comp
         
+
+
+ofi_check_rx_attr
+    int rm_enabled = (prov_info->domain_attr->resource_mgmt == FI_RM_ENABLED);
