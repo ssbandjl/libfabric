@@ -158,6 +158,29 @@ fi_tsend ->
     rxm_ep_tsend -> rxm_get_conn -> 
     rxm_send_common -> 
         rxm_send_eager -> rxm_msg_tsend -> tcpx_tx_queue_insert -> rxm_cq_write 发完后写完成队列 -> ofi_cq_write
+send, 发送:
+fi_tsend -> 
+    rxm_ep_tsend -> 
+        rxm_get_conn -> 
+            rxm_send_common ->
+                data_len = ofi_total_iov_len(iov, count)
+                rxm_mr_desc_to_hmem_iface_dev
+                rxm_send_eager -> 小于16KB的走紧急消息
+                    rxm_msg_tsend -> 
+                        tcpx_tx_queue_insert -> 
+                            rxm_cq_write 发完后写完成队列 -> 
+                                ofi_cq_write
+                rxm_send_sar -> 大于 128 Kb
+                    rxm_mr_desc_to_hmem_iface_dev
+                    rxm_init_segment
+                    ofi_copy_from_hmem_iov
+                    fi_send
+                    for (i = 1; i < segs_cnt; i++)
+                        rxm_send_segment
+                            rxm_init_segment
+                            ofi_copy_from_hmem_iov
+                    remain_len -= rxm_buffer_size
+
 
 
 断点: rxm_ep_tsend
@@ -616,8 +639,24 @@ ret = ft_init_av() -> av: 18446744073709551615
   fi_av_insert -> static int rxm_av_insert
     ofi_ip_av_insert(av_fid, addr, count, fi_addr, flags, context)
       entry = ofi_ibuf_alloc(av->av_entry_pool)
+        ofi_bufpool_grow
       HASH_ADD(hh, av->hash, data, av->addrlen, entry) -> 插入hash表
     ret = rxm_av_add_peers(av, addr, count, fi_addr)
+        peer = util_get_peer(av, cur_addr)
+	        node = ofi_rbmap_find(&av->addr_map, (void *) addr);
+                map->compare(map, key, node->data)
+            rxm_alloc_peer
+                ofi_ibuf_alloc
+                ofi_rbmap_insert(&av->addr_map, &peer->addr, peer, &peer->node)
+        ofi_av_lookup_fi_addr(&av->util_av, cur_addr);
+            ofi_av_lookup_fi_addr_unsafe
+                HASH_FIND(hh, av->hash, addr, av->addrlen, entry)
+        rxm_set_av_context
+        rxm_put_peer_addr
+            rxm_set_av_context(av, fi_addr, NULL)
+
+
+
 
 ...
 init_test(&opts, test_name, sizeof(test_name))
@@ -664,7 +703,7 @@ fi_domain
     _domain->cache.delete_region = vrb_mr_cache_delete_region
     ret = ofi_mr_cache_init(&_domain->util_domain, memory_monitors, &_domain->cache)
       ofi_rbmap_init
-      ofi_bufpool_create
+      ofi_bufpool_create 内存池
         pool->entry_size = ofi_get_aligned_size(entry_sz, pool->attr.alignment)
     ret = vrb_init_progress(&_domain->progress, _domain->verbs)
 
@@ -683,6 +722,7 @@ fi_domain
 
 
 
+RXM初始化, 
 #define DEFAULT_CONF_FILE_PATH "libfabric.conf" -> 默认配置文件
 定义参数:
 rxm_buffer_size 16KB
@@ -695,9 +735,11 @@ RXM_INI
 			"corresponds to the rxm inject limit, and is also "
 			"typically used as the eager message size. "
 			"(default %zu)", rxm_buffer_size);
+    rxm_cm_progress_interval = 10000
 comp_per_progress: 每轮一个
 sar_limit: 分割与重组, prov/rxm：允许指定与缓冲区大小分开的急切大小 对于 rxm + tcp，急切大小和缓冲区大小可以不同。 Tcp 允许直接使用 tcp 发布用户缓冲区，从而避免发送端副本。 在接收端，只有在意外消息的情况下才需要缓冲区大小，我们可以单独处理。 （在后续补丁中）。 此更改将使我们能够避免在常见情况下不使用的缓冲区分配，从而减少通过 tcp 运行时的内存占用
 enable_passthru: 直通, 启用 passthru 优化。Passthru 允许 rxm 将所有数据传输调用直接传递到核心提供程序，从而消除 rxm 协议和相关开销。Passthru 是到 tcp 提供程序的优化路径，具体取决于 应用程序请求的功能,
+
 
 
 rdma发送标记:
@@ -773,3 +815,157 @@ ofi_tostr_mode
 str2mode
 
 
+gpu:
+fabtests/component/dmabuf-rdma/fi-rdmabw-xe.c -> main
+zeMemAllocHost
+init_buf
+init_ofi
+init_nic
+    fi_domain
+    fi_endpoint
+    fi_cq_open
+    if (ep_type == FI_EP_RDM) -> 可靠数据报不需要建连, 通过地址向量管理通信地址
+        fi_av_open -> rxm_av_open
+            rxm_util_av_open -> 所有对等地址，无论是已插入 AV 还是端点与其有活动连接，都存储在 addr_map 中。 对等点是从缓冲池中分配的，并使用该池分配本地索引。 所有rxm端点都维护一个与peer_pool对齐的连接数组。 从技术上讲，我们只需要在 AV 本身中存储每个对等点的索引。 “util_av”基本上可以被 ofi_index_map 替换。 然而，太多现有代码依赖于现有的 util_av 并存储 AV 地址。 未来的清理工作是删除 util_av 的使用，并使 rxm_av 实现独立
+                ofi_bufpool_create(&av->peer_pool
+                ofi_bufpool_create(&av->conn_pool
+                ofi_rbmap_init(&av->addr_map, rxm_addr_compare)
+                ofi_av_init(domain, attr, &util_attr, &av->util_av, context)
+                    ofi_av_init_lightweight
+                        util_verify_av_attr
+                    util_av_init -> UDP：添加具有通用实现的 UDP 提供程序 这引入了 UDP 套接字提供程序以及实用程序“库”。 UDP 提供程序是基于 DGRAM 的提供程序，用于发送和接收 UDP 数据包。 它应该与 usnic 提供商兼容，但我还没有测试过。 UDP 提供程序是使用基本提供程序构建块（实用程序“库”）构建的。 引入 UDP 提供程序的原因是它提供了最低级别的功能，可以在该功能上构建其他功能并将其添加到实用程序库中。 该实用程序库有两个目的。 第一个是提供所有提供商都可以使用的通用构建块。 这将使我们能够集中精力优化任何提供商都可以使用的各种功能的单一实现。 例如，实用程序代码提供了 libfabric 对象的基本定义，以便处理引用计数、检查属性等。它还提供了 CQ、EQ、轮询集、AV 等的软件实现......我预计开发人员会迭代实用程序库 代码作为提供者更新以使用它。 该实用程序库基于套接字和 psm 提供商的现有代码。 性能是主要关注点，因此期望提供者特定的代码段。 例如，EP 和 CQ 代码几乎完全是特定于提供商的。 目的是扩展实用程序库以实现额外的 libfabric 功能（例如标记接口、多接收支持等），并构建一个可以自动升级现有提供程序的功能集的实用程序提供程序
+                        util_verify_av_util_attr
+                        roundup_power_of_two
+                        ofi_bufpool_create_attr
+            fi_av_open
+        fi_ep_bind
+    if (ep_type == FI_EP_MSG) -> 消息需要建连
+        fi_connect
+        fi_accept -> .accept = vrb_msg_ep_accept
+            fi_control(&ep->fid, FI_ENABLE, NULL)
+            vrb_msg_ep_prepare_cm_data
+            vrb_ep_prepare_rdma_cm_param
+                conn_param->responder_resources = RDMA_MAX_RESP_RES;
+                conn_param->initiator_depth = RDMA_MAX_INIT_DEPTH;
+                conn_param->flow_control = 1; -> 流控
+                conn_param->rnr_retry_count = 7; -> 重试次数
+            rdma_accept(_ep->id, &conn_param)
+        or wait_connected
+            fi_eq_sread
+                rdma_connect
+
+
+
+type - 端点类型, https://ofiwg.github.io/libfabric/v1.20.0/man/fi_endpoint.3.html
+如果指定，则指示所需的结构接口通信类型。支持的类型有：
+
+FI_EP_DGRAM
+支持无连接、不可靠的数据报通信。消息边界得到维护，但最大消息大小可能受限于结构 MTU。无法保证流量控制。
+FI_EP_MSG
+提供可靠、面向连接的数据传输服务，并具有维护消息边界的流控制。
+FI_EP_RDM
+可靠的数据报消息。提供可靠的无连接数据传输服务，并具有维护消息边界的流控制。
+FI_EP_SOCK_DGRAM
+具有类似 UDP 套接字语义的无连接、不可靠的数据报端点。FI_EP_SOCK_DGRAM 对于围绕使用 UDP 套接字设计的应用程序最有用。有关适用于数据报套接字端点的其他详细信息和限制，请参阅 SOCKET ENDPOINT 部分。
+FI_EP_SOCK_STREAM
+具有 TCP 套接字语义的数据流端点。提供可靠、面向连接的数据传输服务，不维护消息边界。FI_EP_SOCK_STREAM 对于围绕使用 TCP 套接字设计的应用程序最有用。有关适用于流端点的其他详细信息和限制，请参阅 SOCKET ENDPOINT 部分。
+FI_EP_UNSPEC
+未指定端点的类型。这通常作为输入提供，端点的其他属性或提供者选择类型。
+
+
+
+地址向量:
+struct rxm_av {
+	struct util_av util_av;
+	struct ofi_rbmap addr_map;
+	struct ofi_bufpool *peer_pool;
+	struct ofi_bufpool *conn_pool;
+	struct fid_peer_av peer_av;
+	struct fid_av *util_coll_av;
+	struct fid_av *offload_coll_av;
+};
+
+常用计算, math, libfabric/include/ofi.h
+
+向上取powerof2
+static inline uint64_t roundup_power_of_two(uint64_t n)
+{
+	if (!n || !(n & (n - 1)))
+		return n;
+	n--;
+	n |= n >> 1;
+	n |= n >> 2;
+	n |= n >> 4;
+	n |= n >> 8;
+	n |= n >> 16;
+	n |= n >> 32;
+	n++;
+	return n;
+}
+
+
+
+rxm,手动/自动推进, 
+FI_PROGRESS_MANUAL, FI_PROGRESS_AUTO
+domain_attr->control_progress = FI_PROGRESS_MANUAL
+cur->domain_attr->data_progress = FI_PROGRESS_MANUAL
+domain_attr->data_progress = FI_PROGRESS_MANUAL
+cur->domain_attr->threading = FI_THREAD_SAFE
+
+fi_control, 控制命令, 
+static int rxm_ep_ctrl(struct fid *fid, int command, void *arg)
+    switch (command)
+    case FI_ENABLE:
+        rxm_ep_msg_cq_open(ep) -> 确保原子进度线程此时未启动。 进度线程应仅在 MSG CQ 打开后启动，以保持简单（避免首先仅进行 MSG EQ，然后在打开 MSG EQ 和 MSG CQ 后同时进行 MSG EQ 和 MSG CQ）
+            cq_attr.wait_obj = rxm_get_wait_obj(rxm_ep)
+            fi_cq_open(domain->msg_domain, &cq_attr, &rxm_ep->msg_cq,rxm_ep)
+            rxm_ep_wait_fd_add(rxm_ep, cq_list[i]->wait) -> 完成列表, 需要等待FD(中断模式)
+                ofi_wait_add_fid
+                    ofi_wait_add_fid(wait, &rxm_ep->msg_cq->fid, POLLIN, rxm_ep_trywait_cq)
+                        fi_trywait(rxm_fabric->msg_fabric, fids, 1)
+                    ofi_wait_add_fid(wait, &rxm_ep->msg_eq->fid, POLLIN, rxm_ep_trywait_eq)
+                        fi_trywait(rxm_fabric->msg_fabric, fids, 1)
+            rxm_ep_wait_fd_add(rxm_ep, cntr_list[i]->wait) -> 控制列表
+        rxm_ep_txrx_res_open(ep) -> 在启用端点时，FI_OPT_BUFFERED_MIN、FI_OPT_BUFFERED_LIMIT应该已被冻结，以便我们可以创建具有正确大小的集合点协议消息池
+            prov/rxm：使用预分配的注入 TX 缓冲区进行非线程安全模式 该补丁通过在关键发送路径上保存 40 条指令来减少延迟 (1-2 ms) 和消息速率 (+ ~50k)。 该补丁提出了以下行为：如果未设置 FI_THREAD_SAFE 线程模式，EP 不会为 inejct 操作分配缓冲区池，EP 会为注入操作分配单个 TX 缓冲区，并在每个注入操作中使用它。 此外，补丁还通过仅存储指向池的指针而不是整个数组来减少 RxM EP 的大小
+            rxm_ep_create_pools -> 内存池
+            rxm_ep_rx_queue_init
+                rxm_recv_queue_init
+                    rxm_recv_fs_create
+                rxm_multi_recv_pool_init
+                    ofi_bufpool_create_attr
+        rxm_prepost_recv(ep, ep->msg_srx)
+            for (i = 0; i < ep->msg_info->rx_attr->size; i++)
+                rxm_rx_buf_alloc
+                rxm_post_recv(rx_buf)
+                    fi_recv
+                        .recv = rxm_recv -> rxm_recv_common
+                            if (op_flags & FI_MULTI_RECV)
+                                rxm_post_mrecv
+                                    rxm_recv_entry_get(ep, &cur_iov, desc, 1, FI_ADDR_UNSPEC, 0, 0, context, op_flags, &ep->recv_queue) -> 接收队列
+                                    rxm_get_unexp_msg
+                                    rxm_handle_rx_buf
+                                        case rxm_ctrl_eager
+                                            rx_buf->ep->eager_ops->handle_rx(rx_buf)
+                                        
+        ret = rxm_start_listen(ep)
+            fi_listen(ep->msg_pep)
+            fi_getname(&ep->msg_pep->fid, &ep->addr, &addr_len)
+            if (ep->util_ep.domain->data_progress == FI_PROGRESS_AUTO || force_auto_progress)
+                pthread_create(&ep->cm_thread, 0, ep->rxm_info->caps & FI_ATOMIC ? rxm_cm_atomic_progress : rxm_cm_progress, ep) -> 启动线程
+
+
+
+
+FI_OFI_RXM_CM_PROGRESS_INTERVAL
+
+共享接收队列: FI_OFI_RXM_USE_SRX
+cli_srx_set
+rxm_use_srx
+core_info->ep_attr->rx_ctx_cnt
+
+
+progress:
+ssize_t rxm_handle_comp
+    rxm_handle_recv_comp
+        
