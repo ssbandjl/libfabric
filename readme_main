@@ -973,3 +973,47 @@ ssize_t rxm_handle_comp
 
 ofi_check_rx_attr
     int rm_enabled = (prov_info->domain_attr->resource_mgmt == FI_RM_ENABLED);
+
+
+vrb_eq_readerr
+
+
+FI_ECANCELED
+
+#define	FI_EIO		 	EIO		/* I/O error */
+
+
+
+如果是下刷错误,则返回取消, 如果是其他错误, 则返回EIO
+err_entry.err = (wc->status == IBV_WC_WR_FLUSH_ERR) ? FI_ECANCELED : FI_EIO;
+
+
+
+工作完成状态:
+enum ibv_wc_status {
+	IBV_WC_SUCCESS,
+	IBV_WC_LOC_LEN_ERR,
+	IBV_WC_LOC_QP_OP_ERR,
+	IBV_WC_LOC_EEC_OP_ERR,
+	IBV_WC_LOC_PROT_ERR,
+	IBV_WC_WR_FLUSH_ERR,
+	IBV_WC_MW_BIND_ERR,
+	IBV_WC_BAD_RESP_ERR,
+	IBV_WC_LOC_ACCESS_ERR,
+	IBV_WC_REM_INV_REQ_ERR,
+	IBV_WC_REM_ACCESS_ERR,
+	IBV_WC_REM_OP_ERR,
+	IBV_WC_RETRY_EXC_ERR,
+	IBV_WC_RNR_RETRY_EXC_ERR,
+	IBV_WC_LOC_RDD_VIOL_ERR,
+	IBV_WC_REM_INV_RD_REQ_ERR,
+	IBV_WC_REM_ABORT_ERR,
+	IBV_WC_INV_EECN_ERR,
+	IBV_WC_INV_EEC_STATE_ERR,
+	IBV_WC_FATAL_ERR,
+	IBV_WC_RESP_TIMEOUT_ERR,
+	IBV_WC_GENERAL_ERR,
+	IBV_WC_TM_ERR,
+	IBV_WC_TM_RNDV_INCOMPLETE,
+};
+
