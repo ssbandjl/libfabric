@@ -1017,3 +1017,48 @@ enum ibv_wc_status {
 	IBV_WC_TM_RNDV_INCOMPLETE,
 };
 
+
+
+vrb_msg_ep_sendmsg
+    
+
+
+
+
+fabtests\component\dmabuf-rdma\rdmabw-xe.c
+dmabuf_reg_open
+xe_init
+init_buf
+init_ib
+    ibv_get_device_list
+    init_nic
+        ibv_open_device
+        ibv_alloc_pd
+        ibv_reg_mr
+        or ibv_reg_dmabuf_mr
+        ibv_create_cq
+        qp_init_attr.qp_type = IBV_QPT_RC;
+        ibv_create_qp
+        ibv_modify_qp
+        ibv_query_gid
+    show_business_card(&me, "Me");
+    exchange_info
+    show_business_card(&peer, "Peer");
+    connect_ib
+        qp_attr.qp_state		= IBV_QPS_RTR;
+        ...
+        ibv_modify_qp
+        qp_attr.qp_state = IBV_QPS_RTS;
+        ibv_modify_qp
+run_rdma_test
+    post_proxy_write
+        .opcode = IBV_WR_RDMA_WRITE,
+    or post_rdma
+        .opcode = test_type == READ ? IBV_WR_RDMA_READ : IBV_WR_RDMA_WRITE
+    ibv_poll_cq
+    check_completions
+        ibv_wc_status_str
+sync_tcp
+sync_ib
+
+
