@@ -1,36 +1,7 @@
-/*
- * Copyright (c) 2016, Cisco Systems, Inc. All rights reserved.
- * Copyright (c) 2013-2015 Intel Corporation, Inc.  All rights reserved.
- * Copyright (c) 2017-2022 Amazon.com, Inc. or its affiliates. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright (c) 2016, Cisco Systems, Inc. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2013-2015 Intel Corporation, Inc.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include <malloc.h>
 #include <stdio.h>
@@ -138,7 +109,6 @@ fi_addr_t efa_av_reverse_lookup_rdm(struct efa_av *av, uint16_t ahn, uint16_t qp
 	struct efa_prv_reverse_av_key prv_key;
 	uint32_t *connid;
 
-	memset(&cur_key, 0, sizeof(cur_key));
 	cur_key.ahn = ahn;
 	cur_key.qpn = qpn;
 
@@ -167,7 +137,6 @@ fi_addr_t efa_av_reverse_lookup_rdm(struct efa_av *av, uint16_t ahn, uint16_t qp
 		return cur_entry->conn->fi_addr;
 
 	/* the packet is from a previous peer, look for its address from the prv_reverse_av */
-	memset(&prv_key, 0, sizeof(prv_key));
 	prv_key.ahn = ahn;
 	prv_key.qpn = qpn;
 	prv_key.connid = *connid;
@@ -284,10 +253,11 @@ void efa_conn_release(struct efa_av *av, struct efa_conn *conn);
  *
  * @param[in]	av	address vector
  * @param[in]	conn	efa_conn object
+ * @param[in]	insert_shm_av	whether insert address to shm av
  * @return	On success return 0, otherwise return a negative error code
  */
 static
-int efa_conn_rdm_init(struct efa_av *av, struct efa_conn *conn)
+int efa_conn_rdm_init(struct efa_av *av, struct efa_conn *conn, bool insert_shm_av)
 {
 	int err, ret;
 	char smr_name[EFA_SHM_NAME_MAX];
@@ -305,8 +275,15 @@ int efa_conn_rdm_init(struct efa_av *av, struct efa_conn *conn)
 	peer = &conn->rdm_peer;
 	efa_rdm_peer_construct(peer, efa_rdm_ep, conn);
 
-	/* If peer is local, insert the address into shm provider's av */
-	if (efa_is_local_peer(av, conn->ep_addr) && av->shm_rdm_av) {
+	/*
+	 * The efa_conn_rdm_init() call can be made in two situations:
+	 * 1. application calls fi_av_insert API
+	 * 2. efa progress engine get a message from unknown peer through efa device,
+	 *    which means peer is not local or shm is disabled for transmission.
+	 * For situation 1, the shm av insertion should happen when the peer is local (insert_shm_av=1)
+	 * For situation 2, the shm av insertion shouldn't happen anyway (insert_shm_av=0).
+	 */
+	if (efa_is_local_peer(av, conn->ep_addr) && av->shm_rdm_av && insert_shm_av) {
 		if (av->shm_used >= efa_env.shm_av_size) {
 			EFA_WARN(FI_LOG_AV,
 				 "Max number of shm AV entry (%d) has been reached.\n",
@@ -456,12 +433,13 @@ int efa_av_update_reverse_av(struct efa_av *av, struct efa_ep_addr *raw_addr,
  * @param[in]	raw_addr	raw efa address
  * @param[in]	flags		flags application passed to fi_av_insert
  * @param[in]	context		context application passed to fi_av_insert
+ * @param[in]	insert_shm_av	whether insert address to shm av
  * @return	on success, return a pointer to an efa_conn object
  *		otherwise, return NULL. errno will be set to a positive error code.
  */
 static
 struct efa_conn *efa_conn_alloc(struct efa_av *av, struct efa_ep_addr *raw_addr,
-				uint64_t flags, void *context)
+				uint64_t flags, void *context, bool insert_shm_av)
 {
 	struct util_av_entry *util_av_entry = NULL;
 	struct efa_av_entry *efa_av_entry = NULL;
@@ -502,7 +480,7 @@ struct efa_conn *efa_conn_alloc(struct efa_av *av, struct efa_ep_addr *raw_addr,
 		goto err_release;
 
 	if (av->ep_type == FI_EP_RDM) {
-		err = efa_conn_rdm_init(av, conn);
+		err = efa_conn_rdm_init(av, conn, insert_shm_av);
 		if (err) {
 			errno = -err;
 			goto err_release;
@@ -601,10 +579,12 @@ void efa_conn_release(struct efa_av *av, struct efa_conn *conn)
  * @param[out]	fi_addr pointer to the output fi address. This address is used by fi_send
  * @param[in]	flags	flags user passed to fi_av_insert.
  * @param[in]	context	context user passed to fi_av_insert
+ * @param[in]	insert_shm_av	whether insert address to shm av
  * @return	0 on success, a negative error code on failure
  */
 int efa_av_insert_one(struct efa_av *av, struct efa_ep_addr *addr,
-		      fi_addr_t *fi_addr, uint64_t flags, void *context)
+		      fi_addr_t *fi_addr, uint64_t flags, void *context,
+		      bool insert_shm_av)
 {
 	struct efa_conn *conn;
 	char raw_gid_str[INET6_ADDRSTRLEN];
@@ -638,7 +618,7 @@ int efa_av_insert_one(struct efa_av *av, struct efa_ep_addr *addr,
 		goto out;
 	}
 
-	conn = efa_conn_alloc(av, addr, flags, context);
+	conn = efa_conn_alloc(av, addr, flags, context, insert_shm_av);
 	if (!conn) {
 		*fi_addr = FI_ADDR_NOTAVAIL;
 		ret = -FI_EADDRNOTAVAIL;
@@ -680,7 +660,7 @@ int efa_av_insert(struct fid_av *av_fid, const void *addr,
 	for (i = 0; i < count; i++) {
 		addr_i = (struct efa_ep_addr *) ((uint8_t *)addr + i * EFA_EP_ADDR_LEN);
 
-		ret = efa_av_insert_one(av, addr_i, &fi_addr_res, flags, context);
+		ret = efa_av_insert_one(av, addr_i, &fi_addr_res, flags, context, true);
 		if (ret) {
 			EFA_WARN(FI_LOG_AV, "insert raw_addr to av failed! ret=%d\n",
 				 ret);
@@ -831,27 +811,24 @@ static void efa_av_close_reverse_av(struct efa_av *av)
 static int efa_av_close(struct fid *fid)
 {
 	struct efa_av *av;
-	int ret = 0;
 	int err = 0;
 
 	av = container_of(fid, struct efa_av, util_av.av_fid.fid);
 
 	efa_av_close_reverse_av(av);
 
-	ret = ofi_av_close(&av->util_av);
-	if (ret) {
-		err = ret;
+	err = ofi_av_close(&av->util_av);
+	if (OFI_UNLIKELY(err)) {
 		EFA_WARN(FI_LOG_AV, "Failed to close av: %s\n",
-			fi_strerror(ret));
+			fi_strerror(err));
 	}
 
 	if (av->ep_type == FI_EP_RDM) {
 		if (av->shm_rdm_av) {
-			ret = fi_close(&av->shm_rdm_av->fid);
-			if (ret) {
-				err = ret;
+			err = fi_close(&av->shm_rdm_av->fid);
+			if (OFI_UNLIKELY(err)) {
 				EFA_WARN(FI_LOG_AV, "Failed to close shm av: %s\n",
-					fi_strerror(ret));
+					fi_strerror(err));
 			}
 		}
 	}

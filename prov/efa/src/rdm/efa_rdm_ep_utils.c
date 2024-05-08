@@ -1,35 +1,5 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -39,7 +9,6 @@
 #include <ofi_iov.h>
 #include "efa.h"
 #include "efa_av.h"
-#include "efa_cq.h"
 #include "efa_rdm_msg.h"
 #include "efa_rdm_rma.h"
 #include "efa_rdm_atomic.h"
@@ -63,8 +32,8 @@ const char *efa_rdm_ep_raw_addr_str(struct efa_rdm_ep *ep, char *buf, size_t *bu
 
 /**
  * @brief return peer's raw address in #efa_ep_addr
- * 
- * @param[in] ep		end point 
+ *
+ * @param[in] ep		end point
  * @param[in] addr 		libfabric address
  * @returns
  * If peer exists, return peer's raw addrress as pointer to #efa_ep_addr;
@@ -102,8 +71,8 @@ int32_t efa_rdm_ep_get_peer_ahn(struct efa_rdm_ep *ep, fi_addr_t addr)
 
 /**
  * @brief return peer's raw address in a reable string
- * 
- * @param[in] ep		end point 
+ *
+ * @param[in] ep		end point
  * @param[in] addr 		libfabric address
  * @param[out] buf		a buffer tat to be used to store string
  * @param[in,out] buflen	length of `buf` as input. length of the string as output.
@@ -117,8 +86,8 @@ const char *efa_rdm_ep_get_peer_raw_addr_str(struct efa_rdm_ep *ep, fi_addr_t ad
 
 /**
  * @brief get pointer to efa_rdm_peer structure for a given libfabric address
- * 
- * @param[in]		ep		endpoint 
+ *
+ * @param[in]		ep		endpoint
  * @param[in]		addr 		libfabric address
  * @returns if peer exists, return pointer to #efa_rdm_peer;
  *          otherwise, return NULL.
@@ -155,12 +124,16 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_rxe(struct efa_rdm_ep *ep, fi_addr_t addr, 
 		EFA_WARN(FI_LOG_EP_CTRL, "RX entries exhausted\n");
 		return NULL;
 	}
-	memset(rxe, 0, sizeof(struct efa_rdm_ope));
 
 	rxe->ep = ep;
 	dlist_insert_tail(&rxe->ep_entry, &ep->rxe_list);
 	rxe->type = EFA_RDM_RXE;
+	rxe->internal_flags = 0;
+	rxe->fi_flags = 0;
 	rxe->rx_id = ofi_buf_index(rxe);
+	rxe->iov_count = 0;
+	memset(rxe->mr, 0, sizeof(*rxe->mr) * EFA_RDM_IOV_LIMIT);
+
 	dlist_init(&rxe->queued_pkts);
 
 	rxe->state = EFA_RDM_RXE_INIT;
@@ -178,12 +151,21 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_rxe(struct efa_rdm_ep *ep, fi_addr_t addr, 
 		rxe->peer = NULL;
 	}
 
-	rxe->bytes_runt = 0;
+	rxe->bytes_received = 0;
 	rxe->bytes_received_via_mulreq = 0;
+	rxe->bytes_copied = 0;
+	rxe->bytes_queued_blocking_copy = 0;
+	rxe->bytes_acked = 0;
+	rxe->bytes_sent = 0;
+	rxe->bytes_runt = 0;
 	rxe->cuda_copy_method = EFA_RDM_CUDA_COPY_UNSPEC;
 	rxe->efa_outstanding_tx_ops = 0;
+	rxe->window = 0;
 	rxe->op = op;
 	rxe->peer_rxe = NULL;
+	rxe->unexp_pkt = NULL;
+	rxe->atomrsp_data = NULL;
+	rxe->bytes_read_total_len = 0;
 
 	switch (op) {
 	case ofi_op_tagged:
@@ -207,7 +189,7 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_rxe(struct efa_rdm_ep *ep, fi_addr_t addr, 
 		break;
 	default:
 		EFA_WARN(FI_LOG_EP_CTRL,
-			"Unknown operation while %s\n", __func__);
+			"Unknown operation for RX entry allocation\n");
 		assert(0 && "Unknown operation");
 	}
 
@@ -227,9 +209,10 @@ int efa_rdm_ep_post_user_recv_buf(struct efa_rdm_ep *ep, struct efa_rdm_ope *rxe
 {
 	struct efa_rdm_pke *pkt_entry;
 	struct efa_mr *mr;
-	int err;
+	size_t rx_iov_offset = 0;
+	int err, rx_iov_index = 0;
 
-	assert(rxe->iov_count == 1);
+	assert(rxe->iov_count > 0  && rxe->iov_count <= ep->rx_iov_limit);
 	assert(rxe->iov[0].iov_len >= ep->msg_prefix_size);
 	pkt_entry = (struct efa_rdm_pke *)rxe->iov[0].iov_base;
 	assert(pkt_entry);
@@ -246,17 +229,32 @@ int efa_rdm_ep_post_user_recv_buf(struct efa_rdm_ep *ep, struct efa_rdm_ope *rxe
 	pkt_entry->alloc_type = EFA_RDM_PKE_FROM_USER_BUFFER;
 	pkt_entry->flags = EFA_RDM_PKE_IN_USE;
 	pkt_entry->next = NULL;
+	pkt_entry->ep = ep;
 	/*
 	 * The actual receiving buffer size (pkt_size) is
-	 *    rxe->total_len - sizeof(struct efa_rdm_pke)
+	 *    (total IOV length) - sizeof(struct efa_rdm_pke)
 	 * because the first part of user buffer was used to
 	 * construct pkt_entry. The actual receiving buffer
 	 * posted to device starts from pkt_entry->wiredata.
 	 */
-	pkt_entry->pkt_size = rxe->iov[0].iov_len - sizeof(struct efa_rdm_pke);
-
+	pkt_entry->pkt_size = ofi_total_iov_len(rxe->iov, rxe->iov_count) - sizeof *pkt_entry;
 	pkt_entry->ope = rxe;
 	rxe->state = EFA_RDM_RXE_MATCHED;
+
+	err = ofi_iov_locate(rxe->iov, rxe->iov_count, ep->msg_prefix_size, &rx_iov_index, &rx_iov_offset);
+	if (OFI_UNLIKELY(err)) {
+		EFA_WARN(FI_LOG_CQ, "ofi_iov_locate failure: %s (%d)\n", fi_strerror(-err), -err);
+		return err;
+	}
+	assert(rx_iov_index < rxe->iov_count);
+	assert(rx_iov_offset < rxe->iov[rx_iov_index].iov_len);
+
+	if (rx_iov_index > 0) {
+		assert(rxe->iov_count - rx_iov_index == 1);
+		pkt_entry->payload = (char *) rxe->iov[rx_iov_index].iov_base + rx_iov_offset;
+		pkt_entry->payload_mr = rxe->desc[rx_iov_index];
+		pkt_entry->payload_size = ofi_total_iov_len(&rxe->iov[rx_iov_index], rxe->iov_count - rx_iov_index) - rx_iov_offset;
+	}
 
 	err = efa_rdm_pke_recvv(&pkt_entry, 1);
 	if (OFI_UNLIKELY(err)) {
@@ -275,10 +273,11 @@ int efa_rdm_ep_post_user_recv_buf(struct efa_rdm_ep *ep, struct efa_rdm_ope *rxe
 
 /* create a new txe */
 struct efa_rdm_ope *efa_rdm_ep_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
-					   const struct fi_msg *msg,
-					   uint32_t op,
-					   uint64_t tag,
-					   uint64_t flags)
+					 struct efa_rdm_peer *peer,
+					 const struct fi_msg *msg,
+					 uint32_t op,
+					 uint64_t tag,
+					 uint64_t flags)
 {
 	struct efa_rdm_ope *txe;
 
@@ -288,7 +287,7 @@ struct efa_rdm_ope *efa_rdm_ep_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
 		return NULL;
 	}
 
-	efa_rdm_txe_construct(txe, efa_rdm_ep, msg, op, flags);
+	efa_rdm_txe_construct(txe, efa_rdm_ep, peer, msg, op, flags);
 	if (op == ofi_op_tagged) {
 		txe->cq_entry.tag = tag;
 		txe->tag = tag;
@@ -328,11 +327,13 @@ void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct efa_rdm_pke
 	struct efa_rdm_ope *ope;
 
 	ope = pkt_entry->ope;
+	assert(ope);
+
 	/*
 	 * peer can be NULL when the pkt_entry is a RMA_CONTEXT_PKT,
 	 * and the RMA is a local read toward the endpoint itself
 	 */
-	peer = efa_rdm_ep_get_peer(ep, pkt_entry->addr);
+	peer = ope->peer;
 	if (peer)
 		dlist_insert_tail(&pkt_entry->entry,
 				  &peer->outstanding_tx_pkts);
@@ -342,8 +343,7 @@ void efa_rdm_ep_record_tx_op_submitted(struct efa_rdm_ep *ep, struct efa_rdm_pke
 	if (peer)
 		peer->efa_outstanding_tx_ops++;
 
-	if (ope)
-		ope->efa_outstanding_tx_ops++;
+	ope->efa_outstanding_tx_ops++;
 #if ENABLE_DEBUG
 	ep->efa_total_posted_tx_ops++;
 #endif
@@ -543,51 +543,31 @@ void efa_rdm_ep_queue_rnr_pkt(struct efa_rdm_ep *ep,
  * return negative libfabric error code for error. Possible errors include:
  * -FI_EAGAIN	temporarily out of resource to send packet
  */
-ssize_t efa_rdm_ep_trigger_handshake(struct efa_rdm_ep *ep,
-				     fi_addr_t addr)
+ssize_t efa_rdm_ep_trigger_handshake(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer)
 {
-	struct efa_rdm_peer *peer;
 	struct efa_rdm_ope *txe;
+	struct fi_msg msg = {0};
 	ssize_t err;
 
-	peer = efa_rdm_ep_get_peer(ep, addr);
 	assert(peer);
-
 	if ((peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED) ||
 	    (peer->flags & EFA_RDM_PEER_REQ_SENT))
 		return 0;
 
-	/* TODO: use efa_rdm_ep_alloc_txe to allocate txe */
-	txe = ofi_buf_alloc(ep->ope_pool);
+	msg.addr = peer->efa_fiaddr;
+
+	txe = efa_rdm_ep_alloc_txe(ep, peer, &msg, ofi_op_write, 0, 0);
+
 	if (OFI_UNLIKELY(!txe)) {
 		EFA_WARN(FI_LOG_EP_CTRL, "TX entries exhausted.\n");
 		return -FI_EAGAIN;
 	}
 
-	txe->ep = ep;
-	txe->total_len = 0;
-	txe->addr = addr;
-	txe->peer = efa_rdm_ep_get_peer(ep, txe->addr);
-	assert(txe->peer);
-	dlist_insert_tail(&txe->peer_entry, &txe->peer->txe_list);
-	txe->msg_id = -1;
-	txe->cq_entry.flags = FI_RMA | FI_WRITE;
-	txe->cq_entry.buf = NULL;
-	dlist_init(&txe->queued_pkts);
-
-	txe->type = EFA_RDM_TXE;
-	txe->op = ofi_op_write;
-	txe->state = EFA_RDM_TXE_REQ;
-
-	txe->bytes_acked = 0;
-	txe->bytes_sent = 0;
-	txe->window = 0;
-	txe->rma_iov_count = 0;
-	txe->iov_count = 0;
+	/* efa_rdm_ep_alloc_txe() joins ep->base_ep.util_ep.tx_op_flags and passed in flags,
+	 * reset to desired flags (remove things like FI_DELIVERY_COMPLETE, and FI_COMPLETION)
+	 */
 	txe->fi_flags = EFA_RDM_TXE_NO_COMPLETION | EFA_RDM_TXE_NO_COUNTER;
-	txe->internal_flags = 0;
-
-	dlist_insert_tail(&txe->ep_entry, &ep->txe_list);
+	txe->msg_id = -1;
 
 	err = efa_rdm_ope_post_send(txe, EFA_RDM_EAGER_RTW_PKT);
 
@@ -605,14 +585,35 @@ ssize_t efa_rdm_ep_trigger_handshake(struct efa_rdm_ep *ep,
  */
 ssize_t efa_rdm_ep_post_handshake(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer)
 {
+	struct efa_rdm_ope *txe;
+	struct fi_msg msg = {0};
 	struct efa_rdm_pke *pkt_entry;
 	fi_addr_t addr;
 	ssize_t ret;
 
 	addr = peer->efa_fiaddr;
-	pkt_entry = efa_rdm_pke_alloc(ep, ep->efa_tx_pkt_pool, EFA_RDM_PKE_FROM_EFA_TX_POOL);
-	if (OFI_UNLIKELY(!pkt_entry))
+	msg.addr = addr;
+
+	/* ofi_op_write is ignored in handshake path */
+	txe = efa_rdm_ep_alloc_txe(ep, peer, &msg, ofi_op_write, 0, 0);
+
+	if (OFI_UNLIKELY(!txe)) {
+		EFA_WARN(FI_LOG_EP_CTRL, "TX entries exhausted.\n");
 		return -FI_EAGAIN;
+	}
+
+	/* efa_rdm_ep_alloc_txe() joins ep->base_ep.util_ep.tx_op_flags and passed in flags,
+	 * reset to desired flags (remove things like FI_DELIVERY_COMPLETE, and FI_COMPLETION)
+	 */
+	txe->fi_flags = EFA_RDM_TXE_NO_COMPLETION | EFA_RDM_TXE_NO_COUNTER;
+
+	pkt_entry = efa_rdm_pke_alloc(ep, ep->efa_tx_pkt_pool, EFA_RDM_PKE_FROM_EFA_TX_POOL);
+	if (OFI_UNLIKELY(!pkt_entry)) {
+		EFA_WARN(FI_LOG_EP_CTRL, "PKE entries exhausted.\n");
+		return -FI_EAGAIN;
+	}
+
+	pkt_entry->ope = txe;
 
 	efa_rdm_pke_init_handshake(pkt_entry, addr);
 
@@ -667,9 +668,30 @@ void efa_rdm_ep_post_handshake_or_queue(struct efa_rdm_ep *ep, struct efa_rdm_pe
 		EFA_WARN(FI_LOG_EP_CTRL,
 			"Failed to post HANDSHAKE to peer %ld: %s\n",
 			peer->efa_fiaddr, fi_strerror(-err));
-		efa_base_ep_write_eq_error(&ep->base_ep, FI_EIO, FI_EFA_ERR_PEER_HANDSHAKE);
+		efa_base_ep_write_eq_error(&ep->base_ep, err, FI_EFA_ERR_PEER_HANDSHAKE);
 		return;
 	}
 
 	peer->flags |= EFA_RDM_PEER_HANDSHAKE_SENT;
 }
+
+/**
+ * @brief Get memory alignment for given ep and hmem iface
+ *
+ * @param ep efa rdm ep
+ * @param iface hmem iface
+ * @return size_t the memory alignment
+ */
+size_t efa_rdm_ep_get_memory_alignment(struct efa_rdm_ep *ep, enum fi_hmem_iface iface)
+{
+	size_t memory_alignment = EFA_RDM_DEFAULT_MEMORY_ALIGNMENT;
+
+	if (ep->sendrecv_in_order_aligned_128_bytes) {
+		memory_alignment = EFA_RDM_IN_ORDER_ALIGNMENT;
+	} else if (iface == FI_HMEM_CUDA) {
+		memory_alignment = EFA_RDM_CUDA_MEMORY_ALIGNMENT;
+	}
+
+	return memory_alignment;
+}
+

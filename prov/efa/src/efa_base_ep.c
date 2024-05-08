@@ -1,34 +1,5 @@
-/*
- * Copyright (c) 2018-2023 Amazon.com, Inc. or its affiliates. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include <sys/time.h>
 #include "efa.h"
@@ -63,7 +34,7 @@ int efa_base_ep_bind_av(struct efa_base_ep *base_ep, struct efa_av *av)
 	return 0;
 }
 
-static int efa_base_ep_destruct_qp(struct efa_base_ep *base_ep)
+int efa_base_ep_destruct_qp(struct efa_base_ep *base_ep)
 {
 	struct efa_domain *domain;
 	struct efa_qp *qp = base_ep->qp;
@@ -77,14 +48,31 @@ static int efa_base_ep_destruct_qp(struct efa_base_ep *base_ep)
 			EFA_INFO(FI_LOG_CORE, "destroy qp[%u] failed!\n", qp->qp_num);
 
 		free(qp);
+		base_ep->qp = NULL;
 	}
 
 	return 0;
 }
 
+void efa_base_ep_close_util_ep(struct efa_base_ep *base_ep)
+{
+	int err;
+
+	if (base_ep->util_ep_initialized) {
+		err = ofi_endpoint_close(&base_ep->util_ep);
+		if (err)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close util EP\n");
+		base_ep->util_ep_initialized = false;
+	}
+}
+
 int efa_base_ep_destruct(struct efa_base_ep *base_ep)
 {
 	int err;
+
+	/* We need to free the util_ep first to avoid race conditions
+	 * with other threads progressing the cq. */
+	efa_base_ep_close_util_ep(base_ep);
 
 	fi_freeinfo(base_ep->info);
 
@@ -93,12 +81,8 @@ int efa_base_ep_destruct(struct efa_base_ep *base_ep)
 
 	err = efa_base_ep_destruct_qp(base_ep);
 
-	if (base_ep->util_ep_initialized) {
-		err = ofi_endpoint_close(&base_ep->util_ep);
-		if (err)
-			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close util EP\n");
-		base_ep->util_ep_initialized = false;
-	}
+	if (base_ep->efa_recv_wr_vec)
+		free(base_ep->efa_recv_wr_vec);
 
 	return err;
 }
@@ -173,36 +157,53 @@ static int efa_base_ep_modify_qp_rst2rts(struct efa_base_ep *base_ep,
 					   IBV_QP_STATE | IBV_QP_SQ_PSN);
 }
 
-int efa_base_ep_create_qp(struct efa_base_ep *base_ep,
-			  struct ibv_qp_init_attr_ex *init_attr_ex)
+/**
+ * @brief Create a efa_qp
+ *
+ * @param qp double pointer of struct efa_qp
+ * @param init_attr_ex ibv_qp_init_attr_ex
+ * @return int 0 on success, negative integer on failure
+ */
+int efa_qp_create(struct efa_qp **qp, struct ibv_qp_init_attr_ex *init_attr_ex)
 {
-	struct efa_qp *qp;
 	struct efadv_qp_init_attr efa_attr = { 0 };
 
-	qp = calloc(1, sizeof(*qp));
-	if (!qp)
+	*qp = calloc(1, sizeof(struct efa_qp));
+	if (!*qp)
 		return -FI_ENOMEM;
 
 	if (init_attr_ex->qp_type == IBV_QPT_UD) {
-		qp->ibv_qp = ibv_create_qp_ex(init_attr_ex->pd->context,
+		(*qp)->ibv_qp = ibv_create_qp_ex(init_attr_ex->pd->context,
 					      init_attr_ex);
 	} else {
 		assert(init_attr_ex->qp_type == IBV_QPT_DRIVER);
 		efa_attr.driver_qp_type = EFADV_QP_DRIVER_TYPE_SRD;
-		qp->ibv_qp = efadv_create_qp_ex(
+		(*qp)->ibv_qp = efadv_create_qp_ex(
 			init_attr_ex->pd->context, init_attr_ex, &efa_attr,
 			sizeof(struct efadv_qp_init_attr));
 	}
 
-	if (!qp->ibv_qp) {
+	if (!(*qp)->ibv_qp) {
 		EFA_WARN(FI_LOG_EP_CTRL, "ibv_create_qp failed. errno: %d\n", errno);
-		free(qp);
+		free(*qp);
+		*qp = NULL;
 		return -errno;
 	}
 
-	qp->ibv_qp_ex = ibv_qp_to_qp_ex(qp->ibv_qp);
-	base_ep->qp = qp;
-	qp->base_ep = base_ep;
+	(*qp)->ibv_qp_ex = ibv_qp_to_qp_ex((*qp)->ibv_qp);
+	return FI_SUCCESS;
+}
+
+int efa_base_ep_create_qp(struct efa_base_ep *base_ep,
+			  struct ibv_qp_init_attr_ex *init_attr_ex)
+{
+	int ret;
+
+	ret = efa_qp_create(&base_ep->qp, init_attr_ex);
+	if (ret)
+		return ret;
+
+	base_ep->qp->base_ep = base_ep;
 	return 0;
 }
 
@@ -299,6 +300,11 @@ int efa_base_ep_construct(struct efa_base_ep *base_ep,
 
 	base_ep->xmit_more_wr_tail = &base_ep->xmit_more_wr_head;
 	base_ep->recv_more_wr_tail = &base_ep->recv_more_wr_head;
+	base_ep->efa_recv_wr_vec = calloc(sizeof(struct efa_recv_wr), EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV);
+	if (!base_ep->efa_recv_wr_vec) {
+		EFA_WARN(FI_LOG_EP_CTRL, "cannot alloc memory for base_ep->efa_recv_wr_vec!\n");
+		return -FI_ENOMEM;
+	}
 	base_ep->efa_qp_enabled = false;
 	return 0;
 }
@@ -352,17 +358,17 @@ int efa_base_ep_getname(fid_t fid, void *addr, size_t *addrlen)
  * 		in-order operation.
  */
 #if HAVE_EFA_DATA_IN_ORDER_ALIGNED_128_BYTES
-bool efa_base_ep_support_op_in_order_aligned_128_bytes(struct efa_base_ep *base_ep, enum ibv_wr_opcode op)
+bool efa_qp_support_op_in_order_aligned_128_bytes(struct efa_qp *qp, enum ibv_wr_opcode op)
 {
 	int caps;
 
-	caps = ibv_query_qp_data_in_order(base_ep->qp->ibv_qp, op,
+	caps = ibv_query_qp_data_in_order(qp->ibv_qp, op,
 					  IBV_QUERY_QP_DATA_IN_ORDER_RETURN_CAPS);
 
 	return !!(caps & IBV_QUERY_QP_DATA_IN_ORDER_ALIGNED_128_BYTES);
 }
 #else
-bool efa_base_ep_support_op_in_order_aligned_128_bytes(struct efa_base_ep *base_ep, enum ibv_wr_opcode op)
+bool efa_qp_support_op_in_order_aligned_128_bytes(struct efa_qp *qp, enum ibv_wr_opcode op)
 {
 	return false;
 }
@@ -376,7 +382,7 @@ bool efa_base_ep_support_op_in_order_aligned_128_bytes(struct efa_base_ep *base_
  * Therefore it is really the last resort to report an error.
  * If the base_ep is not binded to an EQ, or write to EQ failed,
  * this function will print the error message to console, then abort()
- * 
+ *
  * @param[in,out] ep	base endpoint
  * @param[in] err	OFI error code
  * @param[in] prov_errno	provider error code
@@ -387,7 +393,8 @@ void efa_base_ep_write_eq_error(struct efa_base_ep *ep, ssize_t err, ssize_t pro
 	int ret = -FI_ENOEQ;
 
 	EFA_WARN(FI_LOG_EQ, "Writing error to EQ: err: %s (%zd) prov_errno: %s (%zd)\n",
-	         fi_strerror(err), err, efa_strerror(prov_errno, NULL), prov_errno);
+	         fi_strerror(err), err, efa_strerror(prov_errno), prov_errno);
+	efa_show_help(prov_errno);
 	if (ep->util_ep.eq) {
 		memset(&err_entry, 0, sizeof(err_entry));
 		err_entry.err = err;
@@ -407,6 +414,6 @@ void efa_base_ep_write_eq_error(struct efa_base_ep *ep, ssize_t err, ssize_t pro
 		"EFA internal error: (%zd) %s\n\n"
 		"Your application will now abort().\n",
 		err, fi_strerror(err),
-		prov_errno, efa_strerror(prov_errno, NULL));
+		prov_errno, efa_strerror(prov_errno));
 	abort();
 }

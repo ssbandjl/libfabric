@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include "efa_unit_tests.h"
 #include "efa_rdm_pke_utils.h"
 #include "efa_rdm_pke_nonreq.h"
@@ -40,7 +43,7 @@ struct fi_info *efa_unit_test_alloc_hints(enum fi_ep_type ep_type)
 	if (!hints)
 		return NULL;
 
-	hints->fabric_attr->prov_name = "efa";
+	hints->fabric_attr->prov_name = strdup("efa");
 	hints->ep_attr->type = ep_type;
 
 	hints->domain_attr->mr_mode |= FI_MR_LOCAL | FI_MR_ALLOCATED;
@@ -53,7 +56,8 @@ struct fi_info *efa_unit_test_alloc_hints(enum fi_ep_type ep_type)
 
 void efa_unit_test_resource_construct_with_hints(struct efa_resource *resource,
 						 enum fi_ep_type ep_type,
-						 struct fi_info *hints)
+						 struct fi_info *hints,
+						 bool enable_ep, bool open_cq)
 {
 	int ret = 0;
 	struct fi_av_attr av_attr = {0};
@@ -88,15 +92,19 @@ void efa_unit_test_resource_construct_with_hints(struct efa_resource *resource,
 
 	fi_ep_bind(resource->ep, &resource->av->fid, 0);
 
-	ret = fi_cq_open(resource->domain, &cq_attr, &resource->cq, NULL);
-	if (ret)
-		goto err;
+	if (open_cq) {
+		ret = fi_cq_open(resource->domain, &cq_attr, &resource->cq, NULL);
+		if (ret)
+			goto err;
 
-	fi_ep_bind(resource->ep, &resource->cq->fid, FI_SEND | FI_RECV);
+		fi_ep_bind(resource->ep, &resource->cq->fid, FI_SEND | FI_RECV);
+	}
 
-	ret = fi_enable(resource->ep);
-	if (ret)
-		goto err;
+	if (enable_ep) {
+		ret = fi_enable(resource->ep);
+		if (ret)
+			goto err;
+	}
 
 	return;
 
@@ -112,7 +120,8 @@ void efa_unit_test_resource_construct(struct efa_resource *resource, enum fi_ep_
 	resource->hints = efa_unit_test_alloc_hints(ep_type);
 	if (!resource->hints)
 		goto err;
-	efa_unit_test_resource_construct_with_hints(resource, ep_type, resource->hints);
+	efa_unit_test_resource_construct_with_hints(resource, ep_type,
+						    resource->hints, true, true);
 	return;
 
 err:
@@ -120,7 +129,40 @@ err:
 
 	/* Fail test early if the resource struct fails to initialize */
 	assert_int_equal(1, 0);
+}
 
+void efa_unit_test_resource_construct_ep_not_enabled(struct efa_resource *resource,
+				      enum fi_ep_type ep_type)
+{
+	resource->hints = efa_unit_test_alloc_hints(ep_type);
+	if (!resource->hints)
+		goto err;
+	efa_unit_test_resource_construct_with_hints(resource, ep_type,
+						    resource->hints, false, true);
+	return;
+
+err:
+	efa_unit_test_resource_destruct(resource);
+
+	/* Fail test early if the resource struct fails to initialize */
+	fail();
+}
+
+void efa_unit_test_resource_construct_no_cq_and_ep_not_enabled(struct efa_resource *resource,
+				      enum fi_ep_type ep_type)
+{
+	resource->hints = efa_unit_test_alloc_hints(ep_type);
+	if (!resource->hints)
+		goto err;
+	efa_unit_test_resource_construct_with_hints(resource, ep_type,
+						    resource->hints, false, false);
+	return;
+
+err:
+	efa_unit_test_resource_destruct(resource);
+
+	/* Fail test early if the resource struct fails to initialize */
+	fail();
 }
 
 /**
@@ -156,6 +198,10 @@ void efa_unit_test_resource_destruct(struct efa_resource *resource)
 
 	if (resource->info) {
 		fi_freeinfo(resource->info);
+	}
+
+	if (resource->hints) {
+		fi_freeinfo(resource->hints);
 	}
 }
 
@@ -208,13 +254,24 @@ void efa_unit_test_eager_msgrtm_pkt_construct(struct efa_rdm_pke *pkt_entry, str
 	pkt_entry->pkt_size = sizeof(base_hdr) + sizeof(opt_connid_hdr);
 }
 
+#define APPEND_OPT_HANDSHAKE_FIELD(field, opt_flag)			\
+        if (attr->field) {						\
+                struct efa_rdm_handshake_opt_##field##_hdr *_hdr =	\
+			(struct efa_rdm_handshake_opt_##field##_hdr *)	\
+			(pkt_entry->wiredata + pkt_entry->pkt_size);	\
+                _hdr->field = attr->field;				\
+                handshake_hdr->flags |= opt_flag;			\
+                pkt_entry->pkt_size += sizeof *_hdr;			\
+        }
+
 /**
  * @brief Construct EFA_RDM_HANDSHAKE_PKT
- *	The function will include the optional connid/host id headers if and only if
- *	attr->connid/host id are non-zero.
  *
- * @param[in,out] pkt_entry Packet entry. Must be non-NULL.
- * @param[in] attr Packet attributes.
+ * This will append any optional handshake packet fields (see EFA RDM protocol
+ * spec) iff they are non-zero in attr
+ *
+ * @param[in,out]	pkt_entry	Packet entry. Must be non-NULL.
+ * @param[in]		attr		Packet attributes.
  */
 void efa_unit_test_handshake_pkt_construct(struct efa_rdm_pke *pkt_entry, struct efa_unit_test_handshake_pkt_attr *attr)
 {
@@ -227,26 +284,9 @@ void efa_unit_test_handshake_pkt_construct(struct efa_rdm_pke *pkt_entry, struct
 	handshake_hdr->nextra_p3 = nex + 3;
 	handshake_hdr->flags = 0;
 
-	calloc((uintptr_t)handshake_hdr->extra_info, nex * sizeof(uint64_t));
 	pkt_entry->pkt_size = sizeof(struct efa_rdm_handshake_hdr) + nex * sizeof(uint64_t);
-	memcpy(pkt_entry->wiredata, handshake_hdr, sizeof(struct efa_rdm_handshake_hdr));
-	assert_int_equal(efa_rdm_pke_get_base_hdr(pkt_entry)->type, EFA_RDM_HANDSHAKE_PKT);
 
-	if (attr->connid) {
-		struct efa_rdm_handshake_opt_connid_hdr opt_connid_hdr = {0};
-		opt_connid_hdr.connid = attr->connid;
-		handshake_hdr->flags |= EFA_RDM_PKT_CONNID_HDR;
-		memcpy(pkt_entry->wiredata + pkt_entry->pkt_size, &opt_connid_hdr, sizeof(struct efa_rdm_handshake_opt_connid_hdr));
-		assert_int_equal(*efa_rdm_pke_connid_ptr(pkt_entry), attr->connid);
-		pkt_entry->pkt_size += sizeof(opt_connid_hdr);
-	}
-
-	if (attr->host_id) {
-		struct efa_rdm_handshake_opt_host_id_hdr opt_host_id_hdr = {0};
-		opt_host_id_hdr.host_id = attr->host_id;
-		handshake_hdr->flags |= EFA_RDM_HANDSHAKE_HOST_ID_HDR;
-		memcpy(pkt_entry->wiredata + pkt_entry->pkt_size, &opt_host_id_hdr, sizeof(struct efa_rdm_handshake_opt_host_id_hdr));
-		assert_int_equal(*efa_rdm_pke_get_handshake_opt_host_id_ptr(pkt_entry), attr->host_id);
-		pkt_entry->pkt_size += sizeof(opt_host_id_hdr);
-	}
+	APPEND_OPT_HANDSHAKE_FIELD(connid,		EFA_RDM_PKT_CONNID_HDR);
+        APPEND_OPT_HANDSHAKE_FIELD(host_id,		EFA_RDM_HANDSHAKE_HOST_ID_HDR);
+        APPEND_OPT_HANDSHAKE_FIELD(device_version,	EFA_RDM_HANDSHAKE_DEVICE_VERSION_HDR);
 }

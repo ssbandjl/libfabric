@@ -9,7 +9,7 @@ dnl
 dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.60])
-AC_INIT([libfabric], [1.19.0rc1], [ofiwg@lists.openfabrics.org])
+AC_INIT([libfabric], [1.22.0a1], [ofiwg@lists.openfabrics.org])
 AC_CONFIG_SRCDIR([src/fabric.c])
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_MACRO_DIR(config)
@@ -59,7 +59,7 @@ AC_DEFINE_UNQUOTED([BUILD_ID],["$with_build_id"],
 
 # Override autoconf default CFLAG settings (e.g. "-g -O2") while still
 # allowing the user to explicitly set CFLAGS=""
-: ${CFLAGS="-fvisibility=hidden ${base_c_warn_flags}"}
+: ${CFLAGS="-pipe -fvisibility=hidden ${base_c_warn_flags}"}
 
 # AM_PROG_AS would set CFLAGS="-g -O2" by default if not set already so it
 # should not be called earlier
@@ -154,6 +154,17 @@ AS_IF([test x"$enable_debug" != x"no"],
 
 AC_DEFINE_UNQUOTED([ENABLE_DEBUG],[$dbg],
                    [defined to 1 if libfabric was configured with --enable-debug, 0 otherwise])
+
+AC_ARG_ENABLE([profile],
+              [AS_HELP_STRING([--enable-profile],
+                              [Enable profiling @<:@default=no@:>@])],
+              [],
+              [enable_profile=no])
+
+AS_IF([test x"$enable_profile" != x"no"],
+      [AC_DEFINE([HAVE_FABRIC_PROFILE], [1],
+                 [defined to 1 if libfabric was configured with --enable-profile, 0 otherwise])
+])
 
 AC_DEFUN([FI_ARG_ENABLE_SANITIZER],[
         AC_ARG_ENABLE([$1],
@@ -361,7 +372,7 @@ AS_IF([test "$have_mm_atomics" -eq 1 -a "$ac_cv_type___int128" = "yes"],
           __atomic_exchange(&d, &s, &r, __ATOMIC_SEQ_CST);
           __atomic_compare_exchange(&d, &c, &s, 0, __ATOMIC_SEQ_CST,
 	  			    __ATOMIC_SEQ_CST);
-	 return 0;
+	 return !__atomic_is_lock_free(sizeof(d), NULL);
         ]])],
         [
             AC_MSG_RESULT(yes)
@@ -410,19 +421,21 @@ AM_CONDITIONAL(HAVE_LD_VERSION_SCRIPT, test "$ac_cv_version_script" = "yes")
 xpmem_happy=0
 AC_ARG_ENABLE([xpmem],
 	      [AS_HELP_STRING([--enable-xpmem@<:@=yes|no|PATH@:>@],
-			      [Enable xpmem (gni and shm providers) @<:@default=yes@:>@
+			      [Enable xpmem (providers) @<:@default=yes@:>@
 			      (yes: enable xpmem; no: disable xpmem;
 			      PATH: enable xpmem and use xpmem installed under PATH)])],
-	      )	
+	      )
 
-FI_CHECK_PACKAGE([xpmem],
-		 [xpmem.h],
-		 [xpmem],
-		 [xpmem_make],
-		 [],
-		 [$enable_xpmem],
-		 [$enable_xpmem/lib64],
-		 [xpmem_happy=1])
+AS_IF([test x"$enable_xpmem" != x"no"],
+      [FI_CHECK_PACKAGE([xpmem],
+                        [xpmem.h],
+                        [xpmem],
+                        [xpmem_make],
+                        [],
+                        [$enable_xpmem],
+                        [],
+                        [xpmem_happy=1])
+      ])
 
 AS_IF([test x"$enable_xpmem" != x"no" && test -n "$enable_xpmem" && test "$xpmem_happy" = "0" ],
 	[AC_MSG_ERROR([XPMEM support requested but XPMEM runtime not available.])])
@@ -544,6 +557,16 @@ AS_IF([test $have_uffd -eq 1],
 AC_DEFINE_UNQUOTED([HAVE_UFFD_UNMAP], [$have_uffd],
 	[Define to 1 if platform supports userfault fd unmap])
 
+dnl restricted DL open
+restricted_dl=0
+AC_ARG_ENABLE([restricted_dl],
+              [AC_HELP_STRING([--enable-restricted-dl],
+                              [only look for dl providers under default location if FI_PROVIDER_PATH is not set])],
+              [restricted_dl=1],
+              [])
+AC_DEFINE_UNQUOTED([HAVE_RESTRICTED_DL], [$restricted_dl],
+  [Define to 1 to only look for dl providers under default location if FI_PROVIDER_PATH is not set])
+
 dnl Check support to intercept syscalls
 AC_CHECK_HEADERS_ONCE(elf.h sys/auxv.h)
 
@@ -606,6 +629,7 @@ AC_ARG_WITH([cuda],
 
 have_cuda=0
 cuda_dlopen=0
+have_cuda_dmabuf=0
 AC_ARG_ENABLE([cuda-dlopen],
     [AS_HELP_STRING([--enable-cuda-dlopen],
         [Enable dlopen of CUDA libraries @<:@default=no@:>@])
@@ -636,6 +660,22 @@ AS_IF([test x"$with_cuda" != x"no"],
 				 [],
 				 [have_cuda=1])
 	      ])
+
+	have_cuda_dmabuf=1
+	AC_CHECK_DECL([cuMemGetHandleForAddressRange],
+			[],
+			[have_cuda_dmabuf=0],
+			[[#include <cuda.h>]])
+
+	AC_CHECK_DECL([CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED],
+			[],
+			[have_cuda_dmabuf=0],
+			[[#include <cuda.h>]])
+
+	AC_CHECK_DECL([CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD],
+			[],
+			[have_cuda_dmabuf=0],
+			[[#include <cuda.h>]])
       ])
 
 AC_DEFINE_UNQUOTED([ENABLE_CUDA_DLOPEN], [$cuda_dlopen], [dlopen CUDA libraries])
@@ -644,6 +684,8 @@ AS_IF([test x"$with_cuda" != x"no" && test -n "$with_cuda" && test "$have_cuda" 
 	[AC_MSG_ERROR([CUDA support requested but CUDA runtime not available.])])
 
 AC_DEFINE_UNQUOTED([HAVE_CUDA], [$have_cuda], [CUDA support])
+
+AC_DEFINE_UNQUOTED([HAVE_CUDA_DMABUF], [$have_cuda_dmabuf], [CUDA dmabuf support])
 
 AS_IF([test "$cuda_dlopen" != "1"], [LIBS="$LIBS $cuda_LIBS"])
 AS_IF([test "$have_cuda" = "1" && test x"$with_cuda" != x"yes"],
@@ -888,6 +930,7 @@ AC_ARG_WITH([rocr],
 
 have_rocr=0
 rocr_dlopen=0
+have_hsa_amd_portable_export_dmabuf=0
 AC_ARG_ENABLE([rocr-dlopen],
     [AS_HELP_STRING([--enable-rocr-dlopen],
         [Enable dlopen of ROCR libraries @<:@default=no@:>@])
@@ -930,7 +973,20 @@ AC_DEFINE_UNQUOTED([HAVE_ROCR], [$have_rocr], [ROCR support])
 AS_IF([test "$rocr_dlopen" != "1"], [LIBS="$LIBS $rocr_LIBS"])
 AS_IF([test "$have_rocr" = "1" && test x"$with_rocr" != x"yes"],
       [CPPFLAGS="$CPPFLAGS $rocr_CPPFLAGS"
-       LDFLAGS="$LDFLAGS $rocr_LDFLAGS"])
+       LDFLAGS="$LDFLAGS $rocr_LDFLAGS"
+       have_hsa_amd_portable_export_dmabuf=1
+       AC_CHECK_DECL([hsa_amd_portable_export_dmabuf],
+                     [],
+                     [have_hsa_amd_portable_export_dmabuf=0],
+                     [[#include <hsa/hsa_ext_amd.h>]])
+
+       AC_CHECK_DECL([HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED],
+                     [],
+                     [have_hsa_amd_portable_export_dmabuf=0],
+                     [[#include <hsa/hsa.h>]])
+      ],
+      [])
+AC_DEFINE_UNQUOTED([HAVE_HSA_AMD_PORTABLE_EXPORT_DMABUF],[$have_hsa_amd_portable_export_dmabuf],[dmabuf handle support])
 
 AC_CHECK_SIZEOF([void *])
 
@@ -950,19 +1006,17 @@ FI_PROVIDER_SETUP([psm3])
 FI_PROVIDER_SETUP([sockets])
 FI_PROVIDER_SETUP([verbs])
 FI_PROVIDER_SETUP([efa])
+FI_PROVIDER_SETUP([cxi])
 dnl The usnic provider must be setup after the verbs provider.  See
 dnl prov/usnic/configure.m4 for details.
 FI_PROVIDER_SETUP([usnic])
-FI_PROVIDER_SETUP([gni])
 FI_PROVIDER_SETUP([udp])
 FI_PROVIDER_SETUP([tcp])
 FI_PROVIDER_SETUP([rxm])
 FI_PROVIDER_SETUP([mrail])
 FI_PROVIDER_SETUP([rxd])
-FI_PROVIDER_SETUP([bgq])
 FI_PROVIDER_SETUP([shm])
 FI_PROVIDER_SETUP([sm2])
-FI_PROVIDER_SETUP([rstream])
 FI_PROVIDER_SETUP([ucx])
 FI_PROVIDER_SETUP([perf])
 FI_PROVIDER_SETUP([trace])

@@ -108,8 +108,8 @@ size_t smr_calculate_size_offsets(size_t tx_count, size_t rx_count,
 	tx_size = roundup_power_of_two(tx_count);
 	rx_size = roundup_power_of_two(rx_count);
 
-	/* Align cmd_queue offset to 128-bit boundary. */
-	cmd_queue_offset = ofi_get_aligned_size(sizeof(struct smr_region), 16);
+	/* Align cmd_queue offset to cache line */
+	cmd_queue_offset = ofi_get_aligned_size(sizeof(struct smr_region), 64);
 	resp_queue_offset = cmd_queue_offset + sizeof(struct smr_cmd_queue) +
 			    sizeof(struct smr_cmd_queue_entry) * rx_size;
 	inject_pool_offset = resp_queue_offset + sizeof(struct smr_resp_queue) +
@@ -393,9 +393,6 @@ int smr_map_to_region(const struct fi_provider *prov, struct smr_map *map,
 	const char *name = smr_no_prefix(peer_buf->peer.name);
 	char tmp[SMR_PATH_MAX];
 
-	if (peer_buf->region)
-		return FI_SUCCESS;
-
 	pthread_mutex_lock(&ep_list_lock);
 	entry = dlist_find_first_match(&ep_name_list, smr_match_name, name);
 	if (entry) {
@@ -406,10 +403,16 @@ int smr_map_to_region(const struct fi_provider *prov, struct smr_map *map,
 	}
 	pthread_mutex_unlock(&ep_list_lock);
 
+	ofi_spin_lock(&map->lock);
+	if (peer_buf->region)
+		goto unlock;
+
 	fd = shm_open(name, O_RDWR, S_IRUSR | S_IWUSR);
 	if (fd < 0) {
-		FI_WARN_ONCE(prov, FI_LOG_AV, "shm_open error\n");
-		return -errno;
+		ret = -errno;
+		FI_WARN_ONCE(prov, FI_LOG_AV,
+			     "shm_open error: name %s errno %d\n", name, errno);
+		goto unlock;
 	}
 
 	memset(tmp, 0, sizeof(tmp));
@@ -454,6 +457,8 @@ int smr_map_to_region(const struct fi_provider *prov, struct smr_map *map,
 
 out:
 	close(fd);
+unlock:
+	ofi_spin_unlock(&map->lock);
 	return ret;
 }
 
@@ -555,13 +560,12 @@ int smr_map_add(const struct fi_provider *prov, struct smr_map *map,
 	strncpy(map->peers[*id].peer.name, name, SMR_NAME_MAX);
 	map->peers[*id].peer.name[SMR_NAME_MAX - 1] = '\0';
 	map->peers[*id].region = NULL;
+	map->num_peers++;
+	ofi_spin_unlock(&map->lock);
 
 	ret = smr_map_to_region(prov, map, *id);
 	if (!ret)
 		map->peers[*id].peer.id = *id;
-
-	map->num_peers++;
-	ofi_spin_unlock(&map->lock);
 	return ret == -ENOENT ? 0 : ret;
 }
 
@@ -569,8 +573,7 @@ void smr_map_del(struct smr_map *map, int64_t id)
 {
 	struct dlist_entry *entry;
 
-	if (id >= SMR_MAX_PEERS || id < 0 || map->peers[id].peer.id < 0)
-		return;
+	assert(id >= 0 && id < SMR_MAX_PEERS);
 
 	pthread_mutex_lock(&ep_list_lock);
 	entry = dlist_find_first_match(&ep_name_list, smr_match_name,
@@ -578,6 +581,9 @@ void smr_map_del(struct smr_map *map, int64_t id)
 	pthread_mutex_unlock(&ep_list_lock);
 
 	ofi_spin_lock(&map->lock);
+	if (map->peers[id].peer.id < 0)
+		goto unlock;
+
 	if (!entry) {
 		if (map->flags & SMR_FLAG_HMEM_ENABLED)
 			(void) ofi_hmem_host_unregister(map->peers[id].region);
@@ -591,6 +597,7 @@ void smr_map_del(struct smr_map *map, int64_t id)
 	map->peers[id].peer.id = -1;
 	map->num_peers--;
 
+unlock:
 	ofi_spin_unlock(&map->lock);
 }
 

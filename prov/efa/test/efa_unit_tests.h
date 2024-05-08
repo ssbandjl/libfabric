@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #ifndef EFA_UNIT_TESTS_H
 #define EFA_UNIT_TESTS_H
 
@@ -30,9 +33,14 @@ struct efa_resource {
 struct fi_info *efa_unit_test_alloc_hints(enum fi_ep_type ep_type);
 
 void efa_unit_test_resource_construct(struct efa_resource *resource, enum fi_ep_type ep_type);
+void efa_unit_test_resource_construct_ep_not_enabled(
+	struct efa_resource *resource, enum fi_ep_type ep_type);
+void efa_unit_test_resource_construct_no_cq_and_ep_not_enabled(
+	struct efa_resource *resource, enum fi_ep_type ep_type);
 void efa_unit_test_resource_construct_with_hints(struct efa_resource *resource,
 						 enum fi_ep_type ep_type,
-						 struct fi_info* hints);
+						 struct fi_info *hints,
+						 bool enable_ep, bool open_cq);
 
 void efa_unit_test_resource_destruct(struct efa_resource *resource);
 
@@ -63,6 +71,7 @@ struct efa_unit_test_eager_rtm_pkt_attr {
 struct efa_unit_test_handshake_pkt_attr {
 	uint32_t connid;
 	uint64_t host_id;
+	uint32_t device_version;
 };
 
 int efa_device_construct(struct efa_device *efa_device,
@@ -91,16 +100,22 @@ void test_efa_rdm_ep_handshake_receive_valid_peer_host_id_and_do_not_send_local_
 void test_efa_rdm_ep_handshake_receive_without_peer_host_id_and_do_not_send_local_host_id();
 void test_efa_rdm_ep_getopt_undersized_optlen();
 void test_efa_rdm_ep_getopt_oversized_optlen();
-void test_efa_rdm_ep_cq_create_error_handling();
 void test_efa_rdm_ep_pkt_pool_flags();
 void test_efa_rdm_ep_pkt_pool_page_alignment();
 void test_efa_rdm_ep_dc_atomic_error_handling();
 void test_efa_rdm_ep_send_with_shm_no_copy();
 void test_efa_rdm_ep_rma_without_caps();
 void test_efa_rdm_ep_atomic_without_caps();
+void test_efa_rdm_ep_setopt_shared_memory_permitted();
+void test_efa_rdm_ep_enable_qp_in_order_aligned_128_bytes_good();
+void test_efa_rdm_ep_enable_qp_in_order_aligned_128_bytes_bad();
+void test_efa_rdm_ep_user_zcpy_rx_happy();
+void test_efa_rdm_ep_user_zcpy_rx_unhappy_due_to_sas();
+void test_efa_rdm_ep_user_zcpy_rx_unhappy_due_to_no_prefix();
 void test_dgram_cq_read_empty_cq();
 void test_ibv_cq_ex_read_empty_cq();
 void test_ibv_cq_ex_read_failed_poll();
+void test_rdm_cq_create_error_handling();
 void test_rdm_cq_read_bad_send_status_unresponsive_receiver();
 void test_rdm_cq_read_bad_send_status_unresponsive_receiver_missing_peer_host_id();
 void test_rdm_cq_read_bad_send_status_invalid_qpn();
@@ -111,7 +126,16 @@ void test_rdm_fallback_to_ibv_create_cq_ex_cq_read_ignore_forgotton_peer();
 void test_ibv_cq_ex_read_ignore_removed_peer();
 void test_info_open_ep_with_wrong_info();
 void test_info_open_ep_with_api_1_1_info();
-void test_info_check_shm_info();
+void test_info_ep_attr();
+void test_info_tx_rx_msg_order_rdm_order_none();
+void test_info_tx_rx_msg_order_rdm_order_sas();
+void test_info_tx_rx_msg_order_dgram_order_none();
+void test_info_tx_rx_msg_order_dgram_order_sas();
+void test_info_tx_rx_op_flags_rdm();
+void test_info_tx_rx_size_rdm();
+void test_info_check_shm_info_hmem();
+void test_info_check_shm_info_op_flags();
+void test_info_check_shm_info_threading();
 void test_info_check_hmem_cuda_support_on_api_lt_1_18();
 void test_info_check_hmem_cuda_support_on_api_ge_1_18();
 void test_info_check_no_hmem_support_when_not_requested();
@@ -138,5 +162,19 @@ void test_efa_rdm_ope_post_write_0_byte();
 void test_efa_rdm_msg_send_to_local_peer_with_null_desc();
 void test_efa_fork_support_request_initialize_when_ibv_fork_support_is_needed();
 void test_efa_fork_support_request_initialize_when_ibv_fork_support_is_unneeded();
-
+void test_efa_rdm_peer_get_runt_size_no_enough_runt();
+void test_efa_rdm_peer_get_runt_size_cuda_memory_smaller_than_alignment();
+void test_efa_rdm_peer_get_runt_size_cuda_memory_exceeding_total_len();
+void test_efa_rdm_peer_get_runt_size_cuda_memory_normal();
+void test_efa_rdm_peer_get_runt_size_host_memory_smaller_than_alignment();
+void test_efa_rdm_peer_get_runt_size_host_memory_exceeding_total_len();
+void test_efa_rdm_peer_get_runt_size_host_memory_normal();
+void test_efa_rdm_peer_select_readbase_rtm_no_runt();
+void test_efa_rdm_peer_select_readbase_rtm_do_runt();
+void test_efa_domain_open_ops_wrong_name();
+void test_efa_domain_open_ops_mr_query();
+void test_efa_rdm_cq_ibv_cq_poll_list_same_tx_rx_cq_single_ep();
+void test_efa_rdm_cq_ibv_cq_poll_list_separate_tx_rx_cq_single_ep();
+void test_efa_rdm_cntr_ibv_cq_poll_list_same_tx_rx_cq_single_ep();
+void test_efa_rdm_cntr_ibv_cq_poll_list_separate_tx_rx_cq_single_ep();
 #endif

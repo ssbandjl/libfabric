@@ -86,7 +86,7 @@
 #define MIN_PROXY_BLOCK	(131072)
 #define TX_DEPTH	(128)
 #define RX_DEPTH	(1)
-#define MAX_NICS	(4)
+#define MAX_NICS	(32)
 
 enum test_type {
 	READ,
@@ -408,6 +408,7 @@ static void init_ib(char *ibdev_names, int sockfd)
 	int ib_port = 1;
 	char *ibdev_name;
 	int i, j;
+	char *saveptr;
 
 	dev_list = ibv_get_device_list(NULL);
 	if (!dev_list) {
@@ -422,11 +423,11 @@ static void init_ib(char *ibdev_names, int sockfd)
 
 	num_nics = 0;
 	if (ibdev_names) {
-		ibdev_name = strtok(ibdev_names, ",");
+		ibdev_name = strtok_r(ibdev_names, ",", &saveptr);
 		while (ibdev_name && num_nics < MAX_NICS) {
 			EXIT_ON_ERROR(init_nic(num_nics, ibdev_name, ib_port));
 			num_nics++;
-			ibdev_name = strtok(NULL, ",");
+			ibdev_name = strtok_r(NULL, ",", &saveptr);
 		}
 	} else {
 		EXIT_ON_ERROR(init_nic(0, NULL, ib_port));

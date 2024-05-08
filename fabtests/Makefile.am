@@ -15,7 +15,6 @@ endif
 bin_PROGRAMS = \
 	functional/fi_av_xfer \
 	functional/fi_msg \
-	functional/fi_stream_msg \
 	functional/fi_msg_sockets \
 	functional/fi_rdm \
 	functional/fi_rdm_rma_event \
@@ -53,6 +52,7 @@ bin_PROGRAMS = \
 	benchmarks/fi_rdm_cntr_pingpong \
 	benchmarks/fi_dgram_pingpong \
 	benchmarks/fi_rdm_pingpong \
+	benchmarks/fi_rma_pingpong \
 	benchmarks/fi_rdm_tagged_pingpong \
 	benchmarks/fi_rdm_tagged_bw \
 	unit/fi_eq_test \
@@ -98,6 +98,7 @@ nobase_dist_config_DATA = \
         test_configs/lat_bw.test \
 	test_configs/tcp/all.test \
 	test_configs/tcp/tcp.exclude \
+	test_configs/tcp/io_uring.exclude \
         test_configs/sockets/all.test \
         test_configs/sockets/quick.test \
 	test_configs/sockets/complete.test \
@@ -127,6 +128,7 @@ nobase_dist_config_DATA = \
 	test_configs/ofi_rxd/ofi_rxd.exclude \
 	test_configs/shm/all.test \
 	test_configs/shm/shm.exclude \
+	test_configs/shm/cuda.exclude \
 	test_configs/shm/quick.test \
 	test_configs/shm/verify.test \
 	test_configs/sm2/quick.test \
@@ -183,6 +185,7 @@ nobase_dist_config_DATA = \
 	pytest/efa/test_mr.py \
 	pytest/efa/test_efa_shm_addr.py \
 	pytest/efa/test_env.py \
+	pytest/efa/test_multi_ep.py \
 	pytest/shm/conftest.py \
 	pytest/shm/shm_common.py \
 	pytest/shm/test_av.py \
@@ -255,10 +258,6 @@ functional_fi_msg_epoll_LDADD = libfabtests.la
 functional_fi_msg_SOURCES = \
 	functional/msg.c
 functional_fi_msg_LDADD = libfabtests.la
-
-functional_fi_stream_msg_SOURCES = \
-	functional/stream_msg.c
-functional_fi_stream_msg_LDADD = libfabtests.la
 
 functional_fi_rdm_SOURCES = \
 	functional/rdm.c
@@ -406,6 +405,11 @@ benchmarks_fi_rdm_pingpong_SOURCES = \
 	benchmarks/rdm_pingpong.c \
 	$(benchmarks_srcs)
 benchmarks_fi_rdm_pingpong_LDADD = libfabtests.la
+
+benchmarks_fi_rma_pingpong_SOURCES = \
+	benchmarks/rma_pingpong.c \
+	$(benchmarks_srcs)
+benchmarks_fi_rma_pingpong_LDADD = libfabtests.la
 
 benchmarks_fi_rdm_tagged_pingpong_SOURCES = \
 	benchmarks/rdm_tagged_pingpong.c \

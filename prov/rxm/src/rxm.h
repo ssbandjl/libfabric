@@ -205,6 +205,7 @@ extern size_t rxm_cq_eq_fairness;
 extern int rxm_passthru;
 extern int force_auto_progress;
 extern int rxm_use_write_rndv;
+extern int rxm_detect_hmem_iface;
 extern enum fi_wait_obj def_wait_obj, def_tcp_wait_obj;
 
 struct rxm_ep;
@@ -303,15 +304,28 @@ struct rxm_mr {
 	struct rxm_domain *domain;
 	enum fi_hmem_iface iface;
 	uint64_t device;
+	void *hmem_handle;
+	uint64_t hmem_flags;
 	ofi_mutex_t amo_lock;
 };
 
 static inline enum fi_hmem_iface
-rxm_mr_desc_to_hmem_iface_dev(void **desc, size_t count, uint64_t *device)
+rxm_iov_desc_to_hmem_iface_dev(const struct iovec *iov, void **desc,
+			       size_t count, uint64_t *device)
 {
-	if (!count || !desc || !desc[0]) {
+	enum fi_hmem_iface iface = FI_HMEM_SYSTEM;
+
+	if (!count) {
 		*device = 0;
-		return FI_HMEM_SYSTEM;
+		return iface;
+	}
+
+	if (!desc || !desc[0]) {
+		if (rxm_detect_hmem_iface)
+			iface = ofi_get_hmem_iface(iov[0].iov_base, device, NULL);
+		else
+			*device = 0;
+		return iface;
 	}
 
 	*device = ((struct rxm_mr *) desc[0])->device;
@@ -773,6 +787,26 @@ void rxm_rndv_hdr_init(struct rxm_ep *rxm_ep, void *buf,
 			      const struct iovec *iov, size_t count,
 			      struct fid_mr **mr);
 
+ssize_t rxm_copy_hmem(void *desc, char *host_buf, void *dev_buf, size_t size,
+		      int dir);
+ssize_t rxm_copy_hmem_iov(void **desc, char *buf, size_t buf_size,
+			  const struct iovec *hmem_iov, int iov_count,
+			  size_t iov_offset, int dir);
+static inline ssize_t rxm_copy_from_hmem_iov(void **desc, char *buf,
+					     size_t buf_size,
+					     const struct iovec *hmem_iov,
+					     int iov_count, size_t iov_offset)
+{
+	return rxm_copy_hmem_iov(desc, buf, buf_size, hmem_iov, iov_count,
+				 iov_offset, OFI_COPY_IOV_TO_BUF);
+}
+static inline ssize_t rxm_copy_to_hmem_iov(void **desc, char *buf, int buf_size,
+					   const struct iovec *hmem_iov,
+					   int iov_count, size_t iov_offset)
+{
+	return rxm_copy_hmem_iov(desc, buf, buf_size, hmem_iov, iov_count,
+				 iov_offset, OFI_COPY_BUF_TO_IOV);
+}
 
 static inline size_t rxm_ep_max_atomic_size(struct fi_info *info)
 {

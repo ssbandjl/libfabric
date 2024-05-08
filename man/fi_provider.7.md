@@ -25,11 +25,11 @@ following diagram illustrates the architecture between the provider
 types.
 
 ```
----------------------------- libfabric API ----------------------------
+---------------------------- libfabric API ---------------------------- 
   [core]   provider|<- [hooking provider]
-[services]   API   |  --- libfabric API ---
+[services]   API   |  --- libfabric API --- 
                    |<- [utility provider]
-                   |  ---------------- libfabric API ------------------
+                   |  ---------------- libfabric API ------------------ 
                    |<-  [core provider] <-peer API-> [offload provider]
 
 ```
@@ -67,16 +67,15 @@ The following core providers are built into libfabric by default, assuming
 all build pre-requisites are met.  That is, necessary libraries are installed,
 operating system support is available, etc.  This list is not exhaustive.
 
+*CXI*
+: Provider for Cray's Slingshot network. See
+  [`fi_cxi`(7)](fi_cxi.7.html) for more information.
+
 *EFA*
 : A provider for the [Amazon EC2 Elastic Fabric Adapter
   (EFA)](https://aws.amazon.com/hpc/efa/), a custom-built OS bypass
   hardware interface for inter-instance communication on EC2.
   See [`fi_efa`(7)](fi_efa.7.html) for more information.
-
-*GNI*
-: A provider for the Aries interconnect in Cray XC(TM) systems
-  utilizing the user-space *Generic Networking Interface*.  See
-  [`fi_gni`(7)](fi_gni.7.html) for more information.
 
 *OPX*
 : Supports Omni-Path networking from Cornelis Networks.  See
@@ -98,13 +97,18 @@ operating system support is available, etc.  This list is not exhaustive.
 : A provider which runs over the TCP/IP protocol and is available on
   multiple operating systems.  This provider enables develop of libfabric
   applications on most platforms.
-  See [`fi_tcp`(7)](fi_tcp.7.html) for more information
+  See [`fi_tcp`(7)](fi_tcp.7.html) for more information.
+
+*UCX*
+: A provider which runs over the UCX library which is currently supported
+  by Infiniband fabrics from NVIDIA.
+  See [`fi_ucx`(7)](fi_ucx.7.html) for more information.
 
 *UDP*
 : A provider which runs over the UDP/IP protocol and is available on
   multiple operating systems.  This provider enables develop of libfabric
   applications on most platforms.
-  See [`fi_udp`(7)](fi_udp.7.html) for more information
+  See [`fi_udp`(7)](fi_udp.7.html) for more information.
 
 *Verbs*
 : This provider targets RDMA NICs for both Linux and Windows platforms.

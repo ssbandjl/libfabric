@@ -1,34 +1,5 @@
-/*
- * Copyright (c) 2018-2022 Amazon.com, Inc. or its affiliates. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #ifndef EFA_H
 #define EFA_H
@@ -81,8 +52,11 @@
 #include "rdm/efa_rdm_pke.h"
 #include "rdm/efa_rdm_peer.h"
 #include "rdm/efa_rdm_util.h"
+#include "fi_ext_efa.h"
 
 #define EFA_ABI_VER_MAX_LEN 8
+
+#define SHM_MAX_INJECT_SIZE 4096
 
 #define EFA_EP_TYPE_IS_RDM(_info) \
 	(_info && _info->ep_attr && (_info->ep_attr->type == FI_EP_RDM))
@@ -99,10 +73,16 @@
 
 
 #define EFA_DEFAULT_RUNT_SIZE (307200)
+#define EFA_NEURON_RUNT_SIZE (131072)
 #define EFA_DEFAULT_INTER_MAX_MEDIUM_MESSAGE_SIZE (65536)
 #define EFA_DEFAULT_INTER_MIN_READ_MESSAGE_SIZE (1048576)
 #define EFA_DEFAULT_INTER_MIN_READ_WRITE_SIZE (65536)
 #define EFA_DEFAULT_INTRA_MAX_GDRCOPY_FROM_DEV_SIZE (3072)
+
+/*
+ * The default memory alignment
+ */
+#define EFA_RDM_DEFAULT_MEMORY_ALIGNMENT (8)
 
 /*
  * The CUDA memory alignment

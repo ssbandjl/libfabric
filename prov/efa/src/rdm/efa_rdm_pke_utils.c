@@ -1,35 +1,6 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include <rdma/fi_rma.h>
 #include "ofi_iov.h"
 #include "efa.h"
@@ -120,13 +91,13 @@ ssize_t efa_rdm_pke_init_payload_from_ope(struct efa_rdm_pke *pke,
 		return 0;
 	}
 
-	if (iov_mr && FI_HMEM_CUDA == iov_mr->peer.iface &&
-	    (iov_mr->peer.flags & OFI_HMEM_DATA_GDRCOPY_HANDLE)) {
+	if (iov_mr && (iov_mr->peer.flags & OFI_HMEM_DATA_DEV_REG_HANDLE)) {
 		assert(iov_mr->peer.hmem_data);
-		copied = ofi_gdrcopy_from_cuda_iov((uint64_t)iov_mr->peer.hmem_data,
-						   pke->wiredata + payload_offset,
-		                                   ope->iov, ope->iov_count,
-		                                   segment_offset, data_size);
+		copied = ofi_dev_reg_copy_from_hmem_iov(pke->wiredata + payload_offset,
+							data_size, iov_mr->peer.iface,
+							(uint64_t)iov_mr->peer.hmem_data,
+							ope->iov, ope->iov_count,
+							segment_offset);
 	} else {
 		copied = ofi_copy_from_hmem_iov(pke->wiredata + payload_offset,
 						data_size,
@@ -179,13 +150,14 @@ int efa_rdm_ep_flush_queued_blocking_copy_to_hmem(struct efa_rdm_ep *ep)
 		desc = rxe->desc[0];
 		assert(desc && desc->peer.iface != FI_HMEM_SYSTEM);
 
-		if (FI_HMEM_CUDA == desc->peer.iface &&
-		    (desc->peer.flags & OFI_HMEM_DATA_GDRCOPY_HANDLE)) {
+		if (desc->peer.flags & OFI_HMEM_DATA_DEV_REG_HANDLE) {
 			assert(desc->peer.hmem_data);
-			bytes_copied[i] = ofi_gdrcopy_to_cuda_iov((uint64_t)desc->peer.hmem_data,
-								  rxe->iov, rxe->iov_count,
-								  segment_offset + ep->msg_prefix_size,
-			                                          data, pkt_entry->payload_size);
+			bytes_copied[i] = ofi_dev_reg_copy_to_hmem_iov(
+								desc->peer.iface,
+								(uint64_t)desc->peer.hmem_data,
+								rxe->iov, rxe->iov_count,
+								segment_offset + ep->msg_prefix_size,
+								data, pkt_entry->payload_size);
 		} else {
 			bytes_copied[i] = ofi_copy_to_hmem_iov(desc->peer.iface,
 			                                       desc->peer.device.reserved,
@@ -199,6 +171,10 @@ int efa_rdm_ep_flush_queued_blocking_copy_to_hmem(struct efa_rdm_ep *ep)
 		pkt_entry = ep->queued_copy_vec[i].pkt_entry;
 		segment_offset = ep->queued_copy_vec[i].data_offset;
 		rxe = pkt_entry->ope;
+		if (pkt_entry->alloc_type == EFA_RDM_PKE_FROM_EFA_RX_POOL) {
+			assert(ep->efa_rx_pkts_held > 0);
+			ep->efa_rx_pkts_held--;
+		}
 
 		if (bytes_copied[i] != MIN(pkt_entry->payload_size,
 					   rxe->cq_entry.len - segment_offset)) {
@@ -243,6 +219,9 @@ int efa_rdm_pke_queued_copy_payload_to_hmem(struct efa_rdm_pke *pke,
 	ep->queued_copy_num += 1;
 
 	rxe->bytes_queued_blocking_copy += pke->payload_size;
+
+	if (pke->alloc_type == EFA_RDM_PKE_FROM_EFA_RX_POOL)
+		ep->efa_rx_pkts_held++;
 
 	if (ep->queued_copy_num < EFA_RDM_MAX_QUEUED_COPY &&
 	    rxe->bytes_copied + rxe->bytes_queued_blocking_copy < rxe->total_len) {
@@ -307,7 +286,7 @@ int efa_rdm_pke_copy_payload_to_cuda(struct efa_rdm_pke *pke,
 	p2p_available = ret;
 	local_read_available = p2p_available && efa_rdm_ep_support_rdma_read(ep);
 	cuda_memcpy_available = ep->cuda_api_permitted;
-	gdrcopy_available = desc->peer.flags & OFI_HMEM_DATA_GDRCOPY_HANDLE;
+	gdrcopy_available = desc->peer.flags & OFI_HMEM_DATA_DEV_REG_HANDLE;
 
 	/* For in-order aligned send/recv, only allow local read to be used to copy data */
 	if (ep->sendrecv_in_order_aligned_128_bytes) {
@@ -353,10 +332,10 @@ int efa_rdm_pke_copy_payload_to_cuda(struct efa_rdm_pke *pke,
 		 */
 		if (rxe->bytes_copied + pke->payload_size == rxe->total_len) {
 			assert(desc->peer.hmem_data);
-			ofi_gdrcopy_to_cuda_iov((uint64_t)desc->peer.hmem_data,
-			                        rxe->iov, rxe->iov_count,
-			                        segment_offset + ep->msg_prefix_size,
-			                        pke->payload, pke->payload_size);
+			ofi_dev_reg_copy_to_hmem_iov(FI_HMEM_CUDA, (uint64_t)desc->peer.hmem_data,
+			                             rxe->iov, rxe->iov_count,
+			                             segment_offset + ep->msg_prefix_size,
+			                             pke->payload, pke->payload_size);
 			efa_rdm_pke_handle_data_copied(pke);
 			return 0;
 		}
@@ -448,9 +427,9 @@ ssize_t efa_rdm_pke_copy_payload_to_ope(struct efa_rdm_pke *pke,
 	 *
 	 * 3. message size is 0, thus no data to copy.
 	 */
-	if (OFI_UNLIKELY((ope->internal_flags & EFA_RDM_RXE_RECV_CANCEL)) ||
-	    OFI_UNLIKELY(segment_offset >= ope->cq_entry.len) ||
-	    OFI_UNLIKELY(pke->payload_size == 0)) {
+	if (OFI_UNLIKELY((ope->internal_flags & EFA_RDM_RXE_RECV_CANCEL) ||
+	    (segment_offset >= ope->cq_entry.len) ||
+	    (pke->payload_size == 0))) {
 		efa_rdm_pke_handle_data_copied(pke);
 		return 0;
 	}
@@ -576,6 +555,9 @@ uint32_t *efa_rdm_pke_connid_ptr(struct efa_rdm_pke *pkt_entry)
 
 	case EFA_RDM_EOR_PKT:
 		return &efa_rdm_pke_get_eor_hdr(pkt_entry)->connid;
+
+	case EFA_RDM_READ_NACK_PKT:
+		return &efa_rdm_pke_get_read_nack_hdr(pkt_entry)->connid;
 
 	case EFA_RDM_HANDSHAKE_PKT:
 		return &(efa_rdm_pke_get_handshake_opt_connid_hdr(pkt_entry)->connid);

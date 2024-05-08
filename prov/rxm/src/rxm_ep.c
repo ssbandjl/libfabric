@@ -960,7 +960,7 @@ void rxm_ep_progress_deferred_queue(struct rxm_ep *rxm_ep,
 			msg.msg_iov = &iov;
 
 			ret = fi_sendmsg(def_tx_entry->rxm_conn->msg_ep, &msg,
-					 FI_PRIORITY);
+					 OFI_PRIORITY);
 			if (ret) {
 				if (ret != -FI_EAGAIN) {
 					rxm_cq_write_error(
@@ -977,18 +977,6 @@ void rxm_ep_progress_deferred_queue(struct rxm_ep *rxm_ep,
 		rxm_dequeue_deferred_tx(def_tx_entry);
 		free(def_tx_entry);
 	}
-}
-
-static inline
-struct fid_ep *get_coll_ep(struct rxm_ep *rxm_ep, uint64_t flags, int coll_op)
-{
-	if (flags & FI_PEER_TRANSFER)
-		return rxm_ep->util_coll_ep;
-
-	if (rxm_ep->offload_coll_mask & BIT(coll_op))
-		return rxm_ep->offload_coll_ep;
-
-	return rxm_ep->util_coll_ep;
 }
 
 static int rxm_ep_init_coll_req(struct rxm_ep *rxm_ep, int coll_op, uint64_t flags,

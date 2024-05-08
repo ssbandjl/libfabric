@@ -340,8 +340,12 @@ static ssize_t sock_cq_sreadfrom(struct fid_cq *cq, void *buf, size_t count,
 	ssize_t cq_entry_len, avail;
 
 	sock_cq = container_of(cq, struct sock_cq, cq_fid);
+	pthread_mutex_lock(&sock_cq->lock);
 	if (ofi_rbused(&sock_cq->cqerr_rb))
-		return -FI_EAVAIL;
+		ret = -FI_EAVAIL;
+	pthread_mutex_unlock(&sock_cq->lock);
+	if (ret)
+		return ret;
 
 	cq_entry_len = sock_cq->cq_entry_size;
 	if (sock_cq->attr.wait_cond == FI_CQ_COND_THRESHOLD)
@@ -449,7 +453,8 @@ static ssize_t sock_cq_readerr(struct fid_cq *cq, struct fi_cq_err_entry *buf,
 			&& buf->err_data && buf->err_data_size) {
 			err_data = buf->err_data;
 			err_data_size = buf->err_data_size;
-			*buf = entry;
+			ofi_cq_err_memcpy(api_version, buf, &entry);
+
 			buf->err_data = err_data;
 
 			/* Fill provided user's buffer */
@@ -733,7 +738,7 @@ int sock_cq_report_error(struct sock_cq *cq, struct sock_pe_entry *entry,
 			 size_t err_data_size)
 {
 	int ret;
-	struct fi_cq_err_entry err_entry;
+	struct fi_cq_err_entry err_entry = {0};
 
 	pthread_mutex_lock(&cq->lock);
 	if (ofi_rbavail(&cq->cqerr_rb) < sizeof(err_entry)) {

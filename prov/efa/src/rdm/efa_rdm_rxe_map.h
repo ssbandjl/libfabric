@@ -1,35 +1,5 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #ifndef EFA_RDM_OPE_RECVMAP
 #define EFA_RDM_OPE_RECVMAP
@@ -49,7 +19,7 @@ struct efa_rdm_rxe_map_entry;
 
 /**
  * @brief a hashmap between sender address + msg_id to RX entry
- * 
+ *
  * @details
  * This hash map is used on the receiver side to implement
  * medium and runting protocols. Such protocol will send
@@ -85,7 +55,6 @@ void efa_rdm_rxe_map_insert(struct efa_rdm_rxe_map *rxe_map,
 			    struct efa_rdm_pke *pkt_entry,
 			    struct efa_rdm_ope *rxe);
 
-void efa_rdm_rxe_map_remove(struct efa_rdm_rxe_map *rxe_map,
-			   struct efa_rdm_pke *pkt_entry,
-			   struct efa_rdm_ope *rxe);
+void efa_rdm_rxe_map_remove(struct efa_rdm_rxe_map *rxe_map, uint64_t msg_id,
+			    fi_addr_t addr, struct efa_rdm_ope *rxe);
 #endif

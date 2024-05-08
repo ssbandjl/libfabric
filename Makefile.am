@@ -2,7 +2,7 @@
 # Copyright (c) 2016 Cisco Systems, Inc.  All rights reserved.
 # Copyright (c) 2017-2018 Intel Corporation, Inc. All right reserved.
 # Copyright (c) 2018 Amazon.com, Inc. or its affiliates. All rights reserved.
-# (C) Copyright 2020 Hewlett Packard Enterprise Development LP
+# (C) Copyright 2020-2023 Hewlett Packard Enterprise Development LP
 #
 # Makefile.am for libfabric
 
@@ -89,6 +89,7 @@ common_srcs =				\
 	prov/util/src/cuda_ipc_monitor.c \
 	prov/util/src/rocr_ipc_monitor.c \
 	prov/util/src/xpmem_monitor.c	\
+	prov/util/src/util_profile.c \
 	prov/coll/src/coll_attr.c	\
 	prov/coll/src/coll_av.c		\
 	prov/coll/src/coll_av_set.c	\
@@ -201,6 +202,7 @@ src_libfabric_la_SOURCES =			\
 	include/rbtree.h			\
 	include/uthash.h			\
 	include/ofi_prov.h			\
+	include/ofi_profile.h       \
 	include/rdma/providers/fi_log.h		\
 	include/rdma/providers/fi_prov.h	\
 	src/fabric.c				\
@@ -218,7 +220,7 @@ src_libfabric_la_LIBADD =
 src_libfabric_la_DEPENDENCIES = libfabric.map
 
 if !EMBEDDED
-src_libfabric_la_LDFLAGS += -version-info 23:0:22
+src_libfabric_la_LDFLAGS += -version-info 25:0:24
 endif
 src_libfabric_la_LDFLAGS += -export-dynamic \
 			   $(libfabric_version_script)
@@ -234,7 +236,8 @@ rdmainclude_HEADERS += \
 	$(top_srcdir)/include/rdma/fi_endpoint.h \
 	$(top_srcdir)/include/rdma/fi_errno.h \
 	$(top_srcdir)/include/rdma/fi_tagged.h \
-	$(top_srcdir)/include/rdma/fi_trigger.h
+	$(top_srcdir)/include/rdma/fi_trigger.h \
+	$(top_srcdir)/include/rdma/fi_profile.h
 providersinclude_HEADERS += \
 	$(top_srcdir)/include/rdma/providers/fi_log.h \
 	$(top_srcdir)/include/rdma/providers/fi_peer.h \
@@ -286,6 +289,7 @@ real_man_pages = \
         man/man3/fi_tagged.3 \
         man/man3/fi_trigger.3 \
         man/man3/fi_version.3 \
+        man/man3/fi_profile.3 \
         man/man7/fabric.7 \
         man/man7/fi_arch.7 \
         man/man7/fi_direct.7 \
@@ -455,16 +459,14 @@ include prov/efa/Makefile.include
 include prov/usnic/Makefile.include
 include prov/psm2/Makefile.include
 include prov/psm3/Makefile.include
-include prov/gni/Makefile.include
+include prov/cxi/Makefile.include
 include prov/rxm/Makefile.include
 include prov/mrail/Makefile.include
 include prov/rxd/Makefile.include
-include prov/bgq/Makefile.include
 include prov/opx/Makefile.include
 include prov/shm/Makefile.include
 include prov/sm2/Makefile.include
 include prov/tcp/Makefile.include
-include prov/rstream/Makefile.include
 include prov/ucx/Makefile.include
 include prov/hook/Makefile.include
 include prov/hook/perf/Makefile.include

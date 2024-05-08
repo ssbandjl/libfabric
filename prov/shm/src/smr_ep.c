@@ -318,12 +318,12 @@ static int smr_format_ze_ipc(struct smr_ep *ep, int64_t id, struct smr_cmd *cmd,
 	if (ep->sock_info->peers[id].state != SMR_CMAP_SUCCESS)
 		return -FI_EAGAIN;
 
-	ret = ze_hmem_get_base_addr(iov[0].iov_base, &base, NULL);
+	ret = ze_hmem_get_base_addr(iov[0].iov_base, iov[0].iov_len, &base,
+				    NULL);
 	if (ret)
 		return ret;
 
-	ret = ze_hmem_get_shared_handle(ep->sock_info->my_fds[device],
-			base, &pend->fd,
+	ret = ze_hmem_get_shared_handle(device, base, &pend->fd,
 			(void **) &cmd->msg.data.ipc_info.ipc_handle);
 	if (ret)
 		return ret;
@@ -347,7 +347,8 @@ static int smr_format_ipc(struct smr_cmd *cmd, void *ptr, size_t len,
 	cmd->msg.hdr.size = len;
 	cmd->msg.data.ipc_info.iface = iface;
 	cmd->msg.data.ipc_info.device = device;
-	ret = ofi_hmem_get_base_addr(cmd->msg.data.ipc_info.iface, ptr, &base,
+	ret = ofi_hmem_get_base_addr(cmd->msg.data.ipc_info.iface, ptr, len,
+				     &base,
 				     &cmd->msg.data.ipc_info.base_length);
 	if (ret)
 		return ret;
@@ -579,7 +580,7 @@ int smr_select_proto(void **desc, size_t iov_count,
 {
 	struct ofi_mr *smr_desc;
 	enum fi_hmem_iface iface = FI_HMEM_SYSTEM;
-	bool gdrcopy_avail = false, use_ipc = false;
+	bool fastcopy_avail = false, use_ipc = false;
 
 	/* Do not inline/inject if IPC is available so device to device
 	 * transfer may occur if possible. */
@@ -590,10 +591,9 @@ int smr_select_proto(void **desc, size_t iov_count,
 				smr_desc->flags & FI_HMEM_DEVICE_ONLY &&
 				!(op_flags & FI_INJECT);
 
-		if (iface == FI_HMEM_CUDA &&
-		    (smr_desc->flags & OFI_HMEM_DATA_GDRCOPY_HANDLE)) {
+		if (smr_desc->flags & OFI_HMEM_DATA_DEV_REG_HANDLE) {
 			assert(smr_desc->hmem_data);
-			gdrcopy_avail = true;
+			fastcopy_avail = true;
 		}
 	}
 
@@ -605,9 +605,9 @@ int smr_select_proto(void **desc, size_t iov_count,
 		return smr_src_sar;
 	}
 
-	/* TODO: Move gdrcopy check out of non-cuda fast paths */
-	if (gdrcopy_avail && total_len <= smr_env.max_gdrcopy_size)
-		return total_len <= SMR_MSG_DATA_LEN ? smr_src_inline : smr_src_inject;
+	if (fastcopy_avail && total_len <= smr_env.max_gdrcopy_size)
+		return total_len <= SMR_MSG_DATA_LEN ? smr_src_inline :
+						       smr_src_inject;
 
 	if (op_flags & FI_INJECT) {
 		if (op_flags & FI_DELIVERY_COMPLETE)
@@ -811,6 +811,21 @@ static void smr_cleanup_epoll(struct smr_sock_info *sock_info)
 	ofi_epoll_close(sock_info->epollfd);
 }
 
+static void smr_free_sock_info(struct smr_ep *ep)
+{
+	int i, j;
+
+	for (i = 0; i < SMR_MAX_PEERS; i++) {
+		if (!ep->sock_info->peers[i].device_fds)
+			continue;
+		for (j = 0; j < ep->sock_info->nfds; j++)
+			close(ep->sock_info->peers[i].device_fds[j]);
+		free(ep->sock_info->peers[i].device_fds);
+	}
+	free(ep->sock_info);
+	ep->sock_info = NULL;
+}
+
 static int smr_ep_close(struct fid *fid)
 {
 	struct smr_ep *ep;
@@ -826,11 +841,16 @@ static int smr_ep_close(struct fid *fid)
 		close(ep->sock_info->listen_sock);
 		unlink(ep->sock_info->name);
 		smr_cleanup_epoll(ep->sock_info);
-		free(ep->sock_info);
+		smr_free_sock_info(ep);
 	}
 
-	if (ep->srx && ep->util_ep.ep_fid.msg != &smr_no_recv_msg_ops)
-		(void) util_srx_close(&ep->srx->fid);
+	if (ep->srx) {
+		/* shm is an owner provider */
+		if (ep->util_ep.ep_fid.msg != &smr_no_recv_msg_ops)
+			(void) util_srx_close(&ep->srx->fid);
+		else /* shm is a peer provider */
+			free(ep->srx);
+	}
 
 	ofi_endpoint_close(&ep->util_ep);
 
@@ -878,10 +898,6 @@ static int smr_ep_bind_cq(struct smr_ep *ep, struct util_cq *cq, uint64_t flags)
 		if (ret)
 			return ret;
 	}
-
-	ret = fid_list_insert(&cq->ep_list,
-			      &cq->ep_list_lock,
-			      &ep->util_ep.ep_fid.fid);
 
 	return ret;
 }
@@ -995,9 +1011,13 @@ static void *smr_start_listener(void *args)
 	struct sockaddr_un sockaddr;
 	struct ofi_epollfds_event events[SMR_MAX_PEERS + 1];
 	int i, ret, poll_fds, sock = -1;
-	int peer_fds[ZE_MAX_DEVICES];
+	int *peer_fds = NULL;
 	socklen_t len = sizeof(sockaddr);
 	int64_t id, peer_id;
+
+	peer_fds = calloc(ep->sock_info->nfds, sizeof(*peer_fds));
+	if (!peer_fds)
+		goto out;
 
 	ep->region->flags |= SMR_FLAG_IPC_SOCK;
 	while (1) {
@@ -1029,6 +1049,15 @@ static void *smr_start_listener(void *args)
 			ret = smr_recvmsg_fd(sock, &id, peer_fds,
 					     ep->sock_info->nfds);
 			if (!ret) {
+				if (!ep->sock_info->peers[id].device_fds) {
+					ep->sock_info->peers[id].device_fds =
+						calloc(ep->sock_info->nfds,
+							sizeof(*ep->sock_info->peers[id].device_fds));
+					if (!ep->sock_info->peers[id].device_fds) {
+						close(sock);
+						goto out;
+					}
+				}
 				memcpy(ep->sock_info->peers[id].device_fds,
 				       peer_fds, sizeof(*peer_fds) *
 				       ep->sock_info->nfds);
@@ -1047,6 +1076,7 @@ static void *smr_start_listener(void *args)
 		}
 	}
 out:
+	free(peer_fds);
 	close(ep->sock_info->listen_sock);
 	unlink(ep->sock_info->name);
 	return NULL;
@@ -1090,7 +1120,6 @@ void smr_ep_exchange_fds(struct smr_ep *ep, int64_t id)
 	char *name1, *name2;
 	int ret = -1, sock = -1;
 	int64_t peer_id;
-	int peer_fds[ZE_MAX_DEVICES];
 
 	if (peer_smr->pid == ep->region->pid ||
 	    !(peer_smr->flags & SMR_FLAG_IPC_SOCK))
@@ -1140,12 +1169,17 @@ void smr_ep_exchange_fds(struct smr_ep *ep, int64_t id)
 	if (ret)
 		goto cleanup;
 
-	ret = smr_recvmsg_fd(sock, &id, peer_fds, ep->sock_info->nfds);
+	if (!ep->sock_info->peers[id].device_fds) {
+		ep->sock_info->peers[id].device_fds =
+			calloc(ep->sock_info->nfds,
+			       sizeof(*ep->sock_info->peers[id].device_fds));
+		if (!ep->sock_info->peers[id].device_fds)
+			goto cleanup;
+	}
+	ret = smr_recvmsg_fd(sock, &id, ep->sock_info->peers[id].device_fds,
+			     ep->sock_info->nfds);
 	if (ret)
 		goto cleanup;
-
-	memcpy(ep->sock_info->peers[id].device_fds, peer_fds,
-	       sizeof(*peer_fds) * ep->sock_info->nfds);
 
 cleanup:
 	close(sock);
@@ -1223,8 +1257,7 @@ close:
 	close(ep->sock_info->listen_sock);
 	unlink(sockaddr.sun_path);
 free:
-	free(ep->sock_info);
-	ep->sock_info = NULL;
+	smr_free_sock_info(ep);
 err_out:
 	FI_WARN(&smr_prov, FI_LOG_EP_CTRL, "Unable to initialize IPC socket."
 		"Defaulting to SAR for device transfers\n");
@@ -1233,6 +1266,15 @@ err_out:
 static int smr_discard(struct fi_peer_rx_entry *rx_entry)
 {
 	struct smr_cmd_ctx *cmd_ctx = rx_entry->peer_context;
+	struct smr_region *peer_smr;
+	struct smr_resp *resp;
+
+	if (cmd_ctx->cmd.msg.hdr.src_data >= smr_src_iov) {
+		peer_smr = smr_peer_region(cmd_ctx->ep->region,
+					   cmd_ctx->cmd.msg.hdr.id);
+		resp = smr_get_ptr(peer_smr, cmd_ctx->cmd.msg.hdr.src_data);
+		resp->status = SMR_STATUS_SUCCESS;
+	}
 
 	ofi_buf_free(cmd_ctx);
 
@@ -1322,7 +1364,6 @@ static int smr_ep_ctrl(struct fid *fid, int command, void *arg)
 	struct smr_domain *domain;
 	struct smr_ep *ep;
 	struct smr_av *av;
-	struct fid_peer_srx *srx;
 	int ret;
 
 	ep = container_of(fid, struct smr_ep, util_ep.ep_fid.fid);
@@ -1379,12 +1420,6 @@ static int smr_ep_ctrl(struct fid *fid, int command, void *arg)
 			if (ret)
 				return ret;
 		} else {
-			srx = calloc(1, sizeof(*srx));
-			srx->peer_ops = &smr_srx_peer_ops;
-			srx->owner_ops = smr_get_peer_srx(ep)->owner_ops;
-			srx->ep_fid.fid.context =
-				smr_get_peer_srx(ep)->ep_fid.fid.context;
-			ep->srx = &srx->ep_fid;
 			ep->util_ep.ep_fid.msg = &smr_no_recv_msg_ops;
 			ep->util_ep.ep_fid.tagged = &smr_no_recv_tag_ops;
 		}

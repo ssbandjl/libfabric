@@ -1,38 +1,7 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include "efa.h"
-#include "efa_cq.h"
 #include "efa_av.h"
 #include "efa_rdm_ep.h"
 #include "efa_rdm_cq.h"
@@ -44,6 +13,46 @@
 #include "efa_rdm_pkt_type.h"
 #include "efa_rdm_pke_req.h"
 #include "efa_cntr.h"
+
+static
+void efa_rdm_ep_construct_ibv_qp_init_attr_ex(struct efa_rdm_ep *ep,
+					struct ibv_qp_init_attr_ex *attr_ex,
+					struct ibv_cq_ex *tx_cq,
+					struct ibv_cq_ex *rx_cq)
+{
+	attr_ex->cap.max_send_wr = ep->base_ep.domain->device->rdm_info->tx_attr->size;
+	attr_ex->cap.max_send_sge = ep->base_ep.domain->device->rdm_info->tx_attr->iov_limit;
+	attr_ex->cap.max_recv_wr = ep->base_ep.domain->device->rdm_info->rx_attr->size;
+	attr_ex->cap.max_recv_sge = ep->base_ep.domain->device->rdm_info->rx_attr->iov_limit;
+	attr_ex->cap.max_inline_data = ep->base_ep.domain->device->efa_attr.inline_buf_size;
+	attr_ex->qp_type = IBV_QPT_DRIVER;
+	attr_ex->comp_mask = IBV_QP_INIT_ATTR_PD | IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
+	attr_ex->send_ops_flags = IBV_QP_EX_WITH_SEND;
+	if (efa_device_support_rdma_read())
+		attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_READ;
+	if (efa_device_support_rdma_write()) {
+		attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE;
+		attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE_WITH_IMM;
+	}
+	attr_ex->pd = efa_rdm_ep_domain(ep)->ibv_pd;
+	attr_ex->qp_context = ep;
+	attr_ex->sq_sig_all = 1;
+
+	attr_ex->send_cq = ibv_cq_ex_to_cq(tx_cq);
+	attr_ex->recv_cq = ibv_cq_ex_to_cq(rx_cq);
+}
+
+static inline
+struct efa_rdm_cq *efa_rdm_ep_get_tx_rdm_cq(struct efa_rdm_ep *ep)
+{
+	return ep->base_ep.util_ep.tx_cq ? container_of(ep->base_ep.util_ep.tx_cq, struct efa_rdm_cq, util_cq) : NULL;
+}
+
+static inline
+struct efa_rdm_cq *efa_rdm_ep_get_rx_rdm_cq(struct efa_rdm_ep *ep)
+{
+	return ep->base_ep.util_ep.rx_cq ? container_of(ep->base_ep.util_ep.rx_cq, struct efa_rdm_cq, util_cq) : NULL;
+}
 
 /**
  * @brief set the "efa_qp" field in the efa_rdm_ep->efa_base_ep
@@ -57,30 +66,34 @@ static
 int efa_rdm_ep_create_base_ep_ibv_qp(struct efa_rdm_ep *ep)
 {
 	struct ibv_qp_init_attr_ex attr_ex = { 0 };
+	struct efa_rdm_cq *tx_rdm_cq, *rx_rdm_cq;
+	struct ibv_cq_ex *tx_ibv_cq, *rx_ibv_cq;
 
-	attr_ex.cap.max_send_wr = ep->base_ep.domain->device->rdm_info->tx_attr->size;
-	attr_ex.cap.max_send_sge = ep->base_ep.domain->device->rdm_info->tx_attr->iov_limit;
-	attr_ex.send_cq = ibv_cq_ex_to_cq(ep->ibv_cq_ex);
+	tx_rdm_cq = efa_rdm_ep_get_tx_rdm_cq(ep);
+	rx_rdm_cq = efa_rdm_ep_get_rx_rdm_cq(ep);
 
-	attr_ex.cap.max_recv_wr = ep->base_ep.domain->device->rdm_info->rx_attr->size;
-	attr_ex.cap.max_recv_sge = ep->base_ep.domain->device->rdm_info->rx_attr->iov_limit;
-	attr_ex.recv_cq = ibv_cq_ex_to_cq(ep->ibv_cq_ex);
-
-	attr_ex.cap.max_inline_data = ep->base_ep.domain->device->efa_attr.inline_buf_size;
-
-	attr_ex.qp_type = IBV_QPT_DRIVER;
-	attr_ex.comp_mask = IBV_QP_INIT_ATTR_PD | IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
-	attr_ex.send_ops_flags = IBV_QP_EX_WITH_SEND;
-	if (efa_device_support_rdma_read())
-		attr_ex.send_ops_flags |= IBV_QP_EX_WITH_RDMA_READ;
-	if (efa_device_support_rdma_write()) {
-		attr_ex.send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE;
-		attr_ex.send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE_WITH_IMM;
+	if (!tx_rdm_cq && !rx_rdm_cq) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			"Endpoint is not bound to a send or receive completion queue\n");
+		return -FI_ENOCQ;
 	}
-	attr_ex.pd = efa_rdm_ep_domain(ep)->ibv_pd;
 
-	attr_ex.qp_context = ep;
-	attr_ex.sq_sig_all = 1;
+	if (!tx_rdm_cq && ofi_needs_tx(ep->base_ep.info->caps)) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			"Endpoint is not bound to a send completion queue when it has transmit capabilities enabled (FI_SEND).\n");
+		return -FI_ENOCQ;
+	}
+
+	if (!rx_rdm_cq && ofi_needs_rx(ep->base_ep.info->caps)) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			"Endpoint is not bound to a receive completion queue when it has receive capabilities enabled. (FI_RECV)\n");
+		return -FI_ENOCQ;
+	}
+
+	tx_ibv_cq = tx_rdm_cq ? tx_rdm_cq->ibv_cq.ibv_cq_ex : rx_rdm_cq->ibv_cq.ibv_cq_ex;
+	rx_ibv_cq = rx_rdm_cq ? rx_rdm_cq->ibv_cq.ibv_cq_ex : tx_rdm_cq->ibv_cq.ibv_cq_ex;
+
+	efa_rdm_ep_construct_ibv_qp_init_attr_ex(ep, &attr_ex, tx_ibv_cq, rx_ibv_cq);
 
 	return efa_base_ep_create_qp(&ep->base_ep, &attr_ex);
 }
@@ -114,7 +127,7 @@ void efa_rdm_pke_pool_mr_dereg_handler(struct ofi_bufpool_region *region)
 
 /**
  * @brief creates a packet entry pool.
- * 
+ *
  * The pool is allowed to grow if
  * max_cnt is 0 and is fixed size otherwise.
  *
@@ -414,7 +427,6 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 {
 	struct efa_domain *efa_domain = NULL;
 	struct efa_rdm_ep *efa_rdm_ep = NULL;
-	struct fi_cq_attr cq_attr;
 	int ret, retv, i;
 
 	efa_rdm_ep = calloc(1, sizeof(*efa_rdm_ep));
@@ -423,9 +435,6 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 
 	efa_domain = container_of(domain, struct efa_domain,
 				  util_domain.domain_fid);
-	memset(&cq_attr, 0, sizeof(cq_attr));
-	cq_attr.format = FI_CQ_FORMAT_DATA;
-	cq_attr.wait_obj = FI_WAIT_NONE;
 
 	ret = efa_base_ep_construct(&efa_rdm_ep->base_ep, domain, info,
 				    efa_rdm_ep_progress, context);
@@ -461,15 +470,7 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 	efa_rdm_ep->efa_max_outstanding_rx_ops = efa_domain->device->rdm_info->rx_attr->size;
 	efa_rdm_ep->efa_device_iov_limit = efa_domain->device->rdm_info->tx_attr->iov_limit;
 	efa_rdm_ep->use_device_rdma = efa_rdm_get_use_device_rdma(info->fabric_attr->api_version);
-
-	cq_attr.size = MAX(efa_rdm_ep->rx_size + efa_rdm_ep->tx_size,
-			   efa_env.cq_size);
-
-	if (info->tx_attr->op_flags & FI_DELIVERY_COMPLETE)
-		EFA_INFO(FI_LOG_CQ, "FI_DELIVERY_COMPLETE unsupported\n");
-
-	assert(info->tx_attr->msg_order == info->rx_attr->msg_order);
-	efa_rdm_ep->msg_order = info->rx_attr->msg_order;
+	efa_rdm_ep->shm_permitted = true;
 	efa_rdm_ep->max_msg_size = info->ep_attr->max_msg_size;
 	efa_rdm_ep->msg_prefix_size = info->ep_attr->msg_prefix_size;
 	efa_rdm_ep->max_proto_hdr_size = efa_rdm_pkt_type_get_max_hdr_size();
@@ -492,19 +493,13 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 #if ENABLE_DEBUG
 	efa_rdm_ep->efa_total_posted_tx_ops = 0;
 	efa_rdm_ep->send_comps = 0;
-	efa_rdm_ep->failed_send_comps = 0;
-	efa_rdm_ep->failed_write_comps = 0;
 	efa_rdm_ep->recv_comps = 0;
 #endif
 
 	efa_rdm_ep->efa_rx_pkts_posted = 0;
 	efa_rdm_ep->efa_rx_pkts_to_post = 0;
+	efa_rdm_ep->efa_rx_pkts_held = 0;
 	efa_rdm_ep->efa_outstanding_tx_ops = 0;
-
-	assert(!efa_rdm_ep->ibv_cq_ex);
-
-	ret = efa_cq_ibv_cq_ex_open(&cq_attr, efa_domain->device->ibv_ctx,
-				    &efa_rdm_ep->ibv_cq_ex, &efa_rdm_ep->ibv_cq_ex_type);
 
 	if (ret) {
 		EFA_WARN(FI_LOG_CQ, "Unable to create extended CQ: %s\n", strerror(errno));
@@ -513,7 +508,7 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 
 	ret = efa_rdm_ep_create_buffer_pools(efa_rdm_ep);
 	if (ret)
-		goto err_close_core_cq;
+		goto err_close_shm_ep;
 
 	efa_rdm_ep_init_linked_lists(efa_rdm_ep);
 
@@ -539,9 +534,12 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = false;
 	efa_rdm_ep->write_in_order_aligned_128_bytes = false;
 
-	ret = efa_rdm_ep_create_base_ep_ibv_qp(efa_rdm_ep);
-	if (ret)
-		goto err_close_core_cq;
+	efa_rdm_ep->pke_vec = calloc(sizeof(struct efa_rdm_pke *), EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV);
+	if (!efa_rdm_ep->pke_vec) {
+		EFA_WARN(FI_LOG_EP_CTRL, "cannot alloc memory for efa_rdm_ep->pke_vec!\n");
+		ret = -FI_ENOMEM;
+		goto err_close_shm_ep;
+	}
 
 	*ep = &efa_rdm_ep->base_ep.util_ep.ep_fid;
 	(*ep)->msg = &efa_rdm_msg_ops;
@@ -553,11 +551,6 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 	(*ep)->cm = &efa_rdm_ep_cm_ops;
 	return 0;
 
-err_close_core_cq:
-	retv = -ibv_destroy_cq(ibv_cq_ex_to_cq(efa_rdm_ep->ibv_cq_ex));
-	if (retv)
-		EFA_WARN(FI_LOG_CQ, "Unable to close cq: %s\n",
-			fi_strerror(-retv));
 err_close_shm_ep:
 	if (efa_rdm_ep->shm_ep) {
 		retv = fi_close(&efa_rdm_ep->shm_ep->fid);
@@ -758,6 +751,9 @@ static void efa_rdm_ep_destroy_buffer_pools(struct efa_rdm_ep *efa_rdm_ep)
 
 	if (efa_rdm_ep->efa_tx_pkt_pool)
 		ofi_bufpool_destroy(efa_rdm_ep->efa_tx_pkt_pool);
+
+	if (efa_rdm_ep->rx_atomrsp_pool)
+		ofi_bufpool_destroy(efa_rdm_ep->rx_atomrsp_pool);
 }
 
 /*
@@ -790,16 +786,74 @@ static inline
 void efa_rdm_ep_wait_send(struct efa_rdm_ep *efa_rdm_ep)
 {
 	struct util_srx_ctx *srx_ctx;
+	struct efa_rdm_cq *tx_cq, *rx_cq;
 	/* peer srx should be initialized when ep is enabled */
 	assert(efa_rdm_ep->peer_srx_ep);
 	srx_ctx = efa_rdm_ep_get_peer_srx_ctx(efa_rdm_ep);
 	ofi_genlock_lock(srx_ctx->lock);
 
+	tx_cq = efa_rdm_ep_get_tx_rdm_cq(efa_rdm_ep);
+	rx_cq = efa_rdm_ep_get_rx_rdm_cq(efa_rdm_ep);
+
 	while (efa_rdm_ep_has_unfinished_send(efa_rdm_ep)) {
+		/* poll cq until empty */
+		if (tx_cq)
+			efa_rdm_cq_poll_ibv_cq(-1, &tx_cq->ibv_cq);
+		if (rx_cq)
+			efa_rdm_cq_poll_ibv_cq(-1, &rx_cq->ibv_cq);
 		efa_rdm_ep_progress_internal(efa_rdm_ep);
 	}
 
 	ofi_genlock_unlock(srx_ctx->lock);
+}
+
+static inline
+void efa_rdm_ep_remove_cntr_ibv_cq_poll_list(struct efa_rdm_ep *ep)
+{
+	int i;
+	struct efa_cntr *efa_cntr;
+	struct util_cntr *util_cntr;
+	struct efa_rdm_cq *tx_cq, *rx_cq;
+
+	tx_cq = efa_rdm_ep_get_tx_rdm_cq(ep);
+	rx_cq = efa_rdm_ep_get_rx_rdm_cq(ep);
+
+	for (i = 0; i< CNTR_CNT; i++) {
+		util_cntr = ep->base_ep.util_ep.cntrs[i];
+		if (util_cntr) {
+			efa_cntr = container_of(util_cntr, struct efa_cntr, util_cntr);
+			if (tx_cq && !ofi_atomic_get32(&tx_cq->util_cq.ref))
+				efa_ibv_cq_poll_list_remove(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &tx_cq->ibv_cq);
+
+			if (rx_cq && !ofi_atomic_get32(&rx_cq->util_cq.ref))
+				efa_ibv_cq_poll_list_remove(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &rx_cq->ibv_cq);
+		}
+	}
+}
+
+static inline
+void efa_rdm_ep_remove_cq_ibv_cq_poll_list(struct efa_rdm_ep *ep)
+{
+	struct efa_rdm_cq *tx_cq, *rx_cq;
+
+	tx_cq = efa_rdm_ep_get_tx_rdm_cq(ep);
+	rx_cq = efa_rdm_ep_get_rx_rdm_cq(ep);
+
+	/* Remove the cross referencing of the CQs.
+	 * It must happen after ofi_endpoint_close
+	 * so we have cq's reference counters updated.
+	 */
+	if (tx_cq && !ofi_atomic_get32(&tx_cq->util_cq.ref)) {
+		efa_ibv_cq_poll_list_remove(&tx_cq->ibv_cq_poll_list, &tx_cq->util_cq.ep_list_lock, &tx_cq->ibv_cq);
+		if (rx_cq)
+			efa_ibv_cq_poll_list_remove(&rx_cq->ibv_cq_poll_list, &rx_cq->util_cq.ep_list_lock, &tx_cq->ibv_cq);
+	}
+
+	if (rx_cq && !ofi_atomic_get32(&rx_cq->util_cq.ref)) {
+		efa_ibv_cq_poll_list_remove(&rx_cq->ibv_cq_poll_list, &rx_cq->util_cq.ep_list_lock, &rx_cq->ibv_cq);
+		if (tx_cq)
+			efa_ibv_cq_poll_list_remove(&tx_cq->ibv_cq_poll_list, &tx_cq->util_cq.ep_list_lock, &rx_cq->ibv_cq);
+	}
 }
 
 /**
@@ -816,15 +870,29 @@ static int efa_rdm_ep_close(struct fid *fid)
 	if (efa_rdm_ep->base_ep.efa_qp_enabled)
 		efa_rdm_ep_wait_send(efa_rdm_ep);
 
+	/*
+	 * util_srx_close will clean all efa_rdm_rxes that are
+	 * associated with peer_rx_entries in unexp msg/tag lists.
+	 * It also decrements the ref count of rx cq. So it must
+	 * be called before we clean up the ibv cq poll list which
+	 * relies on the correct ref count of tx/rx cq.
+	 */
+	if (efa_rdm_ep->peer_srx_ep) {
+		util_srx_close(&efa_rdm_ep->peer_srx_ep->fid);
+		efa_rdm_ep->peer_srx_ep = NULL;
+	}
+
+	/* We need to free the util_ep first to avoid race conditions
+	 * with other threads progressing the cq. */
+	efa_base_ep_close_util_ep(&efa_rdm_ep->base_ep);
+
+	efa_rdm_ep_remove_cntr_ibv_cq_poll_list(efa_rdm_ep);
+
+	efa_rdm_ep_remove_cq_ibv_cq_poll_list(efa_rdm_ep);
+
 	ret = efa_base_ep_destruct(&efa_rdm_ep->base_ep);
 	if (ret) {
 		EFA_WARN(FI_LOG_EP_CTRL, "Unable to close base endpoint\n");
-		retv = ret;
-	}
-
-	ret = -ibv_destroy_cq(ibv_cq_ex_to_cq(efa_rdm_ep->ibv_cq_ex));
-	if (ret) {
-		EFA_WARN(FI_LOG_EP_CTRL, "Unable to close ibv_cq_ex\n");
 		retv = ret;
 	}
 
@@ -836,15 +904,14 @@ static int efa_rdm_ep_close(struct fid *fid)
 		}
 	}
 
-	/*
-	 * util_srx_close will clean all efa_rdm_rxes that are
-	 * associated with peer_rx_entries in unexp msg/tag lists.
-	 */
-	if (efa_rdm_ep->peer_srx_ep) {
-		util_srx_close(&efa_rdm_ep->peer_srx_ep->fid);
-		efa_rdm_ep->peer_srx_ep = NULL;
-	}
 	efa_rdm_ep_destroy_buffer_pools(efa_rdm_ep);
+
+	if (efa_rdm_ep->pke_vec)
+		free(efa_rdm_ep->pke_vec);
+
+	if (efa_rdm_ep->user_info)
+		fi_freeinfo(efa_rdm_ep->user_info);
+
 	free(efa_rdm_ep);
 	return retv;
 }
@@ -885,50 +952,103 @@ void efa_rdm_ep_set_extra_info(struct efa_rdm_ep *ep)
 	ep->extra_info[0] |= EFA_RDM_EXTRA_REQUEST_CONNID_HEADER;
 
 	ep->extra_info[0] |= EFA_RDM_EXTRA_FEATURE_RUNT;
+
+	/* READ_NACK feature introduced in libfabric 1.20 */
+	ep->extra_info[0] |= EFA_RDM_EXTRA_FEATURE_READ_NACK;
 }
 
 /**
- * @brief set the "use_shm_for_tx" field of efa_rdm_ep
- * The field is set based on various factors, including
- * environment variables, user hints, user's fi_setopt()
- * calls.
- * This function should be called during call to fi_enable(),
- * after user called fi_setopt().
+ * @brief Close all shm resources bound to the efa ep and domain.
+ * This function will do this cleanup as best effort. When there is failure
+ * to clean up shm resource, it will still move forward by setting the resource
+ * pointer to NULL so it won't be used later.
  *
- * @param[in,out]	ep	endpoint to set the field
+ * @param efa_rdm_ep pointer to efa_rdm_ep.
+ */
+static void efa_rdm_ep_close_shm_resources(struct efa_rdm_ep *efa_rdm_ep)
+{
+	int ret;
+	struct efa_domain *efa_domain;
+	struct efa_av *efa_av;
+	struct efa_rdm_cq *efa_rdm_cq;
+
+	if (efa_rdm_ep->shm_ep) {
+		ret = fi_close(&efa_rdm_ep->shm_ep->fid);
+		if (ret)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm ep\n");
+		efa_rdm_ep->shm_ep = NULL;
+	}
+
+	efa_av = efa_rdm_ep->base_ep.av;
+	if (efa_av->shm_rdm_av) {
+		ret = fi_close(&efa_av->shm_rdm_av->fid);
+		if (ret)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm av\n");
+		efa_av->shm_rdm_av = NULL;
+	}
+
+	efa_rdm_cq = container_of(efa_rdm_ep->base_ep.util_ep.tx_cq, struct efa_rdm_cq, util_cq);
+	if (efa_rdm_cq->shm_cq) {
+		ret = fi_close(&efa_rdm_cq->shm_cq->fid);
+		if (ret)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm cq\n");
+		efa_rdm_cq->shm_cq = NULL;
+	}
+
+	efa_rdm_cq = container_of(efa_rdm_ep->base_ep.util_ep.rx_cq, struct efa_rdm_cq, util_cq);
+	if (efa_rdm_cq->shm_cq) {
+		ret = fi_close(&efa_rdm_cq->shm_cq->fid);
+		if (ret)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm cq\n");
+		efa_rdm_cq->shm_cq = NULL;
+	}
+
+	efa_domain = efa_rdm_ep_domain(efa_rdm_ep);
+
+	if (efa_domain->shm_domain) {
+		ret = fi_close(&efa_domain->shm_domain->fid);
+		if (ret)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm domain\n");
+		efa_domain->shm_domain = NULL;
+	}
+
+	if (efa_domain->fabric->shm_fabric) {
+		ret = fi_close(&efa_domain->fabric->shm_fabric->fid);
+		if (ret)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm fabric\n");
+		efa_domain->fabric->shm_fabric = NULL;
+	}
+
+	if (efa_domain->shm_info) {
+		fi_freeinfo(efa_domain->shm_info);
+		efa_domain->shm_info = NULL;
+	}
+}
+
+/**
+ * @brief update the shm resources based on the
+ * the current ep status. When cuda_api_permitted
+ * is set as false via fi_setopt, shm should be
+ * shut down. This function must be called inside
+ * fi_enable which is called after fi_setopt.
+ *
+ * @param[in,out]	ep	efa_rdm_ep
  */
 static
-void efa_rdm_ep_set_use_shm_for_tx(struct efa_rdm_ep *ep)
+void efa_rdm_ep_update_shm(struct efa_rdm_ep *ep)
 {
-	if (!efa_rdm_ep_domain(ep)->shm_domain) {
-		ep->use_shm_for_tx = false;
+	bool use_shm;
+
+	/*
+	 * when efa_env.enable_shm_transfer is false
+	 * , shm resources won't be created.
+	 */
+	if (!efa_rdm_ep_domain(ep)->shm_domain)
 		return;
-	}
+
+	use_shm = true;
 
 	assert(ep->user_info);
-
-	/* App provided hints supercede environmental variables.
-	 *
-	 * Using the shm provider comes with some overheads, so avoid
-	 * initializing the provider if the app provides a hint that it does not
-	 * require node-local communication. We can still loopback over the EFA
-	 * device in cases where the app violates the hint and continues
-	 * communicating with node-local peers.
-	 *
-	 * aws-ofi-nccl relies on this feature.
-	 */
-	if ((ep->user_info->caps & FI_REMOTE_COMM)
-	    /* but not local communication */
-	    && !(ep->user_info->caps & FI_LOCAL_COMM)) {
-		ep->use_shm_for_tx = false;
-		return;
-	}
-
-	/* TODO Update shm provider to support HMEM atomic */
-	if ((ep->user_info->caps) & FI_ATOMIC && (ep->user_info->caps & FI_HMEM)) {
-		ep->use_shm_for_tx = false;
-		return;
-	}
 
 	/*
 	 * shm provider must make cuda calls to transfer cuda memory.
@@ -938,17 +1058,82 @@ void efa_rdm_ep_set_use_shm_for_tx(struct efa_rdm_ep *ep)
 	 * AWS Neuron and Habana Synapse, have no SHM provider
 	 * support anyways, so disabling SHM will not impact them.
 	 */
-	if ((ep->user_info->caps & FI_HMEM)
+	if (((ep->user_info->caps & FI_HMEM)
 	    && hmem_ops[FI_HMEM_CUDA].initialized
-	    && !ep->cuda_api_permitted) {
-		ep->use_shm_for_tx = false;
-		return;
+	    && !ep->cuda_api_permitted)
+		|| !ep->shm_permitted) {
+		use_shm = false;
 	}
 
-	ep->use_shm_for_tx = efa_env.enable_shm_transfer;
-	return;
+	if (!use_shm)
+		efa_rdm_ep_close_shm_resources(ep);
 }
 
+static inline
+int efa_rdm_ep_insert_cntr_ibv_cq_poll_list(struct efa_rdm_ep *ep)
+{
+	int i, ret;
+	struct efa_cntr *efa_cntr;
+	struct util_cntr *util_cntr;
+	struct efa_rdm_cq *tx_cq, *rx_cq;
+	tx_cq = efa_rdm_ep_get_tx_rdm_cq(ep);
+	rx_cq = efa_rdm_ep_get_rx_rdm_cq(ep);
+
+	for (i = 0; i < CNTR_CNT; i++) {
+		util_cntr = ep->base_ep.util_ep.cntrs[i];
+		if (util_cntr) {
+			efa_cntr = container_of(util_cntr, struct efa_cntr, util_cntr);
+			if (tx_cq) {
+				ret = efa_ibv_cq_poll_list_insert(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &tx_cq->ibv_cq);
+				if (ret)
+					return ret;
+			}
+			if (rx_cq) {
+				ret = efa_ibv_cq_poll_list_insert(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &rx_cq->ibv_cq);
+				if (ret)
+					return ret;
+			}
+		}
+	}
+
+	return FI_SUCCESS;
+}
+
+static inline
+int efa_rdm_ep_insert_cq_ibv_cq_poll_list(struct efa_rdm_ep *ep)
+{
+	int ret;
+	struct efa_rdm_cq *tx_cq, *rx_cq;
+	/* cross referencing */
+	tx_cq = efa_rdm_ep_get_tx_rdm_cq(ep);
+	rx_cq = efa_rdm_ep_get_rx_rdm_cq(ep);
+
+	if (tx_cq) {
+		ret = efa_ibv_cq_poll_list_insert(&tx_cq->ibv_cq_poll_list, &tx_cq->util_cq.ep_list_lock, &tx_cq->ibv_cq);
+		if (ret)
+			return ret;
+
+		if (rx_cq) {
+			ret = efa_ibv_cq_poll_list_insert(&tx_cq->ibv_cq_poll_list, &tx_cq->util_cq.ep_list_lock, &rx_cq->ibv_cq);
+			if (ret)
+				return ret;
+		}
+	}
+
+	if (rx_cq) {
+		ret = efa_ibv_cq_poll_list_insert(&rx_cq->ibv_cq_poll_list, &rx_cq->util_cq.ep_list_lock, &rx_cq->ibv_cq);
+		if (ret)
+			return ret;
+
+		if (tx_cq) {
+			ret = efa_ibv_cq_poll_list_insert(&rx_cq->ibv_cq_poll_list, &rx_cq->util_cq.ep_list_lock, &tx_cq->ibv_cq);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return FI_SUCCESS;
+}
 
 /**
  * @brief implement the fi_enable() API for EFA RDM endpoint
@@ -970,15 +1155,29 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 	switch (command) {
 	case FI_ENABLE:
 		ep = container_of(fid, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
-		ret = efa_base_ep_enable(&ep->base_ep);
-		if (ret)
-			return ret;
 
 		/*
 		 * efa uses util SRX no matter shm is enabled, so we need to initialize
 		 * it anyway.
 		 */
 		ret = efa_rdm_peer_srx_construct(ep);
+		if (ret)
+			return ret;
+
+		ret = efa_rdm_ep_create_base_ep_ibv_qp(ep);
+		if (ret)
+			return ret;
+
+		/* efa_base_ep_enable destroys qp in the error path */
+		ret = efa_base_ep_enable(&ep->base_ep);
+		if (ret)
+			return ret;
+
+		ret = efa_rdm_ep_insert_cq_ibv_cq_poll_list(ep);
+		if (ret)
+			return ret;
+
+		ret = efa_rdm_ep_insert_cntr_ibv_cq_poll_list(ep);
 		if (ret)
 			return ret;
 
@@ -990,10 +1189,10 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 
 		ep_addr_strlen = sizeof(ep_addr_str);
 		efa_rdm_ep_raw_addr_str(ep, ep_addr_str, &ep_addr_strlen);
-		EFA_WARN(FI_LOG_EP_CTRL, "libfabric %s efa endpoint created! address: %s\n",
+		EFA_INFO(FI_LOG_EP_CTRL, "libfabric %s efa endpoint created! address: %s\n",
 			fi_tostr("1", FI_TYPE_VERSION), ep_addr_str);
 
-		efa_rdm_ep_set_use_shm_for_tx(ep);
+		efa_rdm_ep_update_shm(ep);
 
 		/* Enable shm provider endpoint & post recv buff.
 		 * Once core ep enabled, 18 bytes efa_addr (16 bytes raw + 2 bytes qpn) is set.
@@ -1008,23 +1207,22 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
                         ret = fi_srx_context(efa_rdm_ep_domain(ep)->shm_domain,
 					     &peer_srx_attr, &peer_srx_ep, &peer_srx_context);
                         if (ret)
-                                goto out;
+                                goto err_unlock_and_destroy_qp;
 			shm_ep_name_len = EFA_SHM_NAME_MAX;
 			ret = efa_shm_ep_name_construct(shm_ep_name, &shm_ep_name_len, &ep->base_ep.src_addr);
 			if (ret < 0)
-				goto out;
+				goto err_unlock_and_destroy_qp;
 			fi_setname(&ep->shm_ep->fid, shm_ep_name, shm_ep_name_len);
 
 			/* Bind srx to shm ep */
 			ret = fi_ep_bind(ep->shm_ep, &ep->peer_srx_ep->fid, 0);
 			if (ret)
-				goto out;
+				goto err_unlock_and_destroy_qp;
 
 			ret = fi_enable(ep->shm_ep);
 			if (ret)
-				goto out;
+				goto err_unlock_and_destroy_qp;
 		}
-out:
 		ofi_genlock_unlock(srx_ctx->lock);
 		break;
 	default:
@@ -1032,6 +1230,11 @@ out:
 		break;
 	}
 
+	return ret;
+
+err_unlock_and_destroy_qp:
+	ofi_genlock_unlock(srx_ctx->lock);
+	efa_base_ep_destruct_qp(&ep->base_ep);
 	return ret;
 }
 
@@ -1116,6 +1319,35 @@ static int efa_rdm_ep_set_cuda_api_permitted(struct efa_rdm_ep *ep, bool cuda_ap
 }
 
 /**
+ * @brief act on shared_memory_permitted flag called by efa_rdm_ep_setopt
+ * @param[in,out]	ep			endpoint
+ * @param[in]		shm_permitted	whether shared memory is permitted
+ * @return		0 on success,
+ *			-FI_EINVAL if shm is requested but the FI_EFA_ENABLE_SHM_TRANSFER environment variable is set to false
+ * @related efa_rdm_ep
+ */
+static int efa_rdm_ep_set_shared_memory_permitted(struct efa_rdm_ep *ep, bool shm_permitted)
+{
+	if (!shm_permitted) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			 "FI_OPT_SHARED_MEMORY_PERMITTED set to false");
+		ep->shm_permitted = false;
+		return FI_SUCCESS;
+	}
+
+	if (!efa_env.enable_shm_transfer) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			 "FI_OPT_SHARED_MEMORY_PERMITTED endpoint option set "
+			 "to true but FI_EFA_ENABLE_SHM_TRANSFER environment "
+			 "variable is set to false.");
+		return -FI_EINVAL;
+	}
+
+	ep->shm_permitted = true;
+	return 0;
+}
+
+/**
  * @brief set use_device_rdma flag in efa_rdm_ep.
  *
  * If the environment variable FI_EFA_USE_DEVICE_RDMA is set, this function will
@@ -1185,49 +1417,57 @@ static int efa_rdm_ep_set_use_device_rdma(struct efa_rdm_ep *ep, bool use_device
 }
 
 /**
- * @brief set sendrecv_in_order_aligned_128_bytes flag in efa_rdm_ep
- * called by efa_rdm_ep_setopt
- * @param[in,out]	ep					endpoint
- * @param[in]		sendrecv_in_order_aligned_128_bytes	whether to enable in_order send/recv
- *								for each 128 bytes aligned buffer
- * @return		0 on success, -FI_EOPNOTSUPP if the option cannot be supported
- * @related efa_rdm_ep
+ * @brief check the in order aligned 128 bytes support for a given ibv_wr_op code
+ *
+ * @param ep efa_rdm_ep
+ * @param op_code ibv wr op code
+ * @return int 0 if in order aligned 128 bytes is supported, -FI_EOPNOTSUPP if
+ * it is not supported. Other negative integer for other errors.
  */
 static
-int efa_rdm_ep_set_sendrecv_in_order_aligned_128_bytes(struct efa_rdm_ep *ep,
-						   bool sendrecv_in_order_aligned_128_bytes)
+int efa_rdm_ep_check_qp_in_order_aligned_128_bytes(struct efa_rdm_ep *ep,
+						   enum ibv_wr_opcode op_code)
 {
-	/*
-	 * RDMA read is used to copy data from host bounce buffer to the
-	 * application buffer on device
-	 */
-	if (sendrecv_in_order_aligned_128_bytes &&
-	    !efa_base_ep_support_op_in_order_aligned_128_bytes(&ep->base_ep, IBV_WR_RDMA_READ))
-		return -FI_EOPNOTSUPP;
+	struct efa_qp *qp = NULL;
+	struct ibv_qp_init_attr_ex attr_ex = {0};
+	int ret, retv;
+	struct ibv_cq_ex *ibv_cq_ex = NULL;
+	enum ibv_cq_ex_type ibv_cq_ex_type;
+	struct fi_cq_attr cq_attr = {0};
 
-	ep->sendrecv_in_order_aligned_128_bytes = sendrecv_in_order_aligned_128_bytes;
-	return 0;
-}
+	ret = efa_cq_ibv_cq_ex_open(&cq_attr, efa_rdm_ep_domain(ep)->device->ibv_ctx, &ibv_cq_ex, &ibv_cq_ex_type);
+	if (ret) {
+		EFA_WARN(FI_LOG_CQ, "Unable to create extended CQ: %d\n", ret);
+		ret = -FI_EINVAL;
+		goto out;
+	}
 
-/**
- * @brief set write_in_order_aligned_128_bytes flag in efa_rdm_ep
- * called by efa_rdm_ep_set_opt
- * @param[in,out]	ep					endpoint
- * @param[in]		write_in_order_aligned_128_bytes	whether to enable RDMA in order write
- *								for each 128 bytes aligned buffer.
- * @return		0 on success, -FI_EOPNOTSUPP if the option cannot be supported.
- * @related efa_rdm_ep
- */
-static
-int efa_rdm_ep_set_write_in_order_aligned_128_bytes(struct efa_rdm_ep *ep,
-						bool write_in_order_aligned_128_bytes)
-{
-	if (write_in_order_aligned_128_bytes &&
-	    !efa_base_ep_support_op_in_order_aligned_128_bytes(&ep->base_ep, IBV_WR_RDMA_WRITE))
-		return -FI_EOPNOTSUPP;
+	/* Create a dummy qp for query only */
+	efa_rdm_ep_construct_ibv_qp_init_attr_ex(ep, &attr_ex, ibv_cq_ex, ibv_cq_ex);
 
-	ep->write_in_order_aligned_128_bytes = write_in_order_aligned_128_bytes;
-	return 0;
+	ret = efa_qp_create(&qp, &attr_ex);
+	if (ret)
+		goto out;
+
+	if (!efa_qp_support_op_in_order_aligned_128_bytes(qp, op_code))
+		ret = -FI_EOPNOTSUPP;
+
+out:
+	if (qp) {
+		retv = ibv_destroy_qp(qp->ibv_qp);
+		if (retv)
+			EFA_WARN(FI_LOG_EP_CTRL, "destroy ibv qp failed! err: %s\n",
+				fi_strerror(-retv));
+		free(qp);
+	}
+
+	if (ibv_cq_ex) {
+		retv = -ibv_destroy_cq(ibv_cq_ex_to_cq(ibv_cq_ex));
+		if (retv)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close ibv cq: %s\n",
+				fi_strerror(-retv));
+	}
+	return ret;
 }
 
 /**
@@ -1276,14 +1516,14 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 		 */
 		if (efa_rdm_ep->base_ep.efa_qp_enabled) {
 			EFA_WARN(FI_LOG_EP_CTRL,
-				"The option FI_OPT_EFA_RNR_RETRY is required \
-				to be set before EP enabled %s\n", __func__);
+				"The option FI_OPT_EFA_RNR_RETRY is required "
+				"to be set before EP enabled\n");
 			return -FI_EINVAL;
 		}
 
 		if (!efa_domain_support_rnr_retry_modify(efa_rdm_ep_domain(efa_rdm_ep))) {
 			EFA_WARN(FI_LOG_EP_CTRL,
-				"RNR capability is not supported %s\n", __func__);
+				"RNR capability is not supported\n");
 			return -FI_ENOSYS;
 		}
 		efa_rdm_ep->base_ep.rnr_retry = *(size_t *)optval;
@@ -1305,6 +1545,13 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 		if (ret)
 			return ret;
 		break;
+	case FI_OPT_SHARED_MEMORY_PERMITTED:
+		if (optlen != sizeof(bool))
+			return -FI_EINVAL;
+		ret = efa_rdm_ep_set_shared_memory_permitted(efa_rdm_ep, *(bool *)optval);
+		if (ret)
+			return ret;
+		break;
 	case FI_OPT_EFA_USE_DEVICE_RDMA:
 		if (optlen != sizeof(bool))
 			return -FI_EINVAL;
@@ -1315,20 +1562,29 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 	case FI_OPT_EFA_SENDRECV_IN_ORDER_ALIGNED_128_BYTES:
 		if (optlen != sizeof(bool))
 			return -FI_EINVAL;
-		ret = efa_rdm_ep_set_sendrecv_in_order_aligned_128_bytes(efa_rdm_ep, *(bool *)optval);
-		if (ret)
-			return ret;
+		/*
+		 * RDMA read is used to copy data from host bounce buffer to the
+		 * application buffer on device
+		 */
+		if (*(bool *)optval) {
+			ret = efa_rdm_ep_check_qp_in_order_aligned_128_bytes(efa_rdm_ep, IBV_WR_RDMA_READ);
+			if (ret)
+				return ret;
+		}
+		efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = *(bool *)optval;
 		break;
 	case FI_OPT_EFA_WRITE_IN_ORDER_ALIGNED_128_BYTES:
 		if (optlen != sizeof(bool))
 			return -FI_EINVAL;
-		ret = efa_rdm_ep_set_write_in_order_aligned_128_bytes(efa_rdm_ep, *(bool *)optval);
-		if (ret)
-			return ret;
+		if (*(bool *)optval) {
+			ret = efa_rdm_ep_check_qp_in_order_aligned_128_bytes(efa_rdm_ep, IBV_WR_RDMA_WRITE);
+			if (ret)
+				return ret;
+		}
+		efa_rdm_ep->write_in_order_aligned_128_bytes = *(bool *)optval;
 		break;
 	default:
-		EFA_WARN(FI_LOG_EP_CTRL,
-			"Unknown endpoint option %s\n", __func__);
+		EFA_WARN(FI_LOG_EP_CTRL, "Unknown endpoint option\n");
 		return -FI_ENOPROTOOPT;
 	}
 
@@ -1409,8 +1665,7 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 		*optlen = sizeof(bool);
 		break;
 	default:
-		EFA_WARN(FI_LOG_EP_CTRL,
-			"Unknown endpoint option %s\n", __func__);
+		EFA_WARN(FI_LOG_EP_CTRL, "Unknown endpoint option\n");
 		return -FI_ENOPROTOOPT;
 	}
 

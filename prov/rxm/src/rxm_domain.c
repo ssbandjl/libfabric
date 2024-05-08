@@ -361,7 +361,8 @@ static void rxm_mr_remove_map_entry(struct rxm_mr *mr)
 
 static int rxm_mr_add_map_entry(struct util_domain *domain,
 				struct fi_mr_attr *msg_attr,
-				struct rxm_mr *rxm_mr)
+				struct rxm_mr *rxm_mr,
+				uint64_t flags)
 {
 	uint64_t temp_key;
 	int ret;
@@ -369,7 +370,7 @@ static int rxm_mr_add_map_entry(struct util_domain *domain,
 	msg_attr->requested_key = rxm_mr->mr_fid.key;
 
 	ofi_genlock_lock(&domain->lock);
-	ret = ofi_mr_map_insert(&domain->mr_map, msg_attr, &temp_key, rxm_mr);
+	ret = ofi_mr_map_insert(&domain->mr_map, msg_attr, &temp_key, rxm_mr, flags);
 	if (OFI_UNLIKELY(ret)) {
 		FI_WARN(&rxm_prov, FI_LOG_DOMAIN,
 			"MR map insert for atomic verification failed %d\n",
@@ -447,6 +448,11 @@ static int rxm_mr_close(fid_t fid)
 	if (rxm_mr->domain->util_domain.info_domain_caps & FI_ATOMIC)
 		rxm_mr_remove_map_entry(rxm_mr);
 
+	if (rxm_mr->hmem_handle) {
+		ofi_hmem_dev_unregister(rxm_mr->iface,
+					(uint64_t) rxm_mr->hmem_handle);
+	}
+
 	ret = fi_close(&rxm_mr->msg_mr->fid);
 	if (ret)
 		FI_WARN(&rxm_prov, FI_LOG_DOMAIN, "Unable to close MSG MR\n");
@@ -468,12 +474,24 @@ int rxm_msg_mr_reg_internal(struct rxm_domain *rxm_domain, const void *buf,
 	size_t len, uint64_t acs, uint64_t flags, struct fid_mr **mr)
 {
 	int ret, tries = 0;
+	struct iovec iov = {
+		.iov_base = (void *)buf,
+		.iov_len = len,
+	};
+	struct fi_mr_attr attr = {
+		.mr_iov = &iov,
+		.iov_count = 1,
+		.access = acs,
+		.iface = FI_HMEM_SYSTEM,
+	};
+
+	if (rxm_detect_hmem_iface)
+		attr.iface = ofi_get_hmem_iface(buf, &attr.device.reserved, NULL);
 
 	/* If we can't get a key within 1024 tries, give up */
 	do {
-		ret = fi_mr_reg(rxm_domain->msg_domain, buf, len, acs, 0,
-				rxm_domain->mr_key++ | FI_PROV_SPECIFIC,
-				flags, mr, NULL);
+		attr.requested_key = rxm_domain->mr_key++ | (1UL << 31);
+		ret = fi_mr_regattr(rxm_domain->msg_domain, &attr, flags, mr);
 	} while (ret == -FI_ENOKEY && tries++ < 1024);
 
 	return ret;
@@ -544,6 +562,8 @@ static void rxm_mr_init(struct rxm_mr *rxm_mr, struct rxm_domain *domain,
 	rxm_mr->mr_fid.mem_desc = rxm_mr;
 	rxm_mr->mr_fid.key = fi_mr_key(rxm_mr->msg_mr);
 	rxm_mr->domain = domain;
+	rxm_mr->hmem_flags = 0x0;
+	rxm_mr->hmem_handle = NULL;
 	ofi_atomic_inc32(&domain->util_domain.ref);
 }
 
@@ -553,7 +573,7 @@ static int rxm_mr_regattr(struct fid *fid, const struct fi_mr_attr *attr,
 	struct rxm_domain *rxm_domain;
 	struct fi_mr_attr msg_attr = *attr;
 	struct rxm_mr *rxm_mr;
-	int ret;
+	int ret,gdrerr;
 
 	rxm_domain = container_of(fid, struct rxm_domain,
 				  util_domain.domain_fid.fid);
@@ -570,7 +590,7 @@ static int rxm_mr_regattr(struct fid *fid, const struct fi_mr_attr *attr,
 
 	ofi_mr_update_attr(rxm_domain->util_domain.fabric->fabric_fid.api_version,
 			   rxm_domain->util_domain.info_domain_caps, attr,
-			   &msg_attr);
+			   &msg_attr, flags);
 
 	if ((flags & FI_HMEM_HOST_ALLOC) && (attr->iface == FI_HMEM_ZE))
 		msg_attr.device.ze = -1;
@@ -589,9 +609,19 @@ static int rxm_mr_regattr(struct fid *fid, const struct fi_mr_attr *attr,
 	rxm_mr->device = msg_attr.device.reserved;
 	*mr = &rxm_mr->mr_fid;
 
+	gdrerr = ofi_hmem_dev_register(rxm_mr->iface, attr->mr_iov->iov_base,
+				       attr->mr_iov->iov_len,
+				       (uint64_t *) &rxm_mr->hmem_handle);
+	if (gdrerr) {
+		rxm_mr->hmem_flags = 0x0;
+		rxm_mr->hmem_handle = NULL;
+	} else {
+		rxm_mr->hmem_flags = OFI_HMEM_DATA_DEV_REG_HANDLE;
+	}
+
 	if (rxm_domain->util_domain.info_domain_caps & FI_ATOMIC) {
 		ret = rxm_mr_add_map_entry(&rxm_domain->util_domain,
-					   &msg_attr, rxm_mr);
+					   &msg_attr, rxm_mr, flags);
 		if (ret)
 			goto map_err;
 	}
@@ -643,7 +673,7 @@ static int rxm_mr_regv(struct fid *fid, const struct iovec *iov, size_t count,
 
 	if (rxm_domain->util_domain.info_domain_caps & FI_ATOMIC) {
 		ret = rxm_mr_add_map_entry(&rxm_domain->util_domain,
-					   &msg_attr, rxm_mr);
+					   &msg_attr, rxm_mr, flags);
 		if (ret)
 			goto map_err;
 	}
@@ -753,7 +783,7 @@ static ssize_t rxm_send_credits(struct fid_ep *ep, uint64_t credits)
 	msg.context = tx_buf;
 	msg.desc = &tx_buf->hdr.desc;
 
-	ret = fi_sendmsg(ep, &msg, FI_PRIORITY);
+	ret = fi_sendmsg(ep, &msg, OFI_PRIORITY);
 	if (!ret)
 		return FI_SUCCESS;
 

@@ -142,6 +142,8 @@ xnet_get_save_rx(struct xnet_ep *ep, uint64_t tag)
 				  &progress->saved_tag_list);
 	}
 
+	xnet_prof_unexp_msg(ep->profile, 1);
+
 	return rx_entry;
 
 free_xfer:
@@ -648,11 +650,22 @@ static int xnet_alter_mrecv(struct xnet_ep *ep, struct xnet_xfer_entry *xfer,
 	if (!recv_entry)
 		goto complete;
 
+	if (!xfer->mrecv) {
+		xfer->mrecv = calloc(1, sizeof(struct xnet_mrecv));
+		if (!xfer->mrecv) {
+			xfer->cq_flags |= FI_MULTI_RECV;
+			return FI_SUCCESS;
+		}
+		xfer->mrecv->ref_cnt = 1;
+	}
+
 	recv_entry->ctrl_flags = XNET_MULTI_RECV;
 	recv_entry->cq_flags = FI_MSG | FI_RECV;
 	recv_entry->cntr = xfer->cntr;
 	recv_entry->cq = xfer->cq;
 	recv_entry->context = xfer->context;
+	recv_entry->mrecv = xfer->mrecv;
+	recv_entry->mrecv->ref_cnt++;
 
 	recv_entry->iov_cnt = 1;
 	recv_entry->user_buf =  (char *) xfer->iov[0].iov_base + msg_len;
@@ -663,7 +676,8 @@ static int xnet_alter_mrecv(struct xnet_ep *ep, struct xnet_xfer_entry *xfer,
 	return 0;
 
 complete:
-	xfer->cq_flags |= FI_MULTI_RECV;
+	if (!xfer->mrecv)
+		xfer->cq_flags |= FI_MULTI_RECV;
 	return ret;
 }
 
@@ -1011,7 +1025,15 @@ static int xnet_progress_hdr(struct xnet_ep *ep)
 		return -FI_EAGAIN;
 
 	ep->hdr_bswap(ep, &ep->cur_rx.hdr.base_hdr);
-	assert(ep->cur_rx.hdr.base_hdr.id == ep->rx_id++);
+
+#ifndef NDEBUG
+	if (ep->cur_rx.hdr.base_hdr.id != ep->rx_id++) {
+		FI_WARN(&xnet_prov, FI_LOG_EP_DATA,
+			"Received invalid hdr sequence number\n");
+		return -FI_EIO;
+	}
+#endif
+
 	if (ep->cur_rx.hdr.base_hdr.op >= ARRAY_SIZE(xnet_start_op)) {
 		FI_WARN(&xnet_prov, FI_LOG_EP_DATA,
 			"Received invalid opcode\n");
@@ -1105,6 +1127,7 @@ void xnet_progress_rx(struct xnet_ep *ep)
 
 	assert(xnet_progress_locked(xnet_ep2_progress(ep)));
 	do {
+		assert(ep->state == XNET_CONNECTED);
 		if (ep->cur_rx.hdr_done < ep->cur_rx.hdr_len) {
 			ret = xnet_recv_hdr(ep);
 		} else {
@@ -1136,14 +1159,19 @@ void xnet_progress_rx(struct xnet_ep *ep)
 void xnet_progress_async(struct xnet_ep *ep)
 {
 	struct xnet_xfer_entry *xfer;
-	uint32_t done;
+	int ret;
 
 	assert(xnet_progress_locked(xnet_ep2_progress(ep)));
-	done = ofi_bsock_async_done(&xnet_prov, &ep->bsock);
+	ret = ofi_bsock_async_done(&xnet_prov, &ep->bsock);
+	if (ret) {
+		xnet_ep_disable(ep, 0, NULL, 0);
+		return;
+	}
+
 	while (!slist_empty(&ep->async_queue)) {
 		xfer = container_of(ep->async_queue.head,
 				    struct xnet_xfer_entry, entry);
-		if (ofi_val32_gt(xfer->async_index, done))
+		if (ofi_val32_gt(xfer->async_index, ep->bsock.done_index))
 			break;
 
 		slist_remove_head(&ep->async_queue);
@@ -1428,9 +1456,9 @@ static void xnet_run_ep(struct xnet_ep *ep, bool pin, bool pout, bool perr)
 	case XNET_CONNECTED:
 		if (perr)
 			xnet_progress_async(ep);
-		if (pin)
+		if (pin && ep->state == XNET_CONNECTED)
 			xnet_progress_rx(ep);
-		if (pout)
+		if (pout && ep->state == XNET_CONNECTED)
 			xnet_progress_tx(ep);
 		break;
 	case XNET_CONNECTING:

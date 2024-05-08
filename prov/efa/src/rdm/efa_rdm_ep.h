@@ -1,35 +1,5 @@
-/*
- * Copyright (c) 2019-2022 Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #ifndef _EFA_RDM_EP_H
 #define _EFA_RDM_EP_H
@@ -41,11 +11,6 @@
 #include "efa_rdm_rxe_map.h"
 
 #define EFA_RDM_ERROR_MSG_BUFFER_LENGTH 1024
-
-enum ibv_cq_ex_type {
-	IBV_CQ,
-	EFADV_CQ
-};
 
 /** @brief Information of a queued copy.
  *
@@ -80,12 +45,7 @@ struct efa_rdm_ep {
 	/* per-version extra feature/request flag */
 	uint64_t extra_info[EFA_RDM_MAX_NUM_EXINFO];
 
-	struct ibv_cq_ex *ibv_cq_ex;
-
-	enum ibv_cq_ex_type ibv_cq_ex_type;
-
 	/* shm provider fid */
-	bool use_shm_for_tx;
 	struct fid_ep *shm_ep;
 
 	/*
@@ -114,9 +74,6 @@ struct efa_rdm_ep {
 
 	/* Resource management flag */
 	uint64_t rm_full;
-
-	/* application's ordering requirements */
-	uint64_t msg_order;
 
 	/* Application's maximum msg size hint */
 	size_t max_msg_size;
@@ -190,8 +147,6 @@ struct efa_rdm_ep {
 
 	size_t efa_total_posted_tx_ops;
 	size_t send_comps;
-	size_t failed_send_comps;
-	size_t failed_write_comps;
 	size_t recv_comps;
 #endif
 	/* track allocated rx_entries and tx_entries for endpoint cleanup */
@@ -208,6 +163,12 @@ struct efa_rdm_ep {
 	 */
 	size_t efa_rx_pkts_to_post;
 
+	/*
+	 * Number of RX packets that are held (not released) by progress engine
+	 * due to queued hmem copy or local read.
+	 */
+	size_t efa_rx_pkts_held;
+
 	/* number of outstanding tx ops on efa device */
 	size_t efa_outstanding_tx_ops;
 
@@ -218,6 +179,7 @@ struct efa_rdm_ep {
 	int	hmem_p2p_opt; /* what to do for hmem transfers */
 	struct fid_ep *peer_srx_ep; /* support sharing receive context with peer providers */
 	bool cuda_api_permitted; /**< whether end point is permitted to call CUDA API */
+	bool shm_permitted; /* Whether the endpoint is allowed to use shared memory for intra-node communication */
 
 	/* use_device_rdma:
 	   Can be set via fi_setopt in API >= 1.18.
@@ -233,6 +195,7 @@ struct efa_rdm_ep {
 	bool sendrecv_in_order_aligned_128_bytes; /**< whether to support in order send/recv of each aligned 128 bytes memory region */
 	bool write_in_order_aligned_128_bytes; /**< whether to support in order write of each aligned 128 bytes memory region */
 	char err_msg[EFA_RDM_ERROR_MSG_BUFFER_LENGTH]; /* A large enough buffer to store CQ/EQ error data used by e.g. fi_cq_readerr */
+	struct efa_rdm_pke **pke_vec;
 };
 
 int efa_rdm_ep_flush_queued_blocking_copy_to_hmem(struct efa_rdm_ep *ep);
@@ -253,10 +216,11 @@ struct efa_rdm_peer *efa_rdm_ep_get_peer(struct efa_rdm_ep *ep, fi_addr_t addr);
 int32_t efa_rdm_ep_get_peer_ahn(struct efa_rdm_ep *ep, fi_addr_t addr);
 
 struct efa_rdm_ope *efa_rdm_ep_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
-					   const struct fi_msg *msg,
-					   uint32_t op,
-					   uint64_t tag,
-					   uint64_t flags);
+					 struct efa_rdm_peer *peer,
+					 const struct fi_msg *msg,
+					 uint32_t op,
+					 uint64_t tag,
+					 uint64_t flags);
 
 struct efa_rdm_ope *efa_rdm_ep_alloc_rxe(struct efa_rdm_ep *ep,
 					   fi_addr_t addr, uint32_t op);
@@ -277,7 +241,7 @@ static inline size_t efa_rdm_ep_get_tx_pool_size(struct efa_rdm_ep *ep)
 
 static inline int efa_rdm_ep_need_sas(struct efa_rdm_ep *ep)
 {
-	return ep->msg_order & FI_ORDER_SAS;
+	return ((ep->user_info->tx_attr->msg_order & FI_ORDER_SAS) || (ep->user_info->rx_attr->msg_order & FI_ORDER_SAS));
 }
 
 
@@ -301,6 +265,8 @@ void efa_rdm_ep_queue_rnr_pkt(struct efa_rdm_ep *ep,
 
 ssize_t efa_rdm_ep_post_queued_pkts(struct efa_rdm_ep *ep,
 				    struct dlist_entry *pkts);
+
+size_t efa_rdm_ep_get_memory_alignment(struct efa_rdm_ep *ep, enum fi_hmem_iface iface);
 
 static inline
 struct efa_domain *efa_rdm_ep_domain(struct efa_rdm_ep *ep)
@@ -435,12 +401,60 @@ static inline struct util_srx_ctx *efa_rdm_ep_get_peer_srx_ctx(struct efa_rdm_ep
 	return (struct util_srx_ctx *) ep->peer_srx_ep->fid.context;
 }
 
-ssize_t efa_rdm_ep_trigger_handshake(struct efa_rdm_ep *ep,
-				     fi_addr_t addr);
+ssize_t efa_rdm_ep_trigger_handshake(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer);
 
 ssize_t efa_rdm_ep_post_handshake(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer);
 
 void efa_rdm_ep_post_handshake_or_queue(struct efa_rdm_ep *ep,
 				     struct efa_rdm_peer *peer);
+
+static inline int efa_rdm_attempt_to_sync_memops(struct efa_rdm_ep *ep, void *buf, void *desc)
+{
+	int err = 0;
+	struct efa_mr *efa_mr = (struct efa_mr *) desc;
+
+	if (OFI_UNLIKELY(ep->cuda_api_permitted && efa_mr && efa_mr->needs_sync)) {
+		err = cuda_set_sync_memops(buf);
+		if (err) {
+			EFA_WARN(FI_LOG_MR, "Unable to set memops for cuda ptr %p\n", buf);
+			return err;
+		}
+		efa_mr->needs_sync = false;
+	}
+
+	return err;
+}
+
+static inline int efa_rdm_attempt_to_sync_memops_iov(struct efa_rdm_ep *ep, struct iovec *iov, void **desc, int num_desc)
+{
+	int err = 0, i;
+
+	if (!desc)
+		return err;
+
+	for (i = 0; i < num_desc; i++) {
+		err = efa_rdm_attempt_to_sync_memops(ep, iov[i].iov_base, (struct efa_mr *) desc[i]);
+		if (err)
+			return err;
+	}
+
+	return err;
+}
+
+static inline int efa_rdm_attempt_to_sync_memops_ioc(struct efa_rdm_ep *ep, struct fi_ioc *ioc, void **desc, int num_desc)
+{
+	int err = 0, i;
+
+	if (!desc)
+		return err;
+
+	for (i = 0; i < num_desc; i++) {
+		err = efa_rdm_attempt_to_sync_memops(ep, ioc[i].addr, (struct efa_mr *) desc[i]);
+		if (err)
+			return err;
+	}
+
+	return err;
+}
 
 #endif

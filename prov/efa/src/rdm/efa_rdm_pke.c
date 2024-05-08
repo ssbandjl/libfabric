@@ -1,35 +1,5 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -85,6 +55,14 @@ struct efa_rdm_pke *efa_rdm_pke_alloc(struct efa_rdm_ep *ep,
 	 */
 	pkt_entry->ep = ep;
 	pkt_entry->mr = mr;
+	/**
+	 * Initialize pkt_entry->pkt_size to the allocated buf size of the
+	 * bufpool. This is the data size posted to rdma-core, and MUST NOT
+	 * exceed the memory registration size. Therefore pkt_entry->pkt_size
+	 * should be adjusted according to the actual data size.
+	 */
+	pkt_entry->pkt_size = pkt_pool->attr.size - sizeof(struct efa_rdm_pke);
+	assert(pkt_entry->pkt_size == ep->mtu_size);
 	pkt_entry->alloc_type = alloc_type;
 	pkt_entry->flags = EFA_RDM_PKE_IN_USE;
 	pkt_entry->next = NULL;
@@ -390,7 +368,9 @@ ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
 	assert(pkt_entry_cnt);
 	ep = pkt_entry_vec[0]->ep;
 	assert(ep);
-	peer = efa_rdm_ep_get_peer(ep, pkt_entry_vec[0]->addr);
+
+	assert(pkt_entry_vec[0]->ope);
+	peer = pkt_entry_vec[0]->ope->peer;
 	assert(peer);
 	if (peer->flags & EFA_RDM_PEER_IN_BACKOFF)
 		return -FI_EAGAIN;
@@ -465,11 +445,10 @@ ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
  * This function posts one read request.
  *
  * @param[in]		pkt_entry	read_entry that has information of the read request.
- * @param[in,out]	ep		endpoint
  * @param[in]		local_buf 	local buffer, where data will be copied to.
  * @param[in]		len		read size.
  * @param[in]		desc		memory descriptor of local buffer.
- * @param[in]		remote_buff	remote buffer, where data will be read from.
+ * @param[in]		remote_buf	remote buffer, where data will be read from.
  * @param[in]		remote_key	memory key of remote buffer.
  * @return	On success, return 0
  * 		On failure, return a negative error code.
@@ -479,16 +458,17 @@ int efa_rdm_pke_read(struct efa_rdm_pke *pkt_entry,
 		     uint64_t remote_buf, size_t remote_key)
 {
 	struct efa_rdm_ep *ep;
-	struct efa_rdm_peer *peer;
 	struct efa_qp *qp;
 	struct efa_conn *conn;
 	struct ibv_sge sge;
+	struct efa_rdm_ope *txe;
 	int err = 0;
 
 	ep = pkt_entry->ep;
 	assert(ep);
-	peer = efa_rdm_ep_get_peer(ep, pkt_entry->addr);
-	if (peer == NULL)
+	txe = pkt_entry->ope;
+
+	if (txe->peer == NULL)
 		pkt_entry->flags |= EFA_RDM_PKE_LOCAL_READ;
 
 	qp = ep->base_ep.qp;
@@ -501,7 +481,7 @@ int efa_rdm_pke_read(struct efa_rdm_pke *pkt_entry,
 	sge.lkey = ((struct efa_mr *)desc)->ibv_mr->lkey;
 
 	ibv_wr_set_sge_list(qp->ibv_qp_ex, 1, &sge);
-	if (peer == NULL) {
+	if (txe->peer == NULL) {
 		ibv_wr_set_ud_addr(qp->ibv_qp_ex, ep->base_ep.self_ah,
 				   qp->qp_num, qp->qkey);
 	} else {
@@ -525,19 +505,13 @@ int efa_rdm_pke_read(struct efa_rdm_pke *pkt_entry,
  *
  * This function posts one write request.
  *
- * @param[in]		pkt_entry	write_entry that has information of the write request.
- * @param[in]		local_buf 	local buffer, where data will be copied from.
- * @param[in]		len		write size.
- * @param[in]		desc		memory descriptor of local buffer.
- * @param[in]		remote_buff	remote buffer, where data will be written to.
- * @param[in]		remote_key	memory key of remote buffer.
+ * @param[in]	pkt_entry	write_entry that has information of the write request.
  * @return	On success, return 0
  * 		On failure, return a negative error code.
  */
 int efa_rdm_pke_write(struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_rdm_ep *ep;
-	struct efa_rdm_peer *peer;
 	struct efa_qp *qp;
 	struct efa_conn *conn;
 	struct ibv_sge sge;
@@ -553,7 +527,6 @@ int efa_rdm_pke_write(struct efa_rdm_pke *pkt_entry)
 
 	ep = pkt_entry->ep;
 	assert(ep);
-	peer = efa_rdm_ep_get_peer(ep, pkt_entry->addr);
 	txe = pkt_entry->ope;
 
 	rma_context_pkt = (struct efa_rdm_rma_context_pkt *)pkt_entry->wiredata;
@@ -565,7 +538,7 @@ int efa_rdm_pke_write(struct efa_rdm_pke *pkt_entry)
 
 	assert(((struct efa_mr *)desc)->ibv_mr);
 
-	self_comm = (peer == NULL);
+	self_comm = (txe->peer == NULL);
 	if (self_comm)
 		pkt_entry->flags |= EFA_RDM_PKE_LOCAL_WRITE;
 
@@ -613,20 +586,16 @@ int efa_rdm_pke_write(struct efa_rdm_pke *pkt_entry)
 /**
  * @brief Post receive requests to EFA device
  *
- * @param[in] ep	EFA rdm endpoint
- * @param[in] pkt_entry	packet entries that contains information of receive buffer
- * @param[in] desc	Memory registration key
- * @param[in] flags	flags to be applied to the receive operation
+ * @param[in] pke_vec	packet entries that contains information of receive buffer
+ * @param[in] pke_cnt	Number of packet entries to post receive requests for
  * @return		0 on success
  * 			On error, a negative value corresponding to fabric errno
- *
  */
 ssize_t efa_rdm_pke_recvv(struct efa_rdm_pke **pke_vec,
 			  int pke_cnt)
 {
 	struct efa_rdm_ep *ep;
-	struct ibv_recv_wr recv_wr_vec[EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV], *bad_wr;
-	struct ibv_sge sge_vec[EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV];
+	struct ibv_recv_wr *bad_wr;
 	int i, err;
 
 	assert(pke_cnt);
@@ -635,21 +604,29 @@ ssize_t efa_rdm_pke_recvv(struct efa_rdm_pke **pke_vec,
 	assert(ep);
 
 	for (i = 0; i < pke_cnt; ++i) {
-		recv_wr_vec[i].wr_id = (uintptr_t)pke_vec[i];
-		recv_wr_vec[i].num_sge = 1;	/* Always post one iov/SGE */
-		recv_wr_vec[i].sg_list = &sge_vec[i];
-		recv_wr_vec[i].sg_list[0].length = ep->mtu_size;
-		recv_wr_vec[i].sg_list[0].lkey = ((struct efa_mr *) pke_vec[i]->mr)->ibv_mr->lkey;
-		recv_wr_vec[i].sg_list[0].addr = (uintptr_t)pke_vec[i]->wiredata;
-		recv_wr_vec[i].next = NULL;
+		ep->base_ep.efa_recv_wr_vec[i].wr.wr_id = (uintptr_t)pke_vec[i];
+		ep->base_ep.efa_recv_wr_vec[i].wr.num_sge = 1;
+		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list = ep->base_ep.efa_recv_wr_vec[i].sge;
+		assert(pke_vec[i]->pkt_size > 0);
+		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[0].length = pke_vec[i]->pkt_size - pke_vec[i]->payload_size;
+		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[0].lkey = ((struct efa_mr *) pke_vec[i]->mr)->ibv_mr->lkey;
+		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[0].addr = (uintptr_t)pke_vec[i]->wiredata;
+		ep->base_ep.efa_recv_wr_vec[i].wr.next = NULL;
+
+		if (pke_vec[i]->payload) {
+			ep->base_ep.efa_recv_wr_vec[i].wr.num_sge = 2;
+			ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[1].addr = (uintptr_t) pke_vec[i]->payload;
+			ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[1].length = pke_vec[i]->payload_size;
+			ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[1].lkey = ((struct efa_mr *) pke_vec[i]->payload_mr)->ibv_mr->lkey;
+		}
 		if (i > 0)
-			recv_wr_vec[i-1].next = &recv_wr_vec[i];
+			ep->base_ep.efa_recv_wr_vec[i-1].wr.next = &ep->base_ep.efa_recv_wr_vec[i].wr;
 #if HAVE_LTTNG
 		efa_tracepoint_wr_id_post_recv(pke_vec[i]);
 #endif
 	}
 
-	err = ibv_post_recv(ep->base_ep.qp->ibv_qp, &recv_wr_vec[0], &bad_wr);
+	err = ibv_post_recv(ep->base_ep.qp->ibv_qp, &ep->base_ep.efa_recv_wr_vec[0].wr, &bad_wr);
 	if (OFI_UNLIKELY(err)) {
 		err = (err == ENOMEM) ? -FI_EAGAIN : -err;
 	}

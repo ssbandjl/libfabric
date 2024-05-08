@@ -48,6 +48,8 @@ struct ft_hmem_ops {
 			    size_t size);
 	int (*copy_from_hmem)(uint64_t device, void *dst, const void *src,
 			      size_t size);
+	int (*get_dmabuf_fd)(void *buf, size_t len,
+			     int *fd, uint64_t *offset);
 };
 
 static struct ft_hmem_ops hmem_ops[] = {
@@ -61,6 +63,7 @@ static struct ft_hmem_ops hmem_ops[] = {
 		.mem_set = ft_host_memset,
 		.copy_to_hmem = ft_host_memcpy,
 		.copy_from_hmem = ft_host_memcpy,
+		.get_dmabuf_fd = ft_hmem_no_get_dmabuf_fd,
 	},
 	[FI_HMEM_CUDA] = {
 		.init = ft_cuda_init,
@@ -72,6 +75,7 @@ static struct ft_hmem_ops hmem_ops[] = {
 		.mem_set = ft_cuda_memset,
 		.copy_to_hmem = ft_cuda_copy_to_hmem,
 		.copy_from_hmem = ft_cuda_copy_from_hmem,
+		.get_dmabuf_fd = ft_cuda_get_dmabuf_fd,
 	},
 	[FI_HMEM_ROCR] = {
 		.init = ft_rocr_init,
@@ -83,17 +87,19 @@ static struct ft_hmem_ops hmem_ops[] = {
 		.mem_set = ft_rocr_memset,
 		.copy_to_hmem = ft_rocr_memcpy,
 		.copy_from_hmem = ft_rocr_memcpy,
+		.get_dmabuf_fd = ft_hmem_no_get_dmabuf_fd,
 	},
 	[FI_HMEM_ZE] = {
 		.init = ft_ze_init,
 		.cleanup = ft_ze_cleanup,
 		.alloc = ft_ze_alloc,
-		.alloc_host = ft_default_alloc_host,
+		.alloc_host = ft_ze_alloc_host,
 		.free = ft_ze_free,
-		.free_host = ft_default_free_host,
+		.free_host = ft_ze_free,
 		.mem_set = ft_ze_memset,
 		.copy_to_hmem = ft_ze_copy,
 		.copy_from_hmem = ft_ze_copy,
+		.get_dmabuf_fd = ft_hmem_no_get_dmabuf_fd,
 	},
 	[FI_HMEM_NEURON] = {
 		.init = ft_neuron_init,
@@ -105,6 +111,7 @@ static struct ft_hmem_ops hmem_ops[] = {
 		.mem_set = ft_neuron_memset,
 		.copy_to_hmem = ft_neuron_memcpy_to_hmem,
 		.copy_from_hmem = ft_neuron_memcpy_from_hmem,
+		.get_dmabuf_fd = ft_hmem_no_get_dmabuf_fd,
 	},
 };
 
@@ -182,4 +189,17 @@ int ft_hmem_copy_from(enum fi_hmem_iface iface, uint64_t device, void *dst,
 		      const void *src, size_t size)
 {
 	return hmem_ops[iface].copy_from_hmem(device, dst, src, size);
+}
+
+int ft_hmem_get_dmabuf_fd(enum fi_hmem_iface iface,
+			  void *buf, size_t len,
+			  int *fd, uint64_t *offset)
+{
+	return hmem_ops[iface].get_dmabuf_fd(buf, len, fd, offset);
+}
+
+int ft_hmem_no_get_dmabuf_fd(void *buf, size_t len,
+			      int *fd, uint64_t *offset)
+{
+	return -FI_ENOSYS;
 }

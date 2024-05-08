@@ -1,34 +1,5 @@
-/*
- * Copyright (c) 2022 Amazon.com, Inc. or its affiliates. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include "efa.h"
 #include "efa_hmem.h"
@@ -69,7 +40,7 @@ static int efa_domain_hmem_info_init_protocol_thresholds(struct efa_domain *efa_
 	case FI_HMEM_SYSTEM:
 		/* We have not yet tested runting with system memory */
 		info->runt_size = 0;
-		info->max_intra_eager_size = efa_env.shm_max_medium_size;
+		info->max_intra_eager_size = SHM_MAX_INJECT_SIZE;
 		info->max_medium_msg_size = EFA_DEFAULT_INTER_MAX_MEDIUM_MESSAGE_SIZE;
 		info->min_read_msg_size = EFA_DEFAULT_INTER_MIN_READ_MESSAGE_SIZE;
 		info->min_read_write_size = EFA_DEFAULT_INTER_MIN_READ_WRITE_SIZE;
@@ -89,7 +60,7 @@ static int efa_domain_hmem_info_init_protocol_thresholds(struct efa_domain *efa_
 		fi_param_get_size_t(&efa_prov, "inter_min_read_write_size", &info->min_read_write_size);
 		break;
 	case FI_HMEM_NEURON:
-		info->runt_size = EFA_DEFAULT_RUNT_SIZE;
+		info->runt_size = EFA_NEURON_RUNT_SIZE;
 		info->max_intra_eager_size = 0;
 		info->max_medium_msg_size = 0;
 		info->min_read_msg_size = efa_max_eager_msg_size_with_largest_header(efa_domain) + 1;
@@ -148,22 +119,23 @@ static int efa_domain_hmem_info_init_cuda(struct efa_domain *efa_domain)
 	int ibv_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
 	size_t len = ofi_get_page_size() * 2, tmp_value;
 	int ret;
+	int dmabuf_fd;
+	uint64_t dmabuf_offset;
 
 	if (!ofi_hmem_is_initialized(FI_HMEM_CUDA)) {
 		EFA_INFO(FI_LOG_DOMAIN, "FI_HMEM_CUDA is not initialized\n");
 		return 0;
 	}
 
-	info->initialized = true;
-
 	cuda_ret = ofi_cudaMalloc(&ptr, len);
 	if (cuda_ret != cudaSuccess) {
 		EFA_WARN(FI_LOG_DOMAIN,
 			 "Failed to allocate CUDA buffer: %s\n",
 			 ofi_cudaGetErrorString(cuda_ret));
-		return -FI_ENOMEM;
+		return 0;
 	}
 
+	info->initialized = true;
 	info->p2p_disabled_by_user = false;
 
 	/* If user is using libfabric API 1.18 or later, by default EFA provider is permitted to
@@ -174,7 +146,27 @@ static int efa_domain_hmem_info_init_cuda(struct efa_domain *efa_domain)
 	else
 		info->p2p_required_by_impl = true;
 
+#if HAVE_EFA_DMABUF_MR
+	ret = cuda_get_dmabuf_fd(ptr, len, &dmabuf_fd, &dmabuf_offset);
+	if (ret == FI_SUCCESS) {
+		ibv_mr = ibv_reg_dmabuf_mr(g_device_list[0].ibv_pd, dmabuf_offset,
+					   len, (uint64_t)ptr, dmabuf_fd, ibv_access);
+		if (!ibv_mr) {
+			EFA_INFO(FI_LOG_DOMAIN,
+				"Unable to register CUDA device buffer via dmabuf: %s. "
+				"Fall back to ibv_reg_mr\n", fi_strerror(-errno));
+			ibv_mr = ibv_reg_mr(g_device_list[0].ibv_pd, ptr, len, ibv_access);
+		}
+	} else {
+		EFA_INFO(FI_LOG_DOMAIN,
+			"Unable to retrieve dmabuf fd of CUDA device buffer: %d. "
+			"Fall back to ibv_reg_mr\n", ret);
+		ibv_mr = ibv_reg_mr(g_device_list[0].ibv_pd, ptr, len, ibv_access);
+	}
+#else
 	ibv_mr = ibv_reg_mr(g_device_list[0].ibv_pd, ptr, len, ibv_access);
+#endif
+
 	if (!ibv_mr) {
 		info->p2p_supported_by_device = false;
 		efa_domain_hmem_info_init_protocol_thresholds(efa_domain, FI_HMEM_CUDA);
@@ -224,6 +216,7 @@ static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
 	void *ptr = NULL;
 	size_t len = ofi_get_page_size() * 2, tmp_value;
 	int dmabuf_fd;
+	uint64_t offset;
 	int ret;
 
 	if (!ofi_hmem_is_initialized(FI_HMEM_NEURON)) {
@@ -255,10 +248,11 @@ static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
 	/* Neuron currently requires P2P */
 	info->p2p_required_by_impl = true;
 
-	ret = neuron_get_dmabuf_fd((uint64_t)ptr, (uint64_t)len, &dmabuf_fd);
+#if HAVE_EFA_DMABUF_MR
+	ret = neuron_get_dmabuf_fd(ptr, (uint64_t)len, &dmabuf_fd, &offset);
 	if (ret == FI_SUCCESS) {
 		ibv_mr = ibv_reg_dmabuf_mr(
-					g_device_list[0].ibv_pd, 0,
+					g_device_list[0].ibv_pd, offset,
 					len, (uint64_t)ptr, dmabuf_fd, ibv_access);
 	} else if (ret == -FI_ENOPROTOOPT) {
 		EFA_INFO(FI_LOG_MR,
@@ -266,6 +260,9 @@ static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
 			"Fall back to ibv_reg_mr\n");
 		ibv_mr = ibv_reg_mr(g_device_list[0].ibv_pd, ptr, len, ibv_access);
 	}
+#else
+	ibv_mr = ibv_reg_mr(g_device_list[0].ibv_pd, ptr, len, ibv_access);
+#endif
 
 	if (!ibv_mr) {
 		info->p2p_supported_by_device = false;

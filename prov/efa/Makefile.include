@@ -94,6 +94,7 @@ _efa_headers = \
 	prov/efa/src/efa_tp.h \
 	prov/efa/src/efa_prov.h \
 	prov/efa/src/efa_env.h \
+	prov/efa/src/fi_ext_efa.h \
 	prov/efa/src/dgram/efa_dgram_ep.h \
 	prov/efa/src/dgram/efa_dgram_cq.h \
 	prov/efa/src/rdm/efa_rdm_peer.h	\
@@ -132,9 +133,11 @@ nodist_prov_efa_test_efa_unit_test_SOURCES = \
 	prov/efa/test/efa_unit_tests.c \
 	prov/efa/test/efa_unit_test_mocks.c \
 	prov/efa/test/efa_unit_test_common.c \
+	prov/efa/test/efa_unit_test_domain.c \
 	prov/efa/test/efa_unit_test_ep.c \
 	prov/efa/test/efa_unit_test_av.c \
 	prov/efa/test/efa_unit_test_cq.c \
+	prov/efa/test/efa_unit_test_cntr.c \
 	prov/efa/test/efa_unit_test_device.c \
 	prov/efa/test/efa_unit_test_info.c \
 	prov/efa/test/efa_unit_test_hmem.c \
@@ -142,7 +145,9 @@ nodist_prov_efa_test_efa_unit_test_SOURCES = \
 	prov/efa/test/efa_unit_test_rnr.c \
 	prov/efa/test/efa_unit_test_ope.c \
 	prov/efa/test/efa_unit_test_send.c \
-	prov/efa/test/efa_unit_test_fork_support.c
+	prov/efa/test/efa_unit_test_fork_support.c \
+	prov/efa/test/efa_unit_test_runt.c
+
 
 efa_CPPFLAGS += -I$(top_srcdir)/include -I$(top_srcdir)/prov/efa/test $(cmocka_CPPFLAGS)
 
@@ -162,6 +167,14 @@ if HAVE_NEURON
 prov_efa_test_efa_unit_test_LDFLAGS += -Wl,--wrap=neuron_alloc
 endif HAVE_NEURON
 
+if HAVE_EFADV_QUERY_MR
+prov_efa_test_efa_unit_test_LDFLAGS += -Wl,--wrap=efadv_query_mr
+endif HAVE_EFADV_QUERY_MR
+
+if HAVE_EFA_DATA_IN_ORDER_ALIGNED_128_BYTES
+prov_efa_test_efa_unit_test_LDFLAGS += -Wl,--wrap=ibv_query_qp_data_in_order
+endif
+
 prov_efa_test_efa_unit_test_LIBS = $(efa_LIBS) $(linkback)
 
 endif ENABLE_EFA_UNIT_TEST
@@ -170,6 +183,9 @@ efa_CPPFLAGS += \
 	-I$(top_srcdir)/prov/efa/src/ \
 	-I$(top_srcdir)/prov/efa/src/dgram/ \
 	-I$(top_srcdir)/prov/efa/src/rdm/
+
+rdmainclude_HEADERS += \
+	prov/efa/src/fi_ext_efa.h
 
 if HAVE_EFA_DL
 pkglib_LTLIBRARIES += libefa-fi.la
@@ -192,6 +208,6 @@ prov_install_man_pages += man/man7/fi_efa.7
 endif HAVE_EFA
 
 efa-doxygen:
-	doxygen prov/efa/docs/doxygen/efa.config
+	doxygen prov/efa/docs/Doxyfile
 
 prov_dist_man_pages += man/man7/fi_efa.7

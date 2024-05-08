@@ -1,9 +1,13 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include <stdint.h>
 #include "efa_mr.h"
 #include "efa_rdm_ope.h"
 #include "efa_rdm_peer.h"
 #include "efa_rdm_protocol.h"
 #include "efa_rdm_pkt_type.h"
+#include "efa_rdm_pke_nonreq.h"
 
 struct efa_rdm_pkt_type_req_info EFA_RDM_PKT_TYPE_REQ_INFO_VEC[] = {
 	/* rtm header */
@@ -13,8 +17,8 @@ struct efa_rdm_pkt_type_req_info EFA_RDM_PKT_TYPE_REQ_INFO_VEC[] = {
 	[EFA_RDM_MEDIUM_TAGRTM_PKT] = {0, sizeof(struct efa_rdm_medium_tagrtm_hdr), 0},
 	[EFA_RDM_LONGCTS_MSGRTM_PKT] = {0, sizeof(struct efa_rdm_longcts_msgrtm_hdr), 0},
 	[EFA_RDM_LONGCTS_TAGRTM_PKT] = {0, sizeof(struct efa_rdm_longcts_tagrtm_hdr), 0},
-	[EFA_RDM_LONGREAD_RTA_MSGRTM_PKT] = {0, sizeof(struct efa_rdm_longread_msgrtm_hdr), EFA_RDM_EXTRA_FEATURE_RDMA_READ},
-	[EFA_RDM_LONGREAD_RTA_TAGRTM_PKT] = {0, sizeof(struct efa_rdm_longread_tagrtm_hdr), EFA_RDM_EXTRA_FEATURE_RDMA_READ},
+	[EFA_RDM_LONGREAD_MSGRTM_PKT] = {0, sizeof(struct efa_rdm_longread_msgrtm_hdr), EFA_RDM_EXTRA_FEATURE_RDMA_READ},
+	[EFA_RDM_LONGREAD_TAGRTM_PKT] = {0, sizeof(struct efa_rdm_longread_tagrtm_hdr), EFA_RDM_EXTRA_FEATURE_RDMA_READ},
 	[EFA_RDM_DC_EAGER_MSGRTM_PKT] = {0, sizeof(struct efa_rdm_dc_eager_msgrtm_hdr), EFA_RDM_EXTRA_FEATURE_DELIVERY_COMPLETE},
 	[EFA_RDM_DC_EAGER_TAGRTM_PKT] = {0, sizeof(struct efa_rdm_dc_eager_tagrtm_hdr), EFA_RDM_EXTRA_FEATURE_DELIVERY_COMPLETE},
 	[EFA_RDM_DC_MEDIUM_MSGRTM_PKT] = {0, sizeof(struct efa_rdm_dc_medium_msgrtm_hdr), EFA_RDM_EXTRA_FEATURE_DELIVERY_COMPLETE},
@@ -30,7 +34,7 @@ struct efa_rdm_pkt_type_req_info EFA_RDM_PKT_TYPE_REQ_INFO_VEC[] = {
 	[EFA_RDM_DC_EAGER_RTW_PKT] = {0, sizeof(struct efa_rdm_dc_eager_rtw_hdr), EFA_RDM_EXTRA_FEATURE_DELIVERY_COMPLETE},
 	[EFA_RDM_LONGCTS_RTW_PKT] = {0, sizeof(struct efa_rdm_longcts_rtw_hdr), 0},
 	[EFA_RDM_DC_LONGCTS_RTW_PKT] = {0, sizeof(struct efa_rdm_longcts_rtw_hdr), EFA_RDM_EXTRA_FEATURE_DELIVERY_COMPLETE},
-	[EFA_RDM_LONGREAD_RTA_RTW_PKT] = {0, sizeof(struct efa_rdm_longread_rtw_hdr), EFA_RDM_EXTRA_FEATURE_RDMA_READ},
+	[EFA_RDM_LONGREAD_RTW_PKT] = {0, sizeof(struct efa_rdm_longread_rtw_hdr), EFA_RDM_EXTRA_FEATURE_RDMA_READ},
 	[EFA_RDM_RUNTCTS_RTW_PKT] = {0, sizeof(struct efa_rdm_runtcts_rtw_hdr), EFA_RDM_EXTRA_FEATURE_RUNT},
 	[EFA_RDM_RUNTREAD_RTW_PKT] = {0, sizeof(struct efa_rdm_runtread_rtw_hdr), EFA_RDM_EXTRA_FEATURE_RUNT},
 	/* rtr header */
@@ -136,6 +140,9 @@ size_t efa_rdm_pkt_type_get_max_hdr_size(void)
 		else
 			pkt_type += 1;
 	}
+
+	/* Non-emulated (real) rdma inject write requires a header */
+	max_hdr_size = MAX(max_hdr_size, sizeof(struct efa_rdm_rma_context_pkt));
 
 	return max_hdr_size;
 }

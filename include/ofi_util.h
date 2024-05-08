@@ -214,6 +214,7 @@ struct util_domain {
 	struct ofi_mr_map	mr_map;
 	enum fi_threading	threading;
 	enum fi_progress	data_progress;
+	enum fi_progress	control_progress;
 };
 
 int ofi_domain_init(struct fid_fabric *fabric_fid, const struct fi_info *info,
@@ -504,7 +505,7 @@ struct util_cq {
 	struct util_wait	*wait;
 	ofi_atomic32_t		ref;
 	struct dlist_entry	ep_list;
-	ofi_mutex_t		ep_list_lock;
+	struct ofi_genlock	ep_list_lock;
 	struct ofi_genlock	cq_lock;
 	uint64_t		flags;
 
@@ -513,6 +514,11 @@ struct util_cq {
 	ofi_cq_progress_func	progress;
 
 	struct fid_peer_cq	*peer_cq;
+
+	/* Error data buffer used to support API version 1.5 and if the user
+	 * provider err_data_size is zero.
+	 */
+	void *err_data;
 
 	/* Only valid if not FI_PEER */
 	struct util_comp_cirq	*cirq;
@@ -556,6 +562,12 @@ ssize_t ofi_cq_read_entries(struct util_cq *cq, void *buf, size_t count,
 	ssize_t i;
 
 	ofi_genlock_lock(&cq->cq_lock);
+
+	if (cq->err_data) {
+		free(cq->err_data);
+		cq->err_data = NULL;
+	}
+
 	if (ofi_cirque_isempty(cq->cirq)) {
 		i = -FI_EAGAIN;
 		goto out;
@@ -731,7 +743,7 @@ struct util_cntr {
 	uint64_t		checkpoint_err;
 
 	struct dlist_entry	ep_list;
-	ofi_mutex_t		ep_list_lock;
+	struct ofi_genlock	ep_list_lock;
 
 	int			internal_wait;
 	ofi_cntr_progress_func	progress;
@@ -881,7 +893,7 @@ struct util_av {
 	 */
 	size_t			context_offset;
 	struct dlist_entry	ep_list;
-	ofi_mutex_t		ep_list_lock;
+	struct ofi_genlock	ep_list_lock;
 	void			(*remove_handler)(struct util_ep *util_ep,
 						  struct util_peer_addr *peer);
 };
@@ -1135,8 +1147,12 @@ struct fid_list_entry {
 
 int fid_list_insert(struct dlist_entry *fid_list, ofi_mutex_t *lock,
 		    struct fid *fid);
+int fid_list_insert2(struct dlist_entry *fid_list, struct ofi_genlock *lock,
+		     struct fid *fid);
 void fid_list_remove(struct dlist_entry *fid_list, ofi_mutex_t *lock,
 		     struct fid *fid);
+void fid_list_remove2(struct dlist_entry *fid_list, struct ofi_genlock *lock,
+		      struct fid *fid);
 int fid_list_search(struct dlist_entry *fid_list, struct fid *fid);
 
 
@@ -1232,6 +1248,7 @@ void *ofi_ns_resolve_name(struct util_ns *ns, const char *server,
  *     the core by calling add_credits.
  */
 #define OFI_OPS_FLOW_CTRL "ofix_flow_ctrl_v1"
+#define OFI_PRIORITY (1ULL << 62)
 
 struct ofi_ops_flow_ctrl {
 	size_t	size;
@@ -1318,6 +1335,49 @@ ssize_t util_srx_generic_trecv(struct fid_ep *ep_fid, const struct iovec *iov,
 			       void **desc, size_t iov_count, fi_addr_t addr,
 			       void *context, uint64_t tag, uint64_t ignore,
 			       uint64_t flags);
+
+static inline void ofi_cq_err_memcpy(uint32_t api_version,
+				     struct fi_cq_err_entry *user_buf,
+				     const struct fi_cq_err_entry *prov_buf)
+{
+	size_t size;
+	char *err_buf_save;
+	size_t err_data_size;
+
+	if (FI_VERSION_LT(api_version, FI_VERSION(1, 5))) {
+		memcpy(user_buf, prov_buf, sizeof(struct fi_cq_err_entry_1_0));
+	} else {
+		err_buf_save = user_buf->err_data;
+		err_data_size = user_buf->err_data_size;
+
+		if (FI_VERSION_GE(api_version, FI_VERSION(1, 20)))
+			size = sizeof(struct fi_cq_err_entry);
+		else
+			size = sizeof(struct fi_cq_err_entry_1_1);
+
+		memcpy(user_buf, prov_buf, size);
+
+		if (err_data_size) {
+			err_data_size = MIN(err_data_size,
+					    prov_buf->err_data_size);
+
+			if (err_data_size)
+				memcpy(err_buf_save, prov_buf->err_data,
+				       err_data_size);
+
+			user_buf->err_data = err_buf_save;
+			user_buf->err_data_size = err_data_size;
+		}
+	}
+}
+
+static inline enum ofi_lock_type
+ofi_progress_lock_type(enum fi_threading threading, enum fi_progress control)
+{
+	return (threading == FI_THREAD_DOMAIN || threading == FI_THREAD_COMPLETION) &&
+		control == FI_PROGRESS_CONTROL_UNIFIED ? OFI_LOCK_NOOP : OFI_LOCK_MUTEX;
+}
+
 #ifdef __cplusplus
 }
 #endif

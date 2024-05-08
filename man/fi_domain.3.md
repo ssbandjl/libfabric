@@ -214,6 +214,7 @@ struct fi_domain_attr {
 	size_t                max_err_data;
 	size_t                mr_cnt;
 	uint32_t              tclass;
+	size_t                max_ep_auth_key;
 };
 ```
 
@@ -237,24 +238,25 @@ The name of the access domain.
 
 The threading model specifies the level of serialization required of
 an application when using the libfabric data transfer interfaces.
-Control interfaces are always considered thread safe, and may be
-accessed by multiple threads.  Applications which can guarantee
-serialization in their access of provider allocated resources and
-interfaces enables a provider to eliminate lower-level locks.
+Control interfaces are always considered thread safe unless the
+control progress model is FI_PROGRESS_CONTROL_UNIFIED. A thread safe
+control interface allows multiple threads to progress the control
+interface, and (depending on threading model selected) one or more
+threads to progress the data interfaces at the same time. Applications
+which can guarantee serialization in their access of provider allocated
+resources and interfaces enable a provider to eliminate lower-level locks.
 
 *FI_THREAD_COMPLETION*
-: The completion threading model is intended for providers that make use
-  of manual progress.  Applications must serialize access to all objects
-  that are associated through the use of having a shared completion
-  structure.  This includes endpoint, transmit context, receive context,
-  completion queue, counter, wait set, and poll set objects.
+: The completion threading model is best suited for multi-threaded applications
+  using scalable endpoints which desire lockless operation.  Applications must
+  serialize access to all objects that are associated by a common completion
+  mechanism (for example, endpoints bound to the same CQ or counter).  It is
+  recommended that providers which support scalable endpoints also support this
+  threading model.
 
-  For example, threads must serialize access to an endpoint and its
-  bound completion queue(s) and/or counters.  Access to endpoints that
-  share the same completion queue must also be serialized.
-
-  The use of FI_THREAD_COMPLETION can increase parallelism over
-  FI_THREAD_SAFE, but requires the use of isolated resources.
+  Applications wanting to leverage FI_THREAD_COMPLETION should allocate
+  transmit contexts, receive contexts, and completion queues and counters to
+  individual threads.
 
 *FI_THREAD_DOMAIN*
 : A domain serialization model requires applications to serialize
@@ -330,7 +332,7 @@ Progress frequently requires action being taken at both the transmitting
 and receiving sides of an operation.  This is often a requirement for
 reliable transfers, as a result of retry and acknowledgement processing.
 
-To balance between performance and ease of use, two progress models
+To balance between performance and ease of use, the following progress models
 are defined.
 
 *FI_PROGRESS_AUTO*
@@ -373,6 +375,14 @@ are defined.
   that acts purely as the target of RMA or atomic operations that uses
   manual progress may still need application assistance to process
   received operations.
+
+*FI_PROGRESS_CONTROL_UNIFIED*
+: This progress model indicates that the user will synchronize progressing the
+  data and control operations themselves (i.e. this allows the control interface
+  to NOT be thread safe). It is only valid for control progress (not data progress).
+  Setting control=FI_PROGRESS_CONTROL_UNIFIED, data=FI_PROGRESS_MANUAL, and
+  threading=FI_THREAD_DOMAIN/FI_THREAD_COMPLETION allows Libfabric to remove all
+  locking in the critical data progress path.
 
 *FI_PROGRESS_UNSPEC*
 : This value indicates that no progress model has been defined.  It
@@ -703,6 +713,20 @@ that a single memory registration operation may reference.
 Domain level capabilities.  Domain capabilities indicate domain
 level features that are supported by the provider.
 
+The following are support primary capabilities:
+*FI_DIRECTED_RECV*
+: When the domain is configured with FI_DIRECTED_RECV and FI_AV_AUTH_KEY,
+  memory regions can be limited to specific authorization keys.
+
+*FI_AV_USER_ID*
+: Indicates that the domain supports the ability to open address vectors
+  with the FI_AV_USER_ID flag. If this domain capability is not set,
+  address vectors cannot be opened with FI_AV_USER_ID. Note that
+  FI_AV_USER_ID can still be supported through the AV insert calls without
+  this domain capability set. See [`fi_av`(3)](fi_av.3.html).
+
+The following are supported secondary capabilities:
+
 *FI_LOCAL_COMM*
 : At a conceptual level, this field indicates that the underlying device
   supports loopback communication.  More specifically, this field
@@ -724,23 +748,16 @@ level features that are supported by the provider.
   feature.
 
 See [`fi_getinfo`(3)](fi_getinfo.3.html) for a discussion on primary versus
-secondary capabilities.  All domain capabilities are considered secondary
-capabilities.
-
-## mode
-
-The operational mode bit related to using the domain.
-
-*FI_RESTRICTED_COMP*
-: This bit indicates that the domain limits completion queues and counters
-  to only be used with endpoints, transmit contexts, and receive contexts that
-  have the same set of capability flags.
+secondary capabilities.
 
 ## Default authorization key (auth_key)
 
 The default authorization key to associate with endpoint and memory
 registrations created within the domain. This field is ignored unless the
 fabric is opened with API version 1.5 or greater.
+
+If domain auth_key_size is set to the value FI_AV_AUTH_KEY, auth_key must be
+NULL.
 
 ## Default authorization key length (auth_key_size)
 
@@ -749,6 +766,11 @@ then no authorization key will be associated with endpoints and memory
 registrations created within the domain unless specified in the endpoint or
 memory registration attributes. This field is ignored unless the fabric is
 opened with API version 1.5 or greater.
+
+If the size is set to the value FI_AV_AUTH_KEY, all endpoints and memory
+regions will be configured to use authorization keys associated with the AV.
+Providers which support authorization keys and connectionless endpoint must
+support this option.
 
 ## Max Error Data Size (max_err_data)
 : The maximum amount of error data, in bytes, that may be returned as part of
@@ -771,6 +793,11 @@ provider to optimize any memory registration cache or lookup tables.
 This specifies the default traffic class that will be associated any endpoints
 created within the domain.  See [`fi_endpoint`(3)](fi_endpoint.3.html)
 for additional information.
+
+## Max Authorization Keys per Endpoint (max_ep_auth_key)
+
+: The maximum number of authorization keys which can be supported per connectionless
+  endpoint.
 
 # RETURN VALUE
 

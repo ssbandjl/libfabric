@@ -1,35 +1,5 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include <assert.h>
 #include <ofi_atomic.h>
@@ -56,7 +26,6 @@ void efa_rdm_pke_init_req_hdr_common(struct efa_rdm_pke *pkt_entry,
 {
 	char *opt_hdr;
 	struct efa_rdm_ep *ep;
-	struct efa_rdm_peer *peer;
 	struct efa_rdm_base_hdr *base_hdr;
 
 	/* init the base header */
@@ -66,17 +35,15 @@ void efa_rdm_pke_init_req_hdr_common(struct efa_rdm_pke *pkt_entry,
 	base_hdr->flags = 0;
 
 	ep = txe->ep;
-	peer = efa_rdm_ep_get_peer(ep, txe->addr);
-	assert(peer);
 
-	if (efa_rdm_peer_need_raw_addr_hdr(peer)) {
+	if (efa_rdm_peer_need_raw_addr_hdr(txe->peer)) {
 		/*
 		 * This is the first communication with this peer on this
 		 * endpoint, so send the core's address for this EP in the REQ
 		 * so the remote side can insert it into its address vector.
 		 */
 		base_hdr->flags |= EFA_RDM_REQ_OPT_RAW_ADDR_HDR;
-	} else if (efa_rdm_peer_need_connid(peer)) {
+	} else if (efa_rdm_peer_need_connid(txe->peer)) {
 		/*
 		 * After receiving handshake packet, we will know the peer's capability.
 		 *
@@ -203,7 +170,7 @@ uint32_t *efa_rdm_pke_get_req_connid_ptr(struct efa_rdm_pke *pkt_entry)
  * @return
  * an integer
  */
-int64_t efa_rdm_pke_get_req_cq_data(struct efa_rdm_pke *pkt_entry)
+uint64_t efa_rdm_pke_get_req_cq_data(struct efa_rdm_pke *pkt_entry)
 {
 	char *opt_hdr;
 	struct efa_rdm_base_hdr *base_hdr;
@@ -239,7 +206,7 @@ uint32_t efa_rdm_pke_get_req_rma_iov_count(struct efa_rdm_pke *pkt_entry)
 	    pkt_type == EFA_RDM_DC_EAGER_RTW_PKT ||
 	    pkt_type == EFA_RDM_LONGCTS_RTW_PKT ||
 	    pkt_type == EFA_RDM_DC_LONGCTS_RTW_PKT ||
-	    pkt_type == EFA_RDM_LONGREAD_RTA_RTW_PKT)
+	    pkt_type == EFA_RDM_LONGREAD_RTW_PKT)
 		return efa_rdm_pke_get_rtw_base_hdr(pkt_entry)->rma_iov_count;
 
 	if (pkt_type == EFA_RDM_SHORT_RTR_PKT ||
@@ -257,7 +224,7 @@ uint32_t efa_rdm_pke_get_req_rma_iov_count(struct efa_rdm_pke *pkt_entry)
 
 /**
  * @brief get the base header size of a REQ packet
- * 
+ *
  * @return
  * a integer that is > 0.
  */
@@ -308,7 +275,7 @@ size_t efa_rdm_pke_get_req_hdr_size(struct efa_rdm_pke *pkt_entry)
 		opt_hdr += sizeof(struct efa_rdm_req_opt_raw_addr_hdr) + raw_addr_hdr->addr_len;
 	}
 
-	if (base_hdr->flags & EFA_RDM_REQ_OPT_CQ_DATA_HDR)
+	if (base_hdr->flags & EFA_RDM_REQ_OPT_CQ_DATA_HDR || pkt_entry->ep->use_zcpy_rx)
 		opt_hdr += sizeof(struct efa_rdm_req_opt_cq_data_hdr);
 
 	if (base_hdr->flags & EFA_RDM_PKT_CONNID_HDR) {

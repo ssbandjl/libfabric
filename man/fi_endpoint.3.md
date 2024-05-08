@@ -478,7 +478,8 @@ Endpoint protocol operations may be retrieved using fi_getopt or set
 using fi_setopt.  Applications specify the level that a desired option
 exists, identify the option, and provide input/output buffers to get
 or set the option.  fi_setopt provides an application a way to adjust
-low-level protocol and implementation specific details of an endpoint.
+low-level protocol and implementation specific details of an endpoint,
+and must be called before the endpoint is enabled (fi_enable).
 
 The following option levels and option names and parameters are defined.
 
@@ -522,7 +523,7 @@ The following option levels and option names and parameters are defined.
   request event. This option is read only.
 
 - *FI_OPT_MIN_MULTI_RECV - size_t*
-: Defines the minimum receive buffer space available when the receive
+: Defines the minimum receive buffer space available below which the receive
   buffer is released by the provider (see FI_MULTI_RECV).  Modifying this
   value is only guaranteed to set the minimum buffer space needed on
   receives posted after the value has been changed.  It is recommended
@@ -550,22 +551,6 @@ The following option levels and option names and parameters are defined.
 : The FI_HMEM_DISABLE_P2P environment variable discussed in
   [`fi_mr`(3)](fi_mr.3.html) takes precedence over this setopt option.
 
-- *FI_OPT_XPU_TRIGGER - struct fi_trigger_xpu \**
-: This option only applies to the fi_getopt() call.  It is used to query
-  the maximum number of variables required to support XPU
-  triggered operations, along with the size of each variable.
-
-  The user provides a filled out struct fi_trigger_xpu on input.  The iface
-  and device fields should reference an HMEM domain.  If the provider does not
-  support XPU triggered operations from the given device, fi_getopt() will
-  return -FI_EOPNOTSUPP.  On input, var should reference an array of
-  struct fi_trigger_var data structures, with count set to the size of the
-  referenced array.  If count is 0, the var field will be ignored, and the
-  provider will return the number of fi_trigger_var structures needed.  If
-  count is > 0, the provider will set count to the needed value, and for
-  each fi_trigger_var available, set the datatype and count of the variable
-  used for the trigger.
-
 - *FI_OPT_CUDA_API_PERMITTED - bool \**
 : This option only applies to the fi_setopt call. It is used to control
   endpoint's behavior in making calls to CUDA API. By default, an endpoint
@@ -576,6 +561,12 @@ The following option levels and option names and parameters are defined.
   If either CUDA library or CUDA device is not available, endpoint will
   return -FI_EINVAL.
   All providers that support FI_HMEM capability implement this option.
+
+- *FI_OPT_SHARED_MEMORY_PERMITTED - bool \**
+: This option controls the use of shared memory for intra-node communication.
+  Setting it to true will allow the use of shared memory. When set to false,
+  shared memory will not be used and the implementation of intra-node communication
+  is provider dependent.
 
 ## fi_tc_dscp_set
 
@@ -658,22 +649,7 @@ desired.  Supported types are:
 : Reliable datagram message.  Provides a reliable, connectionless data
   transfer service with flow control that maintains message
   boundaries.
-
-  RDM 可靠的数据报消息端点。 提供可靠的无连接数据传输服务，并具有维护消息边界的流控制, mercury默认使用该模式, 参考代码: hints->ep_attr->type = FI_EP_RDM
-
-*FI_EP_SOCK_DGRAM*
-: A connectionless, unreliable datagram endpoint with UDP socket-like
-  semantics.  FI_EP_SOCK_DGRAM is most useful for applications designed
-  around using UDP sockets.  See the SOCKET ENDPOINT section for additional
-  details and restrictions that apply to datagram socket endpoints.
-
-*FI_EP_SOCK_STREAM*
-: Data streaming endpoint with TCP socket-like semantics.  Provides
-  a reliable, connection-oriented data transfer service that does
-  not maintain message boundaries.  FI_EP_SOCK_STREAM is most useful for
-  applications designed around using TCP sockets.  See the SOCKET
-  ENDPOINT section for additional details and restrictions that apply
-  to stream endpoints.
+RDM 可靠的数据报消息端点。 提供可靠的无连接数据传输服务，并具有维护消息边界的流控制, mercury默认使用该模式, 参考代码: hints->ep_attr->type = FI_EP_RDM
 
 *FI_EP_UNSPEC*
 : The type of endpoint is not specified.  This is usually provided as
@@ -692,9 +668,6 @@ protocol value set to one.
 *FI_PROTO_EFA*
 : Proprietary protocol on Elastic Fabric Adapter fabric. It supports both
   DGRAM and RDM endpoints.
-
-*FI_PROTO_GNI*
-: Protocol runs over Cray GNI low-level interface.
 
 *FI_PROTO_IB_RDM*
 : Reliable-datagram protocol implemented over InfiniBand reliable-connected
@@ -754,6 +727,15 @@ protocol value set to one.
 *FI_PROTO_SM2*
 : Protocol for intra-node communication using shared memory segments
   used by the sm2 provider
+
+*FI_PROTO_CXI*
+: Reliable-datagram protocol optimized for HPC applications
+  used by cxi provider.
+
+*FI_PROTO_CXI_RNR*
+: A version of the FI_PROTO_CXI protocol that implements an RNR
+  protocol which can be used when messaging is primarily expected
+  and FI_ORDER_SAS ordering is not required.
 
 *FI_PROTO_UNSPEC*
 : The protocol is not specified.  This is usually provided as input,
@@ -917,6 +899,8 @@ The length of the authorization key in bytes.  This field will be 0 if
 authorization keys are not available or used.  This field is ignored
 unless the fabric is opened with API version 1.5 or greater.
 
+If the domain is opened with FI_AV_AUTH_KEY, auth_key_size must be 0.
+
 ## auth_key - Authorization Key
 
 If supported by the fabric, an authorization key (a.k.a. job
@@ -928,6 +912,8 @@ that processes running in different jobs do not accidentally
 cross traffic.  The domain authorization key will be used if auth_key_size
 is set to 0.  This field is ignored unless the fabric is opened with API
 version 1.5 or greater.
+
+If the domain is opened with FI_AV_AUTH_KEY, auth_key is must be NULL.
 
 # TRANSMIT CONTEXT ATTRIBUTES
 
@@ -1267,7 +1253,7 @@ capability bits from the fi_info structure will be used.
 
 The following capabilities apply to the receive attributes: FI_MSG,
 FI_RMA, FI_TAGGED, FI_ATOMIC, FI_REMOTE_READ, FI_REMOTE_WRITE, FI_RECV,
-FI_HMEM, FI_TRIGGER, FI_RMA_PMEM, FI_DIRECTED_RECV, FI_VARIABLE_MSG,
+FI_HMEM, FI_TRIGGER, FI_RMA_PMEM, FI_DIRECTED_RECV,
 FI_MULTI_RECV, FI_SOURCE, FI_RMA_EVENT, FI_SOURCE_ERR, FI_COLLECTIVE,
 and FI_XPU.
 
@@ -1651,7 +1637,7 @@ Fabric errno values are defined in `rdma/fi_errno.h`.
   made to bind multiple domains.
 
 *-FI_ENOCQ*
-: The endpoint has not been configured with necessary event queue.
+: The endpoint has not been configured with necessary completion queue.
 
 *-FI_EOPBADSTATE*
 : The endpoint's state does not permit the requested operation.

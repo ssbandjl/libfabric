@@ -150,8 +150,8 @@ static inline int64_t sm2_absptr_to_relptr(void *absptr, struct sm2_mmap *map)
 }
 
 struct sm2_fifo {
-	long int head;
-	long int tail;
+	uintptr_t head;
+	uintptr_t tail;
 };
 
 /* Initialize FIFO queue to empty state */
@@ -198,7 +198,7 @@ static inline struct sm2_xfer_entry *sm2_fifo_read(struct sm2_ep *ep)
 {
 	struct sm2_fifo *self_fifo = sm2_recv_queue(ep->self_region);
 	struct sm2_xfer_entry *xfer_entry;
-	long int prev_head;
+	uintptr_t prev_head;
 
 	assert(self_fifo->head != 0);
 	assert(self_fifo->tail != 0);
@@ -236,9 +236,25 @@ static inline struct sm2_xfer_entry *sm2_fifo_read(struct sm2_ep *ep)
 static inline void sm2_fifo_write_back(struct sm2_ep *ep,
 				       struct sm2_xfer_entry *xfer_entry)
 {
-	xfer_entry->hdr.proto = sm2_proto_return;
+	xfer_entry->hdr.proto_flags |= SM2_RETURN;
 	assert(xfer_entry->hdr.sender_gid != ep->gid);
 	sm2_fifo_write(ep, xfer_entry->hdr.sender_gid, xfer_entry);
+}
+
+static inline void
+sm2_fifo_write_back_ipc_host_to_dev(struct sm2_ep *ep,
+				    struct sm2_xfer_entry *xfer_entry)
+{
+	/* This function is called by the sender after the CUDA memcpy is
+	 * complete. Receiver generates receive completion after receiving this
+	 * message */
+	sm2_gid_t receiver_gid = xfer_entry->hdr.sender_gid;
+
+	xfer_entry->hdr.proto_flags &= ~SM2_CMA_HOST_TO_DEV;
+	xfer_entry->hdr.proto_flags |= SM2_CMA_HOST_TO_DEV_ACK;
+	assert(xfer_entry->hdr.sender_gid != ep->gid);
+	xfer_entry->hdr.sender_gid = ep->gid;
+	sm2_fifo_write(ep, receiver_gid, xfer_entry);
 }
 
 #endif /* _SM2_FIFO_H_ */

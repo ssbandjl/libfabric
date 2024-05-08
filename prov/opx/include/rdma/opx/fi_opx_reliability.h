@@ -188,8 +188,7 @@ struct fi_opx_reliability_service {
 	/* == CACHE LINE == */
 	int				is_backoff_enabled;
 	enum ofi_reliability_kind	reliability_kind;	/* 4 bytes */
-	uint16_t			nack_threshold;
-	uint16_t			unused[2];
+	uint16_t			unused[3];
 	uint8_t				fifo_max;
 	uint8_t				hfi1_max;
 	RbtHandle			handshake_init;		/*  1 qw  =   8 bytes */
@@ -258,10 +257,12 @@ struct fi_opx_reliability_tx_replay {
 	/* == CACHE LINE 1 == */
 	void						*sdma_we;
 	uint32_t					sdma_we_use_count;
-	uint32_t					unused2;
-	uint64_t					unused3[6];
+	enum fi_hmem_iface				hmem_iface;
+	uint64_t					hmem_device;
+	uint64_t					unused3[5];
 
 #ifndef NDEBUG
+	/* == CACHE LINE == */
 	uint64_t					orig_payload[8];
 #endif
 
@@ -272,6 +273,10 @@ struct fi_opx_reliability_tx_replay {
 	uint8_t						data[];
 } __attribute__((__aligned__(64)));
 
+OPX_COMPILE_TIME_ASSERT(offsetof(struct fi_opx_reliability_tx_replay, sdma_we) == FI_OPX_CACHE_LINE_SIZE,
+			"Reliability Replay sdma_we should start on first cacheline!");
+OPX_COMPILE_TIME_ASSERT((offsetof(struct fi_opx_reliability_tx_replay, scb) & (FI_OPX_CACHE_LINE_SIZE - 1)) == 0,
+			"Reliability Replay scb must be 64-byte aligned!");
 
 struct fi_opx_reliability_resynch_flow {
 	bool client_ep;
@@ -554,8 +559,7 @@ void fi_opx_reliability_client_fini (struct fi_opx_reliability_client_state * st
 __OPX_FORCE_INLINE__
 unsigned fi_opx_reliability_client_active (struct fi_opx_reliability_client_state * state)
 {
-	return (state->service->reliability_kind != OFI_RELIABILITY_KIND_NONE) &&
-		((state->replay_pool && !ofi_bufpool_empty(state->replay_pool)) ||
+	return ((state->replay_pool && !ofi_bufpool_empty(state->replay_pool)) ||
 		 (state->replay_iov_pool && !ofi_bufpool_empty(state->replay_iov_pool)));
 }
 
@@ -670,7 +674,7 @@ uint16_t fi_opx_reliability_rx_drop_packet (struct fi_opx_reliability_client_sta
 }
 #endif
 
-#ifdef OPX_PING_DEBUG
+#ifdef OPX_DEBUG_COUNTERS_RELIABILITY_PING
 void dump_ping_counts();
 #endif
 
@@ -883,9 +887,9 @@ int32_t fi_opx_reliability_tx_max_nacks () {
 	return 0;
 }
 
-void fi_opx_reliability_inc_throttle_count();
-void fi_opx_reliability_inc_throttle_nacks();
-void fi_opx_reliability_inc_throttle_maxo();
+void fi_opx_reliability_inc_throttle_count(struct fid_ep *ep);
+void fi_opx_reliability_inc_throttle_nacks(struct fid_ep *ep);
+void fi_opx_reliability_inc_throttle_maxo(struct fid_ep *ep);
 
 __OPX_FORCE_INLINE__
 bool opx_reliability_ready(struct fid_ep *ep,
@@ -897,7 +901,7 @@ bool opx_reliability_ready(struct fid_ep *ep,
 {
 
 	/* Not using reliability, or it's Intranode */
-	if (reliability == OFI_RELIABILITY_KIND_NONE || (fi_opx_hfi_is_intranode(dlid)))
+	if (fi_opx_hfi_is_intranode(dlid))
 		return true;
 
 	union fi_opx_reliability_service_flow_key key = {
@@ -959,15 +963,15 @@ int32_t fi_opx_reliability_tx_available_psns (struct fid_ep *ep,
 	}
 	if(OFI_UNLIKELY((*psn_ptr)->psn.nack_count > fi_opx_reliability_tx_max_nacks())) {
 		(*psn_ptr)->psn.throttle = 1;
-		fi_opx_reliability_inc_throttle_count();
-		fi_opx_reliability_inc_throttle_nacks();
+		fi_opx_reliability_inc_throttle_count(ep);
+		fi_opx_reliability_inc_throttle_nacks(ep);
 		return -1;
 	}
 	uint32_t max_outstanding = fi_opx_reliability_tx_max_outstanding();
 	if(OFI_UNLIKELY((*psn_ptr)->psn.bytes_outstanding > max_outstanding)) {
 		(*psn_ptr)->psn.throttle = 1;
-		fi_opx_reliability_inc_throttle_count();
-		fi_opx_reliability_inc_throttle_maxo();
+		fi_opx_reliability_inc_throttle_count(ep);
+		fi_opx_reliability_inc_throttle_maxo(ep);
 		return -1;
 	}
 
@@ -1017,13 +1021,15 @@ int32_t fi_opx_reliability_tx_next_psn (struct fid_ep *ep,
 		}
 		if(OFI_UNLIKELY((*psn_ptr)->psn.nack_count > fi_opx_reliability_tx_max_nacks())) {
 			(*psn_ptr)->psn.throttle = 1;
-			fi_opx_reliability_inc_throttle_count();
+			fi_opx_reliability_inc_throttle_count(ep);
+			fi_opx_reliability_inc_throttle_nacks(ep);
 			return -1;
 		}
 		if(OFI_UNLIKELY((*psn_ptr)->psn.bytes_outstanding >
 			fi_opx_reliability_tx_max_outstanding())) {
 			(*psn_ptr)->psn.throttle = 1;
-			fi_opx_reliability_inc_throttle_count();
+			fi_opx_reliability_inc_throttle_count(ep);
+			fi_opx_reliability_inc_throttle_maxo(ep);
 			return -1;
 		}
 
@@ -1055,6 +1061,8 @@ fi_opx_reliability_client_replay_allocate(struct fi_opx_reliability_client_state
 #ifndef NDEBUG
 			memset(return_value->orig_payload, 0x2B, 64);
 #endif
+			return_value->hmem_iface = FI_HMEM_SYSTEM;
+			return_value->hmem_device = 0;
 
 			// This will implicitly set return_value->iov correctly
 			return_value->payload = (uint64_t *) &return_value->data;
@@ -1074,13 +1082,6 @@ int32_t fi_opx_reliability_get_replay (struct fid_ep *ep,
 					const enum ofi_reliability_kind reliability
 					)
 {
-
-	/* This behavior used to occur in every caller of fi_opx_reliability_get_replay, makes sense to move here instead */
-	if (reliability == OFI_RELIABILITY_KIND_NONE) {
-		*psn_ptr = NULL;
-		*replay = NULL;
-		return 0;
-	}
 	
 	union fi_opx_reliability_service_flow_key key = {
 		.slid = (uint32_t) state->lid_be,
@@ -1113,13 +1114,15 @@ int32_t fi_opx_reliability_get_replay (struct fid_ep *ep,
 	}
 	if(OFI_UNLIKELY((*psn_ptr)->psn.nack_count > fi_opx_reliability_tx_max_nacks())) {
 		(*psn_ptr)->psn.throttle = 1;
-		fi_opx_reliability_inc_throttle_count();
+		fi_opx_reliability_inc_throttle_count(ep);
+		fi_opx_reliability_inc_throttle_nacks(ep);
 		return -1;
 	}
 	if(OFI_UNLIKELY((*psn_ptr)->psn.bytes_outstanding >
 		fi_opx_reliability_tx_max_outstanding())) {
 		(*psn_ptr)->psn.throttle = 1;
-		fi_opx_reliability_inc_throttle_count();
+		fi_opx_reliability_inc_throttle_count(ep);
+		fi_opx_reliability_inc_throttle_maxo(ep);
 		return -1;
 	}
 	
@@ -1203,7 +1206,7 @@ void fi_opx_reliability_client_replay_register_with_update (struct fi_opx_reliab
 	replay->cc_dec = value;
 
 #ifndef NDEBUG
-	if (replay->use_iov) {
+	if (replay->use_iov && replay->hmem_iface == FI_HMEM_SYSTEM) {
 		/* Copy up to 64 bytes of the current payload value for
 		 * later comparison as a sanity check to make sure the
 		 * user didn't alter the buffer */

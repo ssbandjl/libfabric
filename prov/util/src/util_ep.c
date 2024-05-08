@@ -64,7 +64,7 @@ int ofi_ep_bind_cq(struct util_ep *ep, struct util_cq *cq, uint64_t flags)
 	}
 
 	if (flags & (FI_TRANSMIT | FI_RECV)) {
-		return fid_list_insert(&cq->ep_list,
+		return fid_list_insert2(&cq->ep_list,
 				       &cq->ep_list_lock,
 				       &ep->ep_fid.fid);
 	}
@@ -92,9 +92,9 @@ int ofi_ep_bind_av(struct util_ep *util_ep, struct util_av *av)
 	util_ep->av = av;
 	ofi_atomic_inc32(&av->ref);
 
-	ofi_mutex_lock(&av->ep_list_lock);
+	ofi_genlock_lock(&av->ep_list_lock);
 	dlist_insert_tail(&util_ep->av_entry, &av->ep_list);
-	ofi_mutex_unlock(&av->ep_list_lock);
+	ofi_genlock_unlock(&av->ep_list_lock);
 
 	return 0;
 }
@@ -157,7 +157,7 @@ int ofi_ep_bind_cntr(struct util_ep *ep, struct util_cntr *cntr, uint64_t flags)
 
 	ep->flags |= OFI_CNTR_ENABLED;
 
-	return fid_list_insert(&cntr->ep_list, &cntr->ep_list_lock,
+	return fid_list_insert2(&cntr->ep_list, &cntr->ep_list_lock,
 			       &ep->ep_fid.fid);
 }
 
@@ -272,14 +272,14 @@ int ofi_endpoint_close(struct util_ep *util_ep)
 	int i;
 
 	if (util_ep->tx_cq) {
-		fid_list_remove(&util_ep->tx_cq->ep_list,
+		fid_list_remove2(&util_ep->tx_cq->ep_list,
 				&util_ep->tx_cq->ep_list_lock,
 				&util_ep->ep_fid.fid);
 		ofi_atomic_dec32(&util_ep->tx_cq->ref);
 	}
 
 	if (util_ep->rx_cq) {
-		fid_list_remove(&util_ep->rx_cq->ep_list,
+		fid_list_remove2(&util_ep->rx_cq->ep_list,
 				&util_ep->rx_cq->ep_list_lock,
 				&util_ep->ep_fid.fid);
 		ofi_atomic_dec32(&util_ep->rx_cq->ref);
@@ -287,7 +287,7 @@ int ofi_endpoint_close(struct util_ep *util_ep)
 
 	for (i = 0; i < CNTR_CNT; i++) {
 		if (util_ep->cntrs[i]) {
-			fid_list_remove(&util_ep->cntrs[i]->ep_list,
+			fid_list_remove2(&util_ep->cntrs[i]->ep_list,
 					&util_ep->cntrs[i]->ep_list_lock,
 					&util_ep->ep_fid.fid);
 			ofi_atomic_dec32(&util_ep->cntrs[i]->ref);
@@ -295,9 +295,9 @@ int ofi_endpoint_close(struct util_ep *util_ep)
 	}
 
 	if (util_ep->av) {
-		ofi_mutex_lock(&util_ep->av->ep_list_lock);
+		ofi_genlock_lock(&util_ep->av->ep_list_lock);
 		dlist_remove(&util_ep->av_entry);
-		ofi_mutex_unlock(&util_ep->av->ep_list_lock);
+		ofi_genlock_unlock(&util_ep->av->ep_list_lock);
 
 		ofi_atomic_dec32(&util_ep->av->ref);
 	}

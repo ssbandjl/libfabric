@@ -74,6 +74,8 @@ AC_DEFUN([FI_EFA_CONFIGURE],[
 	have_ibv_is_fork_initialized=0
 	efa_support_data_in_order_aligned_128_byte=0
 	efadv_support_extended_cq=0
+	have_efa_dmabuf_mr=0
+	have_efadv_query_mr=0
 
 	dnl $have_neuron is defined at top-level configure.ac
 	AM_CONDITIONAL([HAVE_NEURON], [ test x"$have_neuron" = x1 ])
@@ -104,15 +106,19 @@ AC_DEFUN([FI_EFA_CONFIGURE],[
 			[efa_support_data_in_order_aligned_128_byte=0],
 			[[#include <infiniband/verbs.h>]])
 
+		AC_CHECK_DECL([ibv_reg_dmabuf_mr],
+			[have_efa_dmabuf_mr=1],
+			[have_efa_dmabuf_mr=0],
+			[[#include <infiniband/verbs.h>]])
+
 		dnl Check for ibv_reg_dmabuf_mr() in libibverbs if built with synapseai support.
 		AS_IF([test x"$have_synapseai" = x"1"],[
-			AC_CHECK_DECL([ibv_reg_dmabuf_mr],
+			AS_IF([test x"$have_efa_dmabuf_mr" = x"1"],
 				[],
 				[AC_MSG_ERROR(
 					[ibv_reg_dmabuf_mr is required by synapseai but not available
 					in the current rdma-core library. Please build libfabric with
-					rdma-core >= v34.0])],
-				[[#include <infiniband/verbs.h>]])
+					rdma-core >= v34.0])])
 		])
 
 		dnl For efadv_support_extended_cq, we check several things,
@@ -129,6 +135,23 @@ AC_DEFUN([FI_EFA_CONFIGURE],[
 		AC_CHECK_DECL([efadv_wc_read_sgid],
 			[],
 			[efadv_support_extended_cq=0],
+			[[#include <infiniband/efadv.h>]])
+
+		dnl For efadv_query_mr, we check several things,
+		dnl and if any of them fail, we disable it
+		have_efadv_query_mr=1
+		AC_CHECK_DECL([efadv_query_mr],
+			[],
+			[have_efadv_query_mr=0],
+			[[#include <infiniband/efadv.h>]])
+		AC_CHECK_MEMBER([struct efadv_mr_attr.rdma_recv_ic_id],
+			[],
+			[have_efadv_query_mr=0],
+			[[#include <infiniband/efadv.h>]])
+		dnl there is more symbols in the enum, only check one of them
+		AC_CHECK_DECL([EFADV_MR_ATTR_VALIDITY_RDMA_READ_IC_ID],
+			[],
+			[have_efadv_query_mr=0],
 			[[#include <infiniband/efadv.h>]])
 	])
 
@@ -150,6 +173,12 @@ AC_DEFUN([FI_EFA_CONFIGURE],[
 	AC_DEFINE_UNQUOTED([HAVE_EFA_DATA_IN_ORDER_ALIGNED_128_BYTES],
 		[$efa_support_data_in_order_aligned_128_byte],
 		[Indicates if EFA supports 128 bytes in-order in writing.])
+	AC_DEFINE_UNQUOTED([HAVE_EFA_DMABUF_MR],
+		[$have_efa_dmabuf_mr],
+		[Indicates if ibv_reg_dmabuf_mr verbs is available])
+	AC_DEFINE_UNQUOTED([HAVE_EFADV_QUERY_MR],
+		[$have_efadv_query_mr],
+		[Indicates if efadv_query_mr verbs is available])
 
 
 	CPPFLAGS=$save_CPPFLAGS
@@ -194,6 +223,8 @@ AC_DEFUN([FI_EFA_CONFIGURE],[
 	AC_DEFINE_UNQUOTED([EFA_UNIT_TEST], [$efa_unit_test], [EFA unit testing])
 
 	AM_CONDITIONAL([HAVE_EFADV_CQ_EX], [ test $efadv_support_extended_cq = 1])
+	AM_CONDITIONAL([HAVE_EFADV_QUERY_MR], [ test $have_efadv_query_mr = 1])
+	AM_CONDITIONAL([HAVE_EFA_DATA_IN_ORDER_ALIGNED_128_BYTES], [ test $efa_support_data_in_order_aligned_128_byte = 1])
 	AM_CONDITIONAL([ENABLE_EFA_UNIT_TEST], [ test x"$enable_efa_unit_test" != xno])
 
 	AC_SUBST(efa_CPPFLAGS)

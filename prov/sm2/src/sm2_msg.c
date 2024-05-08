@@ -38,6 +38,40 @@
 #include "ofi_iov.h"
 #include "sm2.h"
 
+static inline int sm2_select_proto(void **desc, size_t iov_count,
+				   uint64_t op_flags, uint64_t total_len)
+{
+	struct ofi_mr *sm2_desc;
+	enum fi_hmem_iface iface;
+
+	if (desc && *desc) {
+		sm2_desc = (struct ofi_mr *) *desc;
+		iface = sm2_desc->iface;
+		if (iface == FI_HMEM_CUDA) {
+			if ((sm2_desc->flags & OFI_HMEM_DATA_DEV_REG_HANDLE) &&
+			    (total_len <= SM2_MAX_GDRCOPY_SIZE)) {
+				assert(sm2_desc->hmem_data);
+				return sm2_proto_inject;
+			}
+			/* Do not inject if IPC is available so device to device
+			 * transfer may occur if possible. */
+			/* TODO - multi IOV support */
+			if (iov_count == 1 && desc && desc[0]) {
+				if (ofi_hmem_is_ipc_enabled(iface) &&
+				    sm2_desc->flags & FI_HMEM_DEVICE_ONLY &&
+				    !(op_flags & FI_INJECT)) {
+					return sm2_proto_ipc;
+				}
+			}
+		}
+	}
+
+	if (total_len <= SM2_INJECT_SIZE)
+		return sm2_proto_inject;
+
+	return sm2_proto_cma;
+}
+
 static ssize_t sm2_recvmsg(struct fid_ep *ep_fid, const struct fi_msg *msg,
 			   uint64_t flags)
 {
@@ -85,6 +119,7 @@ static ssize_t sm2_generic_sendmsg(struct sm2_ep *ep, const struct iovec *iov,
 	ssize_t ret = 0;
 	size_t total_len;
 	struct ofi_mr **mr = (struct ofi_mr **) desc;
+	int proto;
 
 	assert(iov_count <= SM2_IOV_LIMIT);
 
@@ -99,13 +134,14 @@ static ssize_t sm2_generic_sendmsg(struct sm2_ep *ep, const struct iovec *iov,
 	total_len = ofi_total_iov_len(iov, iov_count);
 	assert(!(op_flags & FI_INJECT) || total_len <= SM2_INJECT_SIZE);
 
-	ret = sm2_proto_ops[sm2_proto_inject](ep, peer_smr, peer_gid, op, tag,
-					      data, op_flags, mr, iov,
-					      iov_count, total_len, context);
+	proto = sm2_select_proto(desc, iov_count, op_flags, total_len);
+	ret = sm2_proto_ops[proto](ep, peer_smr, peer_gid, op, tag, data,
+				   op_flags, mr, iov, iov_count, total_len,
+				   context);
 	if (ret)
 		goto unlock_cq;
 
-	if (!(op_flags & FI_DELIVERY_COMPLETE)) {
+	if (sm2_proto_imm_send_comp(proto)) {
 		ret = sm2_complete_tx(ep, context, op, op_flags);
 		if (ret) {
 			FI_WARN(&sm2_prov, FI_LOG_EP_CTRL,

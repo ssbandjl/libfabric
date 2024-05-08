@@ -1,35 +1,5 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include "efa.h"
 
@@ -59,6 +29,7 @@ ssize_t efa_rdm_pke_init_handshake(struct efa_rdm_pke *pkt_entry,
 	struct efa_rdm_handshake_hdr *handshake_hdr;
 	struct efa_rdm_handshake_opt_connid_hdr *connid_hdr;
 	struct efa_rdm_handshake_opt_host_id_hdr *host_id_hdr;
+	struct efa_rdm_handshake_opt_device_version_hdr *device_version_hdr;
 
 	handshake_hdr = (struct efa_rdm_handshake_hdr *)pkt_entry->wiredata;
 	handshake_hdr->type = EFA_RDM_HANDSHAKE_PKT;
@@ -93,6 +64,17 @@ ssize_t efa_rdm_pke_init_handshake(struct efa_rdm_pke *pkt_entry,
 		pkt_entry->pkt_size += sizeof(struct efa_rdm_handshake_opt_host_id_hdr);
 	}
 
+	/* Include the device version (0xEFA0, 0xEFA1, etc) */
+	device_version_hdr = (struct efa_rdm_handshake_opt_device_version_hdr *) (pkt_entry->wiredata + pkt_entry->pkt_size);
+
+	/* This assumes the global device list will never contain dissimilar EFA
+	 * devices. I.e. the PCI bus will only contain EFA devices with the same
+	 * vendor_part_id (0xEFA0, 0xEFA1, etc)
+	 */
+	device_version_hdr->device_version = g_device_list[0].ibv_attr.vendor_part_id;
+	handshake_hdr->flags |= EFA_RDM_HANDSHAKE_DEVICE_VERSION_HDR;
+	pkt_entry->pkt_size += sizeof (struct efa_rdm_handshake_opt_device_version_hdr);
+
 	pkt_entry->addr = addr;
 	return 0;
 }
@@ -125,6 +107,9 @@ void efa_rdm_pke_handle_handshake_recv(struct efa_rdm_pke *pkt_entry)
 		peer->host_id = *host_id_ptr;
 		EFA_INFO(FI_LOG_CQ, "Received peer host id: i-%017lx\n", peer->host_id);
 	}
+
+	peer->device_version = efa_rdm_pke_get_handshake_opt_device_version(pkt_entry);
+	EFA_INFO(FI_LOG_CQ, "Received peer EFA device version: 0x%x\n", peer->device_version);
 
 	efa_rdm_pke_release_rx(pkt_entry);
 }
@@ -512,6 +497,11 @@ void efa_rdm_pke_handle_rma_read_completion(struct efa_rdm_pke *context_pkt_entr
 			if (txe->addr == FI_ADDR_NOTAVAIL) {
 				data_pkt_entry = txe->local_read_pkt_entry;
 				assert(data_pkt_entry->payload_size > 0);
+				/* We were using a held rx pkt to post local read */
+				if (data_pkt_entry->alloc_type == EFA_RDM_PKE_FROM_EFA_RX_POOL) {
+					assert(txe->ep->efa_rx_pkts_held > 0);
+					txe->ep->efa_rx_pkts_held--;
+				}
 				efa_rdm_pke_handle_data_copied(data_pkt_entry);
 			} else {
 				assert(txe && txe->cq_entry.flags & FI_READ);
@@ -629,6 +619,25 @@ void efa_rdm_pke_handle_eor_send_completion(struct efa_rdm_pke *pkt_entry)
 	}
 }
 
+/*  Read NACK packet related functions */
+int efa_rdm_pke_init_read_nack(struct efa_rdm_pke *pkt_entry, struct efa_rdm_ope *rxe)
+{
+	struct efa_rdm_read_nack_hdr *nack_hdr;
+
+	nack_hdr = (struct efa_rdm_read_nack_hdr *)pkt_entry->wiredata;
+	nack_hdr->type = EFA_RDM_READ_NACK_PKT;
+	nack_hdr->version = EFA_RDM_PROTOCOL_VERSION;
+	nack_hdr->flags = 0;
+	nack_hdr->send_id = rxe->tx_id;
+	nack_hdr->recv_id = rxe->rx_id;
+	nack_hdr->flags |= EFA_RDM_PKT_CONNID_HDR;
+	nack_hdr->connid = efa_rdm_ep_raw_addr(rxe->ep)->qkey;
+	pkt_entry->pkt_size = sizeof(struct efa_rdm_read_nack_hdr);
+	pkt_entry->addr = rxe->addr;
+	pkt_entry->ope = rxe;
+	return 0;
+}
+
 /*
  *   Sender handles the acknowledgment (EFA_RDM_EOR_PKT) from receiver on the completion
  *   of the large message copy via fi_readmsg operation
@@ -637,11 +646,8 @@ void efa_rdm_pke_handle_eor_recv(struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_rdm_eor_hdr *eor_hdr;
 	struct efa_rdm_ope *txe;
-	struct efa_rdm_peer *peer;
 
-	peer = efa_rdm_ep_get_peer(pkt_entry->ep, pkt_entry->addr);
-	assert(peer);
-	peer->num_read_msg_in_flight -= 1;
+	efa_rdm_ep_domain(pkt_entry->ep)->num_read_msg_in_flight -= 1;
 
 	eor_hdr = (struct efa_rdm_eor_hdr *)pkt_entry->wiredata;
 
@@ -656,6 +662,38 @@ void efa_rdm_pke_handle_eor_recv(struct efa_rdm_pke *pkt_entry)
 
 	efa_rdm_pke_release_rx(pkt_entry);
 
+}
+
+/*
+ *   Sender handles the read NACK from receiver when receiver has failed to register the receive buffer
+ */
+void efa_rdm_pke_handle_read_nack_recv(struct efa_rdm_pke *pkt_entry)
+{
+	struct efa_rdm_read_nack_hdr *nack_hdr;
+	struct efa_rdm_ope *txe;
+
+	efa_rdm_ep_domain(pkt_entry->ep)->num_read_msg_in_flight -= 1;
+
+	nack_hdr = (struct efa_rdm_read_nack_hdr *) pkt_entry->wiredata;
+
+	txe = ofi_bufpool_get_ibuf(pkt_entry->ep->ope_pool, nack_hdr->send_id);
+
+	efa_rdm_pke_release_rx(pkt_entry);
+	txe->internal_flags |= EFA_RDM_OPE_READ_NACK;
+
+	if (txe->op == ofi_op_tagged) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			 "Sender fallback to long CTS tagged "
+			 "protocol because memory registration limit "
+			 "was reached on the receiver\n");
+		efa_rdm_ope_post_send_or_queue(txe, EFA_RDM_LONGCTS_TAGRTM_PKT);
+	} else {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			 "Sender fallback to long CTS untagged "
+			 "protocol because memory registration limit "
+			 "was reached on the receiver\n");
+		efa_rdm_ope_post_send_or_queue(txe, EFA_RDM_LONGCTS_MSGRTM_PKT);
+	}
 }
 
 /* receipt packet related functions */
@@ -762,7 +800,7 @@ void efa_rdm_pke_handle_atomrsp_recv(struct efa_rdm_pke *pkt_entry)
 	                           txe->atomic_ex.resp_iov_count, atomrsp_pkt->data,
 	                           atomrsp_hdr->seg_length);
 	if (OFI_UNLIKELY(ret < 0)) {
-		efa_base_ep_write_eq_error(&pkt_entry->ep->base_ep, FI_EMSGSIZE, FI_EFA_LOCAL_ERROR_BAD_LENGTH);
+		efa_base_ep_write_eq_error(&pkt_entry->ep->base_ep, -ret, EFA_IO_COMP_STATUS_LOCAL_ERROR_BAD_LENGTH);
 		return;
 	}
 

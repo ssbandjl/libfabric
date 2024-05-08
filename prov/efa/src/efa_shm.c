@@ -1,34 +1,6 @@
-/*
- * Copyright (c) 2022 Amazon.com, Inc. or its affiliates. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include <assert.h>
 #include "efa.h"
 #include "efa_shm.h"
@@ -114,10 +86,11 @@ void efa_shm_info_create(const struct fi_info *app_info, struct fi_info **shm_in
 	 * make this request to shm as well.
 	 */
 	shm_hints->domain_attr->mr_mode = FI_MR_VIRT_ADDR;
-	if (app_info && (app_info->caps & FI_HMEM)) {
+	if (app_info->caps & FI_HMEM) {
 		shm_hints->domain_attr->mr_mode |= FI_MR_HMEM;
 	}
 
+	shm_hints->domain_attr->threading = app_info->domain_attr->threading;
 	shm_hints->domain_attr->av_type = FI_AV_TABLE;
 	shm_hints->domain_attr->caps |= FI_LOCAL_COMM;
 	shm_hints->tx_attr->msg_order = FI_ORDER_SAS;

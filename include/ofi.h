@@ -97,20 +97,22 @@ extern "C" {
 #define OFI_PRIMARY_RX_CAPS \
 	(FI_MSG | FI_RMA | FI_TAGGED | FI_ATOMIC | \
 	 FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | \
-	 FI_DIRECTED_RECV | FI_VARIABLE_MSG | \
-	 FI_COLLECTIVE | FI_HMEM)
+	 FI_DIRECTED_RECV | FI_COLLECTIVE | FI_HMEM)
 
 #define OFI_SECONDARY_RX_CAPS \
 	(FI_MULTI_RECV | FI_TRIGGER | FI_RMA_PMEM | FI_SOURCE | \
 	 FI_RMA_EVENT | FI_SOURCE_ERR)
 
-#define OFI_PRIMARY_CAPS \
-	(OFI_PRIMARY_TX_CAPS | OFI_PRIMARY_RX_CAPS | \
-	 FI_REMOTE_COMM | FI_LOCAL_COMM)
+#define OFI_DOMAIN_PRIMARY_CAPS FI_AV_USER_ID
+#define OFI_DOMAIN_SECONDARY_CAPS \
+	(FI_SHARED_AV | FI_REMOTE_COMM | FI_LOCAL_COMM)
 
-#define OFI_SECONDARY_CAPS \
-	(OFI_SECONDARY_TX_CAPS | OFI_SECONDARY_RX_CAPS | \
-	 FI_SHARED_AV)
+ #define OFI_PRIMARY_CAPS \
+	(OFI_PRIMARY_TX_CAPS | OFI_PRIMARY_RX_CAPS | OFI_DOMAIN_PRIMARY_CAPS)
+
+ #define OFI_SECONDARY_CAPS \
+        (OFI_SECONDARY_TX_CAPS | OFI_SECONDARY_RX_CAPS | \
+	 OFI_DOMAIN_SECONDARY_CAPS)
 
 #define OFI_TX_MSG_CAPS (FI_MSG | FI_SEND)
 #define OFI_RX_MSG_CAPS (FI_MSG | FI_RECV)
@@ -119,8 +121,7 @@ extern "C" {
 
 #define OFI_IGNORED_TX_CAPS /* older Rx caps not applicable to Tx */ \
 	(FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_DIRECTED_RECV | \
-	 FI_VARIABLE_MSG | FI_MULTI_RECV | FI_SOURCE | FI_RMA_EVENT | \
-	 FI_SOURCE_ERR)
+	 FI_MULTI_RECV | FI_SOURCE | FI_RMA_EVENT | FI_SOURCE_ERR)
 #define OFI_IGNORED_RX_CAPS /* Older Tx caps not applicable to Rx */ \
 	(FI_READ | FI_WRITE | FI_SEND | FI_FENCE | FI_MULTICAST | \
 	 FI_NAMED_RX_CTX)
@@ -461,6 +462,9 @@ int ofi_open_log(uint32_t version, void *attr, size_t attr_len,
 		 uint64_t flags, struct fid **fid, void *context);
 void ofi_tostr_log_level(char *buf, size_t len, enum fi_log_level level);
 void ofi_tostr_log_subsys(char *buf, size_t len, enum fi_log_subsys subsys);
+
+int ofi_nic_close(struct fid *fid);
+int ofi_nic_control(struct fid *fid, int command, void *arg);
 
 #ifdef __cplusplus
 }

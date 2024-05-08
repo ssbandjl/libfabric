@@ -44,7 +44,7 @@ void CALLBACK nd_io_cb(DWORD error, DWORD bytes, LPOVERLAPPED ov)
 	ofi_mutex_lock(&base->lock);
 
 	VRB_DBG(FI_LOG_EP_CTRL, "IO callback: error: %s, bytes: %d, ov: %p\n",
-		ofi_nd_error_str(error), bytes, ov);
+		nd_error_str(error), bytes, ov);
 
 	if (error) {
 		assert(base->error_cb);
@@ -127,8 +127,8 @@ void nd_get_connection_data(IND2Connector *connector, struct nd_cm_event *event)
 	       FI_LOG_EP_CTRL, "IND2Connector::GetPrivateData: hr=0x%08lx\n",
 	       hr);
 
-	event->event.param.conn.private_data_len = (uint8_t)len;
-	if (len) {
+	if ((SUCCEEDED(hr) || hr == ND_BUFFER_OVERFLOW) && len) {
+		event->event.param.conn.private_data_len = (uint8_t)len;
 		event->event.param.conn.private_data = malloc(len);
 		if (event->event.param.conn.private_data) {
 			hr = connector->lpVtbl->GetPrivateData(
@@ -140,6 +140,11 @@ void nd_get_connection_data(IND2Connector *connector, struct nd_cm_event *event)
 			       FI_LOG_EP_CTRL,
 			       "IND2Connector::GetPrivateData: hr=0x%08lx\n",
 			       hr);
+			if (FAILED(hr)) {
+				free(event->event.param.conn.private_data);
+				event->event.param.conn.private_data = NULL;
+				event->event.param.conn.private_data_len = 0;
+			}
 		} else {
 			event->event.param.conn.private_data_len = 0;
 			VRB_WARN(
@@ -147,6 +152,7 @@ void nd_get_connection_data(IND2Connector *connector, struct nd_cm_event *event)
 				"Failed to allocate memory for connection data.\n");
 		}
 	} else {
+		event->event.param.conn.private_data_len = 0;
 		event->event.param.conn.private_data = NULL;
 	}
 }
@@ -390,6 +396,7 @@ void nd_cm_connect_nack(struct nd_event_base *base, DWORD bytes, DWORD error)
 		cm_event->event.status = ECONNREFUSED;
 
 		nd_get_read_limits(event->connector, cm_event);
+		nd_get_connection_data(event->connector, cm_event);
 
 		hr = event->qp->lpVtbl->Flush(event->qp);
 		FI_LOG(&vrb_prov, FAILED(hr) ? FI_LOG_WARN : FI_LOG_DEBUG,
@@ -436,6 +443,6 @@ void nd_cq_notify_error(struct nd_event_base *base, DWORD bytes, DWORD error)
 		nd_cq_notify_event(base, bytes);
 	} else {
 		VRB_WARN(FI_LOG_CQ, "Unknown error: %s, bytes %d, ov: %p\n",
-			 ofi_nd_error_str(error), bytes, base);
+			 nd_error_str(error), bytes, base);
 	}
 }

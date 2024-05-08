@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #ifndef _EFA_RDM_TRACEPOINT_H
 #define _EFA_RDM_TRACEPOINT_H
 
@@ -24,9 +27,9 @@
 
 #else
 
-#define efa_rdm_tracepoint(...)	while (0) {}
-#define efa_rdm_tracef(...)	while (0) {}
-#define efa_rdm_tracelog(...)	while (0) {}
+#define efa_rdm_tracepoint(...)	do {} while (0)
+#define efa_rdm_tracef(...)	do {} while (0)
+#define efa_rdm_tracelog(...)	do {} while (0)
 
 #endif /* HAVE_LTTNG */
 

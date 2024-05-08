@@ -91,9 +91,42 @@ extern pthread_mutex_t sm2_ep_list_lock;
 
 enum {
 	sm2_proto_inject,
-	sm2_proto_return,
+	sm2_proto_cma,
+	sm2_proto_ipc,
 	sm2_proto_max,
 };
+
+/* Protocol flags */
+#define SM2_RETURN (1 << 0)
+
+#define SM2_RMA_REQ (1 << 1)
+
+/* The SM2_UNEXP flag is used for unexpected receives. On the receiver, it
+indicates that the xfer_entry that the receiver is processing is actually in the
+xfer_ctx_pool and not in the receiver's freestack.
+
+For protocols that require delivery complete semantics (CMA and IPC), the
+receiver pops an xfer_entry from its own freestack, sets SM2_UNEXP flag and uses
+the new xfer_entry to process the receive. Once the receive is processed, the
+receiver sets the SM2_RETURN and SM2_GENERATE_COMPLETION and sends it to the
+sender. The sender will generate the completion entry when it receives such an
+xfer_entry.
+
+TODO: Copy the data to a temporary buffer so that the sender is agnostic to
+unexpected receives. That also allows the sender to immediately generate
+completions instead of waiting for the application to post the receive buffer.
+*/
+#define SM2_UNEXP (1 << 2)
+
+/* SM2_GENERATE_COMPLETION is used in protocols that require delivery complete
+ * semantics (CMA and IPC). It is set when the receiver has finished processing
+ * the request and wants to tell the sender that the sender should generate a
+ * send completion. */
+#define SM2_GENERATE_COMPLETION (1 << 3)
+
+/* Protocol flags for SM2 CMA protocol */
+#define SM2_CMA_HOST_TO_DEV	(1 << 4)
+#define SM2_CMA_HOST_TO_DEV_ACK (1 << 5)
 
 /*
  * 	next - fifo linked list next ptr
@@ -109,7 +142,8 @@ enum {
  * 	proto - sm2 operation
  * 	proto_flags - Flags used by the sm2 protocol
  * 	sender_gid - id of msg sender
- * 	user_data - the message
+ * 	user_data - Protocol dependent data. For inject, it's the message.
+ * 				For CMA protocol, it's struct sm2_cma_data.
  */
 struct sm2_xfer_hdr {
 	volatile long int next;
@@ -151,6 +185,15 @@ struct sm2_atomic_data {
 struct sm2_atomic_entry {
 	struct sm2_atomic_hdr atomic_hdr;
 	struct sm2_atomic_data atomic_data;
+};
+
+struct sm2_cma_data {
+	size_t iov_count;
+	struct iovec iov[SM2_IOV_LIMIT];
+
+	/* Used for IPC host to device protocol */
+	struct ipc_info ipc_info;
+	struct fi_peer_rx_entry *rx_entry;
 };
 
 struct sm2_ep_name {
@@ -210,6 +253,7 @@ struct sm2_xfer_ctx {
 
 struct sm2_domain {
 	struct util_domain util_domain;
+	struct ofi_mr_cache *ipc_cache;
 	struct fid_peer_srx *srx;
 };
 
@@ -290,6 +334,17 @@ static inline size_t sm2_pop_xfer_entry(struct sm2_ep *ep,
 
 	*xfer_entry = smr_freestack_pop(sm2_freestack(ep->self_region));
 	return FI_SUCCESS;
+}
+
+static inline bool sm2_proto_imm_send_comp(uint16_t proto)
+{
+	switch (proto) {
+	case sm2_proto_cma:
+	case sm2_proto_ipc:
+		return false;
+	default:
+		return true;
+	}
 }
 
 int sm2_query_atomic(struct fid_domain *domain, enum fi_datatype datatype,

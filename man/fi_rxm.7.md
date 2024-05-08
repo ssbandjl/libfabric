@@ -122,8 +122,8 @@ FI_ORDER_SAW can not be supported.
 The ofi_rxm provider checks for the following environment variables.
 
 *FI_OFI_RXM_BUFFER_SIZE*
-: Defines the transmit buffer size / inject size. Messages of size less than this
-  would be transmitted via an eager protocol and those above would be transmitted
+: Defines the transmit buffer size / inject size. Messages of size less than or equal to this
+  would be transmitted via an eager protocol and messages greater in size would be transmitted
   via a rendezvous or SAR (Segmentation And Reassembly) protocol. Transmit data
   would be copied up to this size (default: ~16k).
 
@@ -174,6 +174,12 @@ with (default: 256).
 : Defines the maximum number of message provider CQ entries that can be
   consecutively read across progress calls without checking to see if the
   CM progress interval has been reached (default: 128)
+
+*FI_OFI_RXM_DETECT_HMEM_IFACE*
+: Set this to 1 to allow automatic detection of HMEM iface of user buffers
+  when such information is not supplied. This feature allows such buffers be
+  copied or registered (e.g. in Rendezvous) internally by RxM. Note that no
+  extra memory registration is performed with this option. (default: false)
 
 # Tuning
 

@@ -1,38 +1,6 @@
-/*
- * Copyright (c) 2022 Amazon.com, Inc. or its affiliates. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include "efa.h"
 #include "efa_prov_info.h"
 
@@ -440,12 +408,36 @@ int efa_user_info_alter_rdm(int version, struct fi_info *info, const struct fi_i
 	 */
 	if (hints) {
 		if (hints->tx_attr) {
+			/* efa device doesn't have ordering (EFA_MSG_ORDER == FI_ORDER_NONE).
+			 * if apps request an ordering that is relaxed than
+			 * what provider supports, we should respect that.
+			 * This is specially true for FI_ORDER_NONE:
+			 * No ordering is specified. This value may be used as input in order to obtain
+			 * the default message order supported by the provider.
+			 */
+			info->tx_attr->msg_order &= hints->tx_attr->msg_order;
 			atomic_ordering = FI_ORDER_ATOMIC_RAR | FI_ORDER_ATOMIC_RAW |
 					  FI_ORDER_ATOMIC_WAR | FI_ORDER_ATOMIC_WAW;
 			if (!(hints->tx_attr->msg_order & atomic_ordering)) {
 				info->ep_attr->max_order_raw_size = 0;
 			}
 		}
+
+		if (hints->rx_attr) {
+			/* efa device doesn't have ordering (EFA_MSG_ORDER == FI_ORDER_NONE).
+			 * if apps request an ordering that is relaxed than
+			 * what provider supports, we should respect that.
+			 * This is specially true for FI_ORDER_NONE:
+			 * No ordering is specified. This value may be used as input in order to obtain
+			 * the default message order supported by the provider.
+			 */
+			info->rx_attr->msg_order &= hints->rx_attr->msg_order;
+		}
+
+		if (info->tx_attr->msg_order != info->rx_attr->msg_order)
+			EFA_INFO(FI_LOG_EP_CTRL, "Inconsistent tx/rx msg order. Tx msg order: %lu, Rx msg order: %lu. "
+						 "Libfabric can proceed but it is recommended to align the tx and rx msg order.\n",
+						 info->tx_attr->msg_order, info->rx_attr->msg_order);
 
 		/* We only support manual progress for RMA operations */
 		if (hints->caps & FI_RMA) {
@@ -480,6 +472,15 @@ int efa_user_info_alter_rdm(int version, struct fi_info *info, const struct fi_i
 			info->ep_attr->msg_prefix_size = EFA_RDM_MSG_PREFIX_SIZE;
 			EFA_INFO(FI_LOG_CORE,
 				"FI_MSG_PREFIX size = %ld\n", info->ep_attr->msg_prefix_size);
+		}
+
+		/* Handle other EP attributes */
+		if (hints->ep_attr) {
+			if (hints->ep_attr->max_msg_size) {
+				info->ep_attr->max_msg_size =
+					MIN(info->ep_attr->max_msg_size,
+					    hints->ep_attr->max_msg_size);
+			}
 		}
 	}
 

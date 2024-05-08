@@ -69,6 +69,7 @@ struct ofi_memhooks memhooks = {
 	.monitor.cleanup = ofi_monitor_cleanup,
 	.monitor.start = ofi_memhooks_start,
 	.monitor.stop = ofi_memhooks_stop,
+	.monitor.name = "memhooks",
 };
 struct ofi_mem_monitor *memhooks_monitor = &memhooks.monitor;
 
@@ -107,6 +108,8 @@ struct ofi_mem_monitor *memhooks_monitor = &memhooks.monitor;
 #endif
 
 #define OFI_INTERCEPT_MAX_PATCH 32
+
+static bool symbols_intercepted;
 
 struct ofi_intercept {
 	struct dlist_entry 		entry;
@@ -188,13 +191,13 @@ static inline void ofi_clear_instruction_cache(uintptr_t address, size_t data_si
 #if (defined(__x86_64__) || defined(__amd64__))
 		__asm__ volatile("mfence;clflush %0;mfence"::
 				 "m" (*((char*) address + i)));
-#elif (defined(__aarch64__)
+#elif (defined(__aarch64__))
 		__asm__ volatile ("dc cvau, %0\n\t"
 			  "dsb ish\n\t"
 			  "ic ivau, %0\n\t"
 			  "dsb ish\n\t"
 			  "isb":: "r" (address + i));
-#elif (defined(__riscv) && (__riscv_xlen == 64)
+#elif (defined(__riscv) && (__riscv_xlen == 64))
 	        __riscv_flush_icache(address, address+data_size, SYS_RISCV_FLUSH_ICACHE_LOCAL);
 		__asm__ volatile ("fence.i\n");
 #endif
@@ -218,8 +221,8 @@ static inline int ofi_write_patch(unsigned char *patch_data, void *address,
 	}
 
 	base = ofi_get_page_start(address, page_size);
-	bound = ofi_get_page_end(address, page_size);
-	length = (uintptr_t) bound - (uintptr_t) base;
+	bound = ofi_get_page_end( (void *) ((uintptr_t) address + data_size - 1), page_size);
+	length = (uintptr_t) bound - (uintptr_t) base + 1;
 
 	if (mprotect(base, length, PROT_EXEC|PROT_READ|PROT_WRITE)) {
 		FI_WARN(&core_prov, FI_LOG_MR,
@@ -712,6 +715,8 @@ static int ofi_memhooks_start(struct ofi_mem_monitor *monitor)
 		}
 	}
 
+	symbols_intercepted = true;
+
 	return 0;
 
 err_intercept_failed:
@@ -730,6 +735,12 @@ static void ofi_memhooks_stop(struct ofi_mem_monitor *monitor)
 	memhooks_monitor->unsubscribe = NULL;
 }
 
+void ofi_memhooks_atfork_handler(void)
+{
+	if (symbols_intercepted)
+		ofi_restore_intercepts();
+}
+
 #else
 
 static int ofi_memhooks_start(struct ofi_mem_monitor *monitor)
@@ -738,6 +749,10 @@ static int ofi_memhooks_start(struct ofi_mem_monitor *monitor)
 }
 
 static void ofi_memhooks_stop(struct ofi_mem_monitor *monitor)
+{
+}
+
+void ofi_memhooks_atfork_handler(void)
 {
 }
 

@@ -166,6 +166,7 @@ Table: 1.2 A list of packet type IDs
 | 8               | `ATOMRSP`           | ATOMic ResSPonse          | non-REQ  | emulated write/fetch/compare atomic |
 | 9               | `HANDSHAKE`         | Handshake                 | non-REQ  | handshake                     |
 | 10              | `RECEIPT`           | Receipt                   | non-REQ  | delivery complete (DC)         |
+| 11              | `READ_NACK`         | Read Nack packet          | non-REQ  | Long read and runting read nack protocols         |
 | 64              | `EAGER_MSGRTM`      | Eager non-tagged Request To Message       | REQ  | eager message |
 | 65              | `EAGER_TAGRTM`      | Eager tagged Request To Message           | REQ  | eager message |
 | 66              | `MEDIUM_MSGRTM`     | Medium non-tagged Request To Message      | REQ  | medium message |
@@ -320,6 +321,7 @@ Table: 2.1 a list of extra features/requests
 | 3  | sender connection id in packet header  | extra request | libfabric 1.14.0 | Section 4.4 |
 | 4  | runting read message protocol    | extra feature | libfabric 1.16.0 | Section 4.5 |
 | 5  | RDMA-Write based data transfer   | extra feature | libfabric 1.18.0 | Section 4.6 |
+| 6  | Read nack packets                | extra feature | libfabric 1.20.0 | Section 4.7 |
 
 How does protocol v4 maintain backward compatibility when extra features/requests are introduced?
 
@@ -363,7 +365,7 @@ one of the following:
      for example)
 
 For example, if sender is using libfabric 1.10, and receiver is using libfabric 1.13.
-If receiver is in zero copy receive mode, it will have the the extra request
+If receiver is in zero copy receive mode, it will have the extra request
 "constant header length", but sender does not support it. In this case, it is OK
 for sender to ignore the request, and send packets with different header length.
 It is receiver's responsibility to react accordingly. (section 4.3)
@@ -374,16 +376,18 @@ The binary format of a HANDSHAKE packet is listed in table 2.2.
 
 Table: 2.2 binary format of the HANDSHAKE packet
 
-| Name      | Length (bytes) | Type | C language type |
-|---|---|---|---|
-| `type`    | 1 | integer | `uint8_t`  |
-| `version` | 1 | integer | `uint8_t`  |
-| `flags`   | 2 | integer | `uint16_t` |
-| `nextra_p3`  | 4 | integer | `uint32_t` |
-| `extra_info`  | `8 * (nextra_p3 - 3)` | integer array | `uint64_t[]` |
-| `connid`  | 4 | integer | sender connection ID, optional, present when the CONNID_HDR flag is on `flags` |
-| `padding` | 4 | integer | padding for `connid`, optional, present when the CONNID_HDR flag is on `flags` |
-| `host_id` | 8 | integer | sender host id, optional, present when the HANDSHAKE_HOST_ID_HDR flag is on `flags` (table 2.3) |
+| Field            | Length (bytes)        | Type          | C data type  | Flag (optional fields)         |
+| -----            | --------------        | ----          | -----------  | ----------------------         |
+| `type`           | 1                     | integer       | `uint8_t`    | _Required_                     |
+| `version`        | 1                     | integer       | `uint8_t`    | _Required_                     |
+| `flags`          | 2                     | integer       | `uint16_t`   | _Required_                     |
+| `nextra_p3`      | 4                     | integer       | `uint32_t`   | _Required_                     |
+| `extra_info`     | 8 * (`nextra_p3` - 3) | integer array | `uint64_t[]` | _Required_                     |
+| `connid`         | 4                     | integer       | `uint32_t`   | `CONNID_HDR`                   |
+| _padding_        | 4                     | _N/A_         | _N/A_        | `CONNID_HDR`                   |
+| `host_id`        | 8                     | integer       | `uint64_t`   | `HANDSHAKE_HOST_ID_HDR`        |
+| `device_version` | 4                     | integer       | `uint32_t`   | `HANDSHAKE_DEVICE_VERSION_HDR` |
+| _reserved_       | 4                     | _N/A_         | _N/A_        | `HANDSHAKE_DEVICE_VERSION_HDR` |
 
 The first 4 bytes (3 fields: `type`, `version`, `flags`) is the EFA RDM base header (section 1.3).
 
@@ -411,8 +415,8 @@ additional request information, thus introduced the concept of "extra request" a
 When protocol v4 was initially introduced, this field is named `maxproto`. The original plan was that protocol
 v4 can only have 64 extra features/requests. If the number of extra feature/request ever exceeds 64, the next
 feature/request will be defined as version 5 feature/request, (version 6 if the number exceeds 128, so on so
-forth). The field `maxproto` means maximumly supported protocol version by an endpoint. The recipient of the
-HANDSHAKE packet use `maxproto` to calculate how many members `extra_info` has, which is `maxproto - 4 + 1`.
+forth). The field `maxproto` means the maximally supported protocol version by an endpoint. The recipient of the
+HANDSHAKE packet uses `maxproto` to calculate how many members `extra_info` has, which is `maxproto - 4 + 1`.
 (Starting from v4, each version has 1 flag, so if `maxproto` is 5, there are 2 members in `extra_info`. One
 for v4, the other for v5. Therefore the formula to compute number of number of members is `maxproto - 4 + 1`)
 
@@ -422,23 +426,33 @@ the base header? Given that the sole purpose of the field `maxproto` is to provi
 how many members the `extra_info` array has, the protocol would be much easier to understand if we re-interpret
 the field `maxproto` as `nextra_p3` and allow protocol v4 to have more than 64 extra feature/requests.
 
-After `extra_info`, there are two optional field `connid` and `padding`:
+#### 2.1.1 Handshake subprotocol optional fields
 
-`connid` is the sender's connection ID (4 bytes), `padding` is a 4 byte space to make the packet to align
-to 8 bytes boundary.
+All fields following the `extra_info` array are optional; implementations are
+not required to include them. They are designated by toggling flags in the
+HANDSHAKE packet's header (table 2.3).
 
-These two fields were introduced with the extra request "connid in header". They are optional,
-therefore an implemenation is not required to set them. (section 4.4 for more details) If an implementation
-does set the connid, the implementation needs to toggle on the CONNID_HDR flag in `flags` (table 1.4).
+- `connid` is a universal field explained in detail in section 4.4.
+- `host_id` is an unsigned integer representing the host identifier of the sender.
+- `device_version` represents the version of the sender's EFA device.
 
-`connid` and `padding` fields are followed by an optional `host_id` (8 bytes) which is the sender's host id.
-If `connid` and `padding` are not present, `host_id` will follow `extra_info`.
+Table 2.3 Flags for optional HANDSHAKE packet fields
 
-Table: 2.3 A list of handshake packet flags
+| Flag                           | Value    | Hex      | Field            |
+| ----                           | -----    | ---      | -----            |
+| `CONNID_HDR`                   | $2^{15}$ | `0x8000` | `connid`         |
+| `HANDSHAKE_HOST_ID_HDR`        | $2^0$    | `0x0001` | `host_id`        |
+| `HANDSHAKE_DEVICE_VERSION_HDR` | $2^1$    | `0x0002` | `device_version` |
 
-| Bit Id | Value | Name | Meaning |
-|---|---|---|---|
-|  0     | 0x1    | `HANDSHAKE_HOST_ID_HDR` | This packet has the optional sender host id header |
+Refer to table 2.2 for field attributes, such as corresponding C data
+types and length in bytes (including padding).
+
+While each field following `extra_info` is optional, their order must be
+retained as defined by the binary packet format in table 2.2. If an optional
+field is missing (flag is unset), its space will _not_ be reserved in the
+HANDSHAKE packet header. For example, if a HANDSHAKE packet should contain only
+the `host_id`, it would directly follow `extra_info` (no empty space left for
+`connid`).
 
 ### 2.2 Handshake subprotocol and raw address exchange
 
@@ -545,7 +559,7 @@ Table: 3.1 A list of REQ packet flags
 |  5     | 0x20   | `REQ_ATOMIC`           | This REQ packet is used by an emulated atomic (write,fetch or compare) communication |
 | 15     | 0x8000 | `CONNID_HDR`           | This REQ packet has the optional connid header |
 
-Note, the CONNID_HDR flag is an universal flag (table 1.4), and is listed here for completeness.
+Note, the CONNID_HDR flag is a universal flag (table 1.4), and is listed here for completeness.
 
 **REQ optional headers** contain additional information needed by the receiver of the REQ packets.
 As mentioned earlier, the existence of optional header in a REQ packet is indicated by bits in the `flags`
@@ -557,8 +571,8 @@ Table: 3.2 Format of the REQ optional raw address header
 
 | Field | Type    | Length | C language type |
 |---|---|---|---|
-| `size`  | integer | 4      | `uint32` |
-| `addr`  | array   | `size` | `uint8[]` |
+| `size`  | integer | 4      | `uint32_t` |
+| `addr`  | array   | `size` | `uint8_t[]` |
 
 As can be seen, the optional raw address consists of two fields `size` and `addr`. The field `size` describes the
 number of bytes in the `addr` array. The field `addr` contains the raw address. The `size` field is necessary because
@@ -585,7 +599,7 @@ application data. For example, the RTR (Request To Read) packet type does not co
 ### 3.2 Baseline features for two-sided communication
 
 This section describes the 3 baseline features for two sided communication: eager message, medium message, and
-long-CTS message.` Each of them corresponds to the same named subprotocol. When describing a subprotocol, we
+long-CTS message. Each of them corresponds to the same named subprotocol. When describing a subprotocol, we
 always follow the same structure: workflow, packet format, and implementation tips.
 
 #### Eager message feature/subprotocol
@@ -645,7 +659,7 @@ on this topic.
 
    total_packet_size is reported by the EFA device when a packet is received.  The REQ optional header length can be derived
    from the `flags` field in the base header. The choice of not including data length in the header is to keep the header
-   length as compact as possible, since eager messagers are sensitive to header length.
+   length as compact as possible, since eager messages are sensitive to header length.
 
 #### Medium message feature/subprotocol
 
@@ -684,7 +698,7 @@ refers to the segment of data in the packet)
 `seg_offset` seems redundant at first glance, as it can be deduced from the
 `seg_length` of other packets. However, because the EFA device does not
 guarantee ordered delivery, the MEDIUM_RTM packets of same message can
-arrive in a different order. Therefore, the recipent of MEDIUM_RTM packets
+arrive in a different order. Therefore, the recipient of MEDIUM_RTM packets
 needs `seg_offset` to put the data in the correct location in the receive
 buffer.
 
@@ -692,7 +706,7 @@ When implementing the medium message protocol, please keep in mind
 that because the EFA device has a limited TX queue (e.g. it can only send
 a limited number of packets at a time), it is possible when sending multiple
 medium RTM packets for some packets to be sent successfully and others to
-not be sent due to temporarily being out of reseources. Implementation needs
+not be sent due to temporarily being out of resources. Implementation needs
 to be able to handle this case.
 
 Note, this "partial send" situation is unique to the medium message
@@ -732,6 +746,8 @@ LONGCTS_RTM, CTS and CTSDATA.
 
 A LONGCTS_RTM packet, like any REQ packet, consists of 3 parts:
 LONGCTS RTM mandatory header, REQ optional header, and application data.
+A LONGCTS_RTM packet sent as part of the read nack protcol (Section 4.7)
+does not contain any application data.
 
 The format of the LONGCTS_RTM mandatory header is listed in table 3.5:
 
@@ -745,8 +761,8 @@ Table: 3.5 Format of the LONGCTS_RTM packet's mandatory header
 | `msg_id`         | 4 | integer | `uint32_t` | message ID |
 | `msg_length`     | 8 | integer | `uint64_t` | total length of the whole message |
 | `send_id`        | 4 | integer | `uint32_t` | ID of the ongoing TX operation |
-| `credit_request` | 4 | integer | `uint64_t` | number of data packets preferred to send |
-| `tag`            | 8 | integer | `uint64_t` | for LONGCTS TAGRTM only |
+| `credit_request` | 4 | integer | `uint32_t` | number of data packets preferred to send |
+| `tag`            | 8 | integer | `uint64_t` | for `LONGCTS_TAGRTM` only |
 
 There are 3 fields that are new:
 
@@ -796,7 +812,7 @@ Table: 3.6 Format a CTS packet
 The 3 new fields in the header are `multiuse`, `recv_id` and `recv_length`.
 
 The field `multiuse` is a 4 byte integer. As the name indicates, it is a multi-purpose field.
-Its exact usage is determined by the the `flags` field.
+Its exact usage is determined by the `flags` field.
 
 If the CONNID_HDR universal flag is toggled in `flags`, this field is the sender's connection ID (connid).
 Otherwise, it is a padding space.
@@ -832,13 +848,13 @@ Table: 3.7 Format of the CTSDATA packet header
 | `version`        | 1 | integer | `uint8_t`  | part of base header|
 | `flags`          | 2 | integer | `uint16_t` | part of base header |
 | `recv_id`        | 4 | integer | `uint32_t` | `recv_id` from the CTS packet |
-| `seg_length`     | 8 | integer | `uint32_t` | length of the application data in the packet |
+| `seg_length`     | 8 | integer | `uint64_t` | length of the application data in the packet |
 | `seg_offset`     | 8 | integer | `uint64_t` | offset of the application data in the packet |
 | `connid`         | 4 | integer | `uint32_t` | sender connection id, optional |
 | `padding`        | 4 | integer | `uint32_t` | padding for connid, optional |
 
 The last two fields `connid` and `padding` was introduced with the extra request "connid header".
-They are optional, which means an implemenation is not required to include them in the DATA of the
+They are optional, which means an implementation is not required to include them in the DATA of the
 data packet. If an implementation does include them in the CTSDATA packet header, the implementation
 needs to toggle on the CONNID_DHR flag in the `flags` field (Table 1.4).
 
@@ -857,7 +873,7 @@ Before getting into the details of each feature, we will discuss some topics rel
 
 There are 3 types of one-sided operations: write, read, and atomic.
 
-Like in two-sided communcation, there are also two endpoints involved in one-sided communcation.
+Like in two-sided communication, there are also two endpoints involved in one-sided communication.
 However, only on one side will the application call libfabric's one-sided API (such as `fi_write`,
 `fi_read` and `fi_atomic`). In protocol v4, this side is called the requester.
 
@@ -989,14 +1005,14 @@ Table: 3.11 Format of the READRSP packet's header
 | `version`        | 1 | integer | `uint8_t`  | part of base header|
 | `flags`          | 2 | integer | `uint16_t` | part of base header |
 | `multiuse(padding/connid)`         | 4 | integer | `uint32_t` | `connid` if CONNID_HDR flag is set, otherwise `padding` |
-| `send_id`        | 4 | integer | `uint64_t` | ID of the send operation, to be included in the CTS header |
+| `send_id`        | 4 | integer | `uint32_t` | ID of the send operation, to be included in the CTS header |
 | `recv_id`        | 4 | integer | `uint32_t` | ID of the receive operation|
 | `recv_length`    | 8 | integer | `uint64_t` | length of the application data in the packet |
 
 The field `multiuse` has been introduced before when introducing the CTS packet (table 3.6).
 It is a multi-purpose field, which can be used to store `connid` or as a padding space, depending
 on whether the CONNID_HDR universal flag is toggled in `flags`. See section 4.4 for more
-information about the field `connid.
+information about the field `connid`.
 
 The workflow of the emulated long-CTS read subprotocol is illustrated in the following diagram:
 
@@ -1038,7 +1054,7 @@ The workflow of emulated write atomic is illustrated in the following diagram:
 ![atomic_write](atomic_write.png)
 
 It is similar to the emulated eager write subprotocol, except a WRITE_RTA packet was
-sent. Table 3.13 lists the binary structure of an WRITE_RTA packet's mandatory
+sent. Table 3.13 lists the binary structure of a WRITE_RTA packet's mandatory
 header:
 
 Table: 3.13 Format of the WRITE_RTA packet's mandatory header
@@ -1166,7 +1182,7 @@ Table: 4.1 Format of the LONGREAD_RTM packet's mandatory header
 | `version`        | 1 | integer | `uint8_t`  | part of base header|
 | `flags`          | 2 | integer | `uint16_t` | part of base header |
 | `msg_id`         | 4 | integer | `uint32_t` | message ID |
-| `msg_length`     | 4 | integer | `uint64_t` | total length of the message |
+| `msg_length`     | 8 | integer | `uint64_t` | total length of the message |
 | `send_id`        | 4 | integer | `uint32_t` | ID of the receive operation  |
 | `read_iov_count` | 4 | integer | `uint32_t` | number of iov to read |
 
@@ -1335,7 +1351,7 @@ buffer at a later time. However, if an application has the following set of requ
    1. Does not need ordered send/receive (`FI_ORDER_SAS`)
    2. Only sends/receives eager messages
    3. Does not use tagged send
-   4. Does not require FI_DIRECTED_RECV (the ability to receive only from certain addresses)
+   4. Does not require `FI_DIRECTED_RECV` (the ability to receive only from certain addresses)
 
 it should be possible to receive data directly using the application buffer since, under such conditions, the
 receiver does not have special requirements on the data it is going to receive, and it will thus accept any
@@ -1355,18 +1371,22 @@ to work, the receiver needs to:
 However, there is no guarantee in the base protocol that the packet header length of EAGER_MSGRTM will not
 change.
 
-In fact, because of the existance of the handshake subprotocol, the packet header length of an EAGER_MSGRTM
+In fact, because of the existence of the handshake subprotocol, the packet header length of an EAGER_MSGRTM
 will definitely change. Recall that the handshake subprotocol's workflow is:
 
-Before receiving handshake packet, an endpoint will always include the optional raw address header in REQ packets.
+1. Before receiving handshake packet, an endpoint will always include the
+   optional raw address header in REQ packets.
+2. After receiving handshake packet, an endpoint will stop including the
+   optional raw address header in REQ packets.
 
-After receiving handshake packet, an endpoint will stop including the optional raw address header in REQ packets.
+Furthermore, a REQ packet may also contain the optional CQ data header (section
+3.1) header (`REQ_OPT_CQ_DATA_HDR`) and is not mutually exclusive with other
+optional REQ header components.  Therefore, a compliant request of _constant
+header length_ should include space for the CQ data header.
 
-The extra feature "keep packet header length constant" (constant header length) is designed to solve this problem.
-
-When an endpoint toggles on this extra request, its peer will try to satisfy it by keeping the header length
-constant.  Exactly how to achieve that is up to the implementation to decide.  The easiest way to do so is to keep
-including the raw address header in the EAGER_MSGRTM even after receiving the handshake packet.
+The extra feature "keep packet header length constant" (constant header length)
+is designed to solve this problem. When an endpoint toggles on this extra
+request, its peer will try to satisfy it by keeping the header length constant.
 
 Note, because this is an extra request, an endpoint cannot assume its peer will comply with the request. Therefore,
 the receiving endpoint must be able to handle the situation that a received packet does not have the expected header
@@ -1378,7 +1398,7 @@ In that case, implementation will have two choices:
 2. Move the application data to the right place
 
 Note, this extra request was initially introduced as an extra feature named "zero copy receive", but later it was realized
-that this is not an feature because the peer does not do anything different.  Rather, it is an expectation that the
+that this is not a feature because the peer does not do anything different.  Rather, it is an expectation that the
 receiving endpoint has for the sender. Therefore, it was re-interpreted as an extra request named "constant header length".
 This re-interpretation does not change the implementation, and thus, it does not cause backward incompatibility.
 
@@ -1391,7 +1411,7 @@ This extra feature is designed to solve the "QP collision" problem, which is com
 client-server types of application.
 
 The "QP collision" problem arose from the fact that the EFA device uses the Device ID (GID) + QP number (QPN)
-as the unique identifier of a peer. Recall that the raw address of the EFA endpoint consistsd of 3 parts:
+as the unique identifier of a peer. Recall that the raw address of the EFA endpoint consists of 3 parts:
 GID + QPN + Connection ID (CONNID). The EFA device only recognizes GID and QPN.  The connection ID was generated
 by the endpoint itself during its initialization.
 
@@ -1455,7 +1475,7 @@ The binary format of a RUNTREAD_RTM packet's mandatory header is listed in table
 | `msg_length`     | 8 | integer | `uint64_t` | total length of the message |
 | `send_id`        | 4 | integer | `uint32_t` | ID of the receive operation  |
 | `read_iov_count` | 4 | integer | `uint32_t` | number of iov to read |
-| `seg_offset`     | 8 | integer | `uint32_t` | offset of the application data |
+| `seg_offset`     | 8 | integer | `uint64_t` | offset of the application data |
 | `runt_length`    | 8 | integer | `uint64_t` | length of the application data |
 | `tag`            | 8 | integer | `uint64_t` | tag for RUNTREAD_TAGRTM only |
 
@@ -1477,6 +1497,49 @@ by the NIC hardware, the responder must still keep the progress engine running
 in order to support CQ entry generation in case the sender uses
 `FI_REMOTE_CQ_DATA`.
 
+
+### 4.7 Long read and runting read nack protocol
+
+Long read and runting read protocols in Libfabric 1.20 and above use a nack protocol
+when the receiver is unable to register a memory region for the RDMA read operation.
+Failure to register the memory region is typically because of a hardware limitation.
+
+Table: 4.2 Format of the READ_NACK packet
+
+| Name | Length (bytes) | Type | C language type | Notes |
+|---|---|---|---|---|
+| `type`           | 1 | integer | `uint8_t`  | part of base header |
+| `version`        | 1 | integer | `uint8_t`  | part of base header|
+| `flags`          | 2 | integer | `uint16_t` | part of base header |
+| `send_id`        | 4 | integer | `uint32_t` | ID of the send operation |
+| `recv_id`        | 4 | integer | `uint32_t` | ID of the receive operation |
+| `multiuse(connid/padding)`  | 4 | integer | `uint32_t` | `connid` if CONNID_HDR is set, otherwise `padding` |
+
+The nack protocols work as follows
+* Sender has decided to use the long read or runting read protocol
+* The receiver receives the RTM packet(s)
+   - One LONGREAD_RTM packet in case of long read protocol
+   - Multiple RUNTREAD_RTM packets in case of runting read protocol
+* The receiver attempts to register a memory region for the RDMA operation but fails
+* After all RTM packets have been processed, the receiver sends a READ_NACK packet to the sender 
+* The sender then switches to the long CTS protocol and sends a LONGCTS_RTM packet
+* The receiver sends a CTS packet and the data transfer continues as in the long CTS protocol
+
+The LONGCTS_RTM packet sent in the nack protocol does not contain any application data.
+This difference is because the LONGCTS_RTM packet does not have a `seg_offset` field.
+While the LONGREAD_RTM packet does not contain any application data, the RUNTREAD_RTM
+packets do. So if the LONGCTS_RTM data were to contain application data, it must have a
+non-zero `seg_offset` to account for the data sent in the RUNTREAD_RTM packets. Instead
+of introducing a `seg_offset` field to LONGCTS_RTM packet, the nack protcol simply
+doesn't send any data in the LONGCTS_RTM packet.
+
+The workflow for long read protocol is shown below
+
+![long-read fallback](message_longread_fallback.png)
+
+The workflow for runting read protocol is shown below
+
+![long-read fallback](message_runtread_fallback.png)
 
 ## 5. What's not covered?
 

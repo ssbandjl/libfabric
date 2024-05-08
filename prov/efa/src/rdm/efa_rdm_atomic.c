@@ -1,35 +1,5 @@
-/*
- * Copyright (c) 2019-2020 Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include <ofi_iov.h>
 #include <ofi_atomic.h>
@@ -67,9 +37,10 @@ static void efa_rdm_atomic_init_shm_msg(struct efa_rdm_ep *ep, struct fi_msg_ato
 static
 struct efa_rdm_ope *
 efa_rdm_atomic_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
-			  const struct fi_msg_atomic *msg_atomic,
-			  const struct efa_rdm_atomic_ex *atomic_ex,
-			  uint32_t op, uint64_t flags)
+		      	 struct efa_rdm_peer *peer,
+			 const struct fi_msg_atomic *msg_atomic,
+			 const struct efa_rdm_atomic_ex *atomic_ex,
+			 uint32_t op, uint64_t flags)
 {
 	struct efa_rdm_ope *txe;
 	struct fi_msg msg;
@@ -96,7 +67,7 @@ efa_rdm_atomic_alloc_txe(struct efa_rdm_ep *efa_rdm_ep,
 	msg.iov_count = msg_atomic->iov_count;
 	msg.data = msg_atomic->data;
 	msg.desc = msg_atomic->desc;
-	efa_rdm_txe_construct(txe, efa_rdm_ep, &msg, op, flags);
+	efa_rdm_txe_construct(txe, efa_rdm_ep, peer, &msg, op, flags);
 
 	assert(msg_atomic->rma_iov_count > 0);
 	assert(msg_atomic->rma_iov);
@@ -149,10 +120,9 @@ ssize_t efa_rdm_atomic_generic_efa(struct efa_rdm_ep *efa_rdm_ep,
 		goto out;
 	}
 
-	txe = efa_rdm_atomic_alloc_txe(efa_rdm_ep, msg, atomic_ex, op, flags);
+	txe = efa_rdm_atomic_alloc_txe(efa_rdm_ep, peer, msg, atomic_ex, op, flags);
 	if (OFI_UNLIKELY(!txe)) {
 		err = -FI_EAGAIN;
-		efa_rdm_ep_progress_internal(efa_rdm_ep);
 		goto out;
 	}
 
@@ -173,7 +143,7 @@ ssize_t efa_rdm_atomic_generic_efa(struct efa_rdm_ep *efa_rdm_ep,
 		 * the information whether the peer
 		 * support it or not.
 		 */
-		err = efa_rdm_ep_trigger_handshake(efa_rdm_ep, txe->addr);
+		err = efa_rdm_ep_trigger_handshake(efa_rdm_ep, txe->peer);
 		if (OFI_UNLIKELY(err)) {
 			efa_rdm_txe_release(txe);
 			goto out;
@@ -205,7 +175,6 @@ ssize_t efa_rdm_atomic_generic_efa(struct efa_rdm_ep *efa_rdm_ep,
 	}
 
 	if (OFI_UNLIKELY(err)) {
-		efa_rdm_ep_progress_internal(efa_rdm_ep);
 		efa_rdm_txe_release(txe);
 		peer->next_msg_id--;
 	}
@@ -236,7 +205,7 @@ efa_rdm_atomic_inject(struct fid_ep *ep,
 		return err;
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, dest_addr);
 	assert(peer);
-	if (peer->is_local && efa_rdm_ep->use_shm_for_tx) {
+	if (peer->is_local && efa_rdm_ep->shm_ep) {
 		if (!(efa_rdm_ep_domain(efa_rdm_ep)->shm_info->domain_attr->mr_mode & FI_MR_VIRT_ADDR))
 			remote_addr = 0;
 
@@ -275,20 +244,24 @@ efa_rdm_atomic_writemsg(struct fid_ep *ep,
 	struct efa_rdm_ep *efa_rdm_ep;
 	struct efa_rdm_peer *peer;
 	struct fi_rma_ioc rma_iov[EFA_RDM_IOV_LIMIT];
-	void *shm_desc[EFA_RDM_IOV_LIMIT];
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	int err;
 
-	EFA_DBG(FI_LOG_EP_DATA,
-	       "%s: iov_len: %lu flags: %lx\n",
-	       __func__, ofi_total_ioc_cnt(msg->msg_iov, msg->iov_count), flags);
+	EFA_DBG(FI_LOG_EP_DATA, "iov_len: %lu flags: %lx\n",
+		ofi_total_ioc_cnt(msg->msg_iov, msg->iov_count), flags);
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
 	err = efa_rdm_ep_cap_check_atomic(efa_rdm_ep);
 	if (err)
 		return err;
+
+	err = efa_rdm_attempt_to_sync_memops_iov(efa_rdm_ep, (struct iovec *)msg->msg_iov, msg->desc, msg->iov_count);
+	if (err)
+		return err;
+
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, msg->addr);
 	assert(peer);
-	if (peer->is_local && efa_rdm_ep->use_shm_for_tx) {
+	if (peer->is_local && efa_rdm_ep->shm_ep) {
 		efa_rdm_atomic_init_shm_msg(efa_rdm_ep, &shm_msg, msg, rma_iov, shm_desc);
 		shm_msg.addr = peer->shm_fiaddr;
 		return fi_atomicmsg(efa_rdm_ep->shm_ep, &shm_msg, flags);
@@ -321,8 +294,8 @@ efa_rdm_atomic_writev(struct fid_ep *ep,
 	msg.context = context;
 	msg.data = 0;
 
-	EFA_DBG(FI_LOG_EP_DATA, "%s total_count=%ld atomic_op=%d\n", __func__,
-	       ofi_total_ioc_cnt(iov, count), msg.op);
+	EFA_DBG(FI_LOG_EP_DATA, "total_count=%ld atomic_op=%d\n",
+		ofi_total_ioc_cnt(iov, count), msg.op);
 
 	return efa_rdm_atomic_writemsg(ep, &msg, 0);
 }
@@ -352,7 +325,8 @@ efa_rdm_atomic_readwritemsg(struct fid_ep *ep,
 	struct efa_rdm_peer *peer;
 	struct fi_msg_atomic shm_msg;
 	struct fi_rma_ioc shm_rma_iov[EFA_RDM_IOV_LIMIT];
-	void *shm_desc[EFA_RDM_IOV_LIMIT];
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
+	void *shm_res_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	struct efa_rdm_atomic_ex atomic_ex;
 	size_t datatype_size;
 	int err;
@@ -362,20 +336,30 @@ efa_rdm_atomic_readwritemsg(struct fid_ep *ep,
 		return -errno;
 	}
 
-	EFA_DBG(FI_LOG_EP_DATA, "%s total_len=%ld atomic_op=%d\n", __func__,
-	       ofi_total_ioc_cnt(msg->msg_iov, msg->iov_count), msg->op);
+	EFA_DBG(FI_LOG_EP_DATA, "total_len=%ld atomic_op=%d\n",
+		ofi_total_ioc_cnt(msg->msg_iov, msg->iov_count), msg->op);
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
 	err = efa_rdm_ep_cap_check_atomic(efa_rdm_ep);
 	if (err)
 		return err;
+
+	err = efa_rdm_attempt_to_sync_memops_iov(efa_rdm_ep, (struct iovec *)msg->msg_iov, msg->desc, msg->iov_count);
+	if (err)
+		return err;
+
+	err = efa_rdm_attempt_to_sync_memops_ioc(efa_rdm_ep, (struct fi_ioc *)resultv, result_desc, result_count);
+	if (err)
+		return err;
+
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, msg->addr);
 	assert(peer);
-	if (peer->is_local & efa_rdm_ep->use_shm_for_tx) {
+	if (peer->is_local && efa_rdm_ep->shm_ep) {
 		efa_rdm_atomic_init_shm_msg(efa_rdm_ep, &shm_msg, msg, shm_rma_iov, shm_desc);
 		shm_msg.addr = peer->shm_fiaddr;
+		efa_rdm_get_desc_for_shm(result_count, result_desc, shm_res_desc);
 		return fi_fetch_atomicmsg(efa_rdm_ep->shm_ep, &shm_msg,
-					  resultv, result_desc, result_count,
+					  resultv, shm_res_desc, result_count,
 					  flags);
 	}
 
@@ -447,7 +431,9 @@ efa_rdm_atomic_compwritemsg(struct fid_ep *ep,
 	struct efa_rdm_peer *peer;
 	struct fi_msg_atomic shm_msg;
 	struct fi_rma_ioc shm_rma_iov[EFA_RDM_IOV_LIMIT];
-	void *shm_desc[EFA_RDM_IOV_LIMIT];
+	void *shm_desc[EFA_RDM_IOV_LIMIT] = {NULL};
+	void *shm_res_desc[EFA_RDM_IOV_LIMIT] = {NULL};
+	void *shm_comp_desc[EFA_RDM_IOV_LIMIT] = {NULL};
 	struct efa_rdm_atomic_ex atomic_ex;
 	size_t datatype_size;
 	int err;
@@ -457,22 +443,36 @@ efa_rdm_atomic_compwritemsg(struct fid_ep *ep,
 		return -errno;
 	}
 
-	EFA_DBG(FI_LOG_EP_DATA,
-	       "%s: iov_len: %lu flags: %lx\n",
-	       __func__, ofi_total_ioc_cnt(msg->msg_iov, msg->iov_count), flags);
+	EFA_DBG(FI_LOG_EP_DATA, "iov_len: %lu flags: %lx\n",
+		ofi_total_ioc_cnt(msg->msg_iov, msg->iov_count), flags);
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
 	err = efa_rdm_ep_cap_check_atomic(efa_rdm_ep);
 	if (err)
 		return err;
+
+	err = efa_rdm_attempt_to_sync_memops_iov(efa_rdm_ep, (struct iovec *)msg->msg_iov, msg->desc, msg->iov_count);
+	if (err)
+		return err;
+
+	err = efa_rdm_attempt_to_sync_memops_ioc(efa_rdm_ep, (struct fi_ioc *)comparev, compare_desc, compare_count);
+	if (err)
+		return err;
+
+	err = efa_rdm_attempt_to_sync_memops_ioc(efa_rdm_ep, (struct fi_ioc *)resultv, result_desc, result_count);
+	if (err)
+		return err;
+
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, msg->addr);
 	assert(peer);
-	if (peer->is_local && efa_rdm_ep->use_shm_for_tx) {
+	if (peer->is_local && efa_rdm_ep->shm_ep) {
 		efa_rdm_atomic_init_shm_msg(efa_rdm_ep, &shm_msg, msg, shm_rma_iov, shm_desc);
 		shm_msg.addr = peer->shm_fiaddr;
+		efa_rdm_get_desc_for_shm(result_count, result_desc, shm_res_desc);
+		efa_rdm_get_desc_for_shm(compare_count, compare_desc, shm_comp_desc);
 		return fi_compare_atomicmsg(efa_rdm_ep->shm_ep, &shm_msg,
-					    comparev, compare_desc, compare_count,
-					    resultv, result_desc, result_count,
+					    comparev, shm_comp_desc, compare_count,
+					    resultv, shm_res_desc, result_count,
 					    flags);
 	}
 

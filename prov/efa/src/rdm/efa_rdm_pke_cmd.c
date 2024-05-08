@@ -1,35 +1,5 @@
-/*
- * Copyright (c) 2019-2022 Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include "efa.h"
 #include "efa_av.h"
@@ -131,18 +101,24 @@ int efa_rdm_pke_fill_data(struct efa_rdm_pke *pkt_entry,
 		ret = efa_rdm_pke_init_medium_tagrtm(pkt_entry, ope, data_offset, data_size);
 		break;
 	case EFA_RDM_LONGCTS_MSGRTM_PKT:
-		assert(data_offset == 0 && data_size == -1);
+		/* The data_offset will be non-zero when the long CTS RTM packet
+		 * is sent to continue a runting read transfer after the
+		 * receiver has run out of memory registrations */
+		assert((data_offset == 0 || ope->internal_flags & EFA_RDM_OPE_READ_NACK) && data_size == -1);
 		ret = efa_rdm_pke_init_longcts_msgrtm(pkt_entry, ope);
 		break;
 	case EFA_RDM_LONGCTS_TAGRTM_PKT:
-		assert(data_offset == 0 && data_size == -1);
+		/* The data_offset will be non-zero when the long CTS RTM packet
+		 * is sent to continue a runting read transfer after the
+		 * receiver has run out of memory registrations */
+		assert((data_offset == 0 || ope->internal_flags & EFA_RDM_OPE_READ_NACK) && data_size == -1);
 		ret = efa_rdm_pke_init_longcts_tagrtm(pkt_entry, ope);
 		break;
-	case EFA_RDM_LONGREAD_RTA_MSGRTM_PKT:
+	case EFA_RDM_LONGREAD_MSGRTM_PKT:
 		assert(data_offset == -1 && data_size == -1);
 		ret = efa_rdm_pke_init_longread_msgrtm(pkt_entry, ope);
 		break;
-	case EFA_RDM_LONGREAD_RTA_TAGRTM_PKT:
+	case EFA_RDM_LONGREAD_TAGRTM_PKT:
 		assert(data_offset == -1 && data_size == -1);
 		ret = efa_rdm_pke_init_longread_tagrtm(pkt_entry, ope);
 		break;
@@ -162,7 +138,7 @@ int efa_rdm_pke_fill_data(struct efa_rdm_pke *pkt_entry,
 		assert(data_offset == 0 && data_size == -1);
 		ret = efa_rdm_pke_init_longcts_rtw(pkt_entry, ope);
 		break;
-	case EFA_RDM_LONGREAD_RTA_RTW_PKT:
+	case EFA_RDM_LONGREAD_RTW_PKT:
 		assert(data_offset == -1 && data_size == -1);
 		ret = efa_rdm_pke_init_longread_rtw(pkt_entry, ope);
 		break;
@@ -226,6 +202,10 @@ int efa_rdm_pke_fill_data(struct efa_rdm_pke *pkt_entry,
 		assert(data_offset >= 0 && data_size > 0);
 		ret = efa_rdm_pke_init_ctsdata(pkt_entry, ope, data_offset, data_size);
 		break;
+	case EFA_RDM_READ_NACK_PKT:
+		assert(data_offset == -1 && data_size == -1);
+		ret = efa_rdm_pke_init_read_nack(pkt_entry, ope);
+		break;
 	default:
 		assert(0 && "unknown pkt type to init");
 		ret = -FI_EINVAL;
@@ -282,8 +262,8 @@ void efa_rdm_pke_handle_sent(struct efa_rdm_pke *pkt_entry)
 	case EFA_RDM_DC_LONGCTS_TAGRTM_PKT:
 		efa_rdm_pke_handle_longcts_rtm_sent(pkt_entry);
 		break;
-	case EFA_RDM_LONGREAD_RTA_MSGRTM_PKT:
-	case EFA_RDM_LONGREAD_RTA_TAGRTM_PKT:
+	case EFA_RDM_LONGREAD_MSGRTM_PKT:
+	case EFA_RDM_LONGREAD_TAGRTM_PKT:
 		efa_rdm_pke_handle_longread_rtm_sent(pkt_entry);
 		break;
 	case EFA_RDM_RUNTREAD_MSGRTM_PKT:
@@ -297,7 +277,7 @@ void efa_rdm_pke_handle_sent(struct efa_rdm_pke *pkt_entry)
 	case EFA_RDM_DC_LONGCTS_RTW_PKT:
 		efa_rdm_pke_handle_longcts_rtw_sent(pkt_entry);
 		break;
-	case EFA_RDM_LONGREAD_RTA_RTW_PKT:
+	case EFA_RDM_LONGREAD_RTW_PKT:
 		/* nothing to do when LONGREAD RTW is sent */
 		break;
 	case EFA_RDM_SHORT_RTR_PKT:
@@ -317,6 +297,9 @@ void efa_rdm_pke_handle_sent(struct efa_rdm_pke *pkt_entry)
 		break;
 	case EFA_RDM_CTSDATA_PKT:
 		efa_rdm_pke_handle_ctsdata_sent(pkt_entry);
+		break;
+	case EFA_RDM_READ_NACK_PKT:
+		/* Nothing to do */
 		break;
 	default:
 		assert(0 && "Unknown packet type to handle sent");
@@ -391,20 +374,21 @@ void efa_rdm_pke_handle_data_copied(struct efa_rdm_pke *pkt_entry)
  *      For other types of error, an error EQ entry is written.
  *
  * @param[in]	pkt_entry	pkt entry
- * @param[in]	err		libfabric error code
  * @param[in]	prov_errno	provider specific error code
  */
-void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int err, int prov_errno)
+void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int prov_errno)
 {
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_ope *txe;
 	struct efa_rdm_ope *rxe;
 	struct efa_rdm_ep *ep;
 
+	int err = to_fi_errno(prov_errno);
+
 	assert(pkt_entry->alloc_type == EFA_RDM_PKE_FROM_EFA_TX_POOL);
 
 	EFA_DBG(FI_LOG_CQ, "Packet send error: %s (%d)\n",
-	        efa_strerror(prov_errno, NULL), prov_errno);
+	        efa_strerror(prov_errno), prov_errno);
 
 	ep = pkt_entry->ep;
 	efa_rdm_ep_record_tx_op_completed(ep, pkt_entry);
@@ -420,49 +404,51 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int err, int pro
 		return;
 	}
 
-	if (!pkt_entry->ope) {
-		/* only handshake packet is not associated with any TX/RX operation */
-		assert(efa_rdm_pke_get_base_hdr(pkt_entry)->type == EFA_RDM_HANDSHAKE_PKT);
-		efa_rdm_pke_release_tx(pkt_entry);
-		if (prov_errno == FI_EFA_REMOTE_ERROR_RNR) {
-			/*
-			 * handshake should always be queued for RNR
-			 */
-			assert(!(peer->flags & EFA_RDM_PEER_HANDSHAKE_QUEUED));
-			peer->flags |= EFA_RDM_PEER_HANDSHAKE_QUEUED;
-			dlist_insert_tail(&peer->handshake_queued_entry,
-					  &ep->handshake_queued_peer_list);
-		} else if (prov_errno != FI_EFA_REMOTE_ERROR_BAD_DEST_QPN) {
-			/* If prov_errno is FI_EFA_REMOTE_ERROR_BAD_DEST_QPN  the peer has
-			 * been destroyed. Which is normal, as peer does not always need a
-			 * handshake packet to perform its duty. (For example, if a peer
-			 * just want to sent 1 message to the ep, it does not need
-			 * handshake.) In this case, it is safe to ignore this error
-			 * completion. In all other cases, we write an eq entry because
-			 * there is no application operation associated with handshake.
-			 */
-			char ep_addr_str[OFI_ADDRSTRLEN], peer_addr_str[OFI_ADDRSTRLEN];
-			size_t buflen=0;
-
-			memset(&ep_addr_str, 0, sizeof(ep_addr_str));
-			memset(&peer_addr_str, 0, sizeof(peer_addr_str));
-			buflen = sizeof(ep_addr_str);
-			efa_rdm_ep_raw_addr_str(ep, ep_addr_str, &buflen);
-			buflen = sizeof(peer_addr_str);
-			efa_rdm_ep_get_peer_raw_addr_str(ep, pkt_entry->addr, peer_addr_str, &buflen);
-			EFA_WARN(FI_LOG_CQ,
-				"While sending a handshake packet, an error occurred."
-				"  Our address: %s, peer address: %s\n",
-				ep_addr_str, peer_addr_str);
-			efa_base_ep_write_eq_error(&ep->base_ep, err, prov_errno);
-		}
-		return;
-	}
-
 	switch (pkt_entry->ope->type) {
 	case EFA_RDM_TXE:
 		txe = pkt_entry->ope;
-		if (prov_errno == FI_EFA_REMOTE_ERROR_RNR) {
+		if (efa_rdm_pke_get_base_hdr(pkt_entry)->type == EFA_RDM_HANDSHAKE_PKT) {
+			if (prov_errno == EFA_IO_COMP_STATUS_REMOTE_ERROR_RNR) {
+				/*
+				 * handshake should always be queued for RNR
+				 */
+				assert(!(peer->flags & EFA_RDM_PEER_HANDSHAKE_QUEUED));
+				peer->flags |= EFA_RDM_PEER_HANDSHAKE_QUEUED;
+				dlist_insert_tail(&peer->handshake_queued_entry,
+						  &ep->handshake_queued_peer_list);
+			} else if (prov_errno != EFA_IO_COMP_STATUS_REMOTE_ERROR_BAD_DEST_QPN) {
+				/*
+				 * If prov_errno is EFA_IO_COMP_STATUS_REMOTE_ERROR_BAD_DEST_QPN
+				 * the peer has been destroyed. Which is normal, as peer does not
+				 * always need a handshake packet to perform its duty. (For example,
+				 * if a peer just want to sent 1 message to the ep, it does not need
+				 * handshake.) In this case, it is safe to ignore this error
+				 * completion. In all other cases, we write an eq entry because
+				 * there is no application operation associated with handshake.
+				 */
+				char ep_addr_str[OFI_ADDRSTRLEN], peer_addr_str[OFI_ADDRSTRLEN];
+				size_t buflen=0;
+
+				memset(&ep_addr_str, 0, sizeof(ep_addr_str));
+				memset(&peer_addr_str, 0, sizeof(peer_addr_str));
+				buflen = sizeof(ep_addr_str);
+				efa_rdm_ep_raw_addr_str(ep, ep_addr_str, &buflen);
+				buflen = sizeof(peer_addr_str);
+				efa_rdm_ep_get_peer_raw_addr_str(ep, pkt_entry->addr, peer_addr_str, &buflen);
+				EFA_WARN(FI_LOG_CQ,
+					"While sending a handshake packet, an error occurred."
+					"  Our address: %s, peer address: %s\n",
+					ep_addr_str, peer_addr_str);
+				efa_base_ep_write_eq_error(&ep->base_ep, err, prov_errno);
+			}
+
+			efa_rdm_pke_release_tx(pkt_entry);
+			efa_rdm_txe_release(txe);
+
+			break;
+		}
+
+		if (prov_errno == EFA_IO_COMP_STATUS_REMOTE_ERROR_RNR) {
 			if (ep->handle_resource_management == FI_RM_DISABLED) {
 				/*
 				 * Write an error to the application for RNR when resource
@@ -474,7 +460,7 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int err, int pro
 				 */
 				if (!(txe->internal_flags & EFA_RDM_TXE_WRITTEN_RNR_CQ_ERR_ENTRY)) {
 					txe->internal_flags |= EFA_RDM_TXE_WRITTEN_RNR_CQ_ERR_ENTRY;
-					efa_rdm_txe_handle_error(pkt_entry->ope, FI_ENORX, FI_EFA_REMOTE_ERROR_RNR);
+					efa_rdm_txe_handle_error(pkt_entry->ope, err, prov_errno);
 				}
 
 				efa_rdm_pke_release_tx(pkt_entry);
@@ -500,7 +486,7 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int err, int pro
 		break;
 	case EFA_RDM_RXE:
 		rxe = pkt_entry->ope;
-		if (prov_errno == FI_EFA_REMOTE_ERROR_RNR) {
+		if (prov_errno == EFA_IO_COMP_STATUS_REMOTE_ERROR_RNR) {
 			/*
 			 * This packet is associated with a recv operation, (such packets
 			 * include CTS and EOR) thus should always be queued for RNR. This
@@ -519,9 +505,7 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int err, int pro
 		}
 		break;
 	default:
-		EFA_WARN(FI_LOG_CQ,
-				"%s unknown x_entry type %d\n",
-				__func__, pkt_entry->ope->type);
+		EFA_WARN(FI_LOG_CQ, "Unknown x_entry type: %d\n", pkt_entry->ope->type);
 		assert(0 && "unknown x_entry state");
 		efa_base_ep_write_eq_error(&ep->base_ep, err, prov_errno);
 		efa_rdm_pke_release_tx(pkt_entry);
@@ -562,6 +546,7 @@ void efa_rdm_pke_handle_send_completion(struct efa_rdm_pke *pkt_entry)
 
 	switch (efa_rdm_pke_get_base_hdr(pkt_entry)->type) {
 	case EFA_RDM_HANDSHAKE_PKT:
+		efa_rdm_txe_release(pkt_entry->ope);
 		break;
 	case EFA_RDM_CTS_PKT:
 		break;
@@ -595,8 +580,8 @@ void efa_rdm_pke_handle_send_completion(struct efa_rdm_pke *pkt_entry)
 	case EFA_RDM_LONGCTS_TAGRTM_PKT:
 		efa_rdm_pke_handle_longcts_rtm_send_completion(pkt_entry);
 		break;
-	case EFA_RDM_LONGREAD_RTA_MSGRTM_PKT:
-	case EFA_RDM_LONGREAD_RTA_TAGRTM_PKT:
+	case EFA_RDM_LONGREAD_MSGRTM_PKT:
+	case EFA_RDM_LONGREAD_TAGRTM_PKT:
 		/* nothing to do */
 		break;
 	case EFA_RDM_RUNTREAD_MSGRTM_PKT:
@@ -609,7 +594,7 @@ void efa_rdm_pke_handle_send_completion(struct efa_rdm_pke *pkt_entry)
 	case EFA_RDM_LONGCTS_RTW_PKT:
 		efa_rdm_pke_handle_longcts_rtw_send_completion(pkt_entry);
 		break;
-	case EFA_RDM_LONGREAD_RTA_RTW_PKT:
+	case EFA_RDM_LONGREAD_RTW_PKT:
 		/* nothing to do when long rtw send completes*/
 		break;
 	case EFA_RDM_SHORT_RTR_PKT:
@@ -647,6 +632,8 @@ void efa_rdm_pke_handle_send_completion(struct efa_rdm_pke *pkt_entry)
 		 * before send completion, we cannot take
 		 * any action on txe here.
 		 */
+	case EFA_RDM_READ_NACK_PKT:
+		/* no action needed for NACK packet */
 		break;
 	default:
 		EFA_WARN(FI_LOG_CQ,
@@ -667,18 +654,28 @@ void efa_rdm_pke_handle_send_completion(struct efa_rdm_pke *pkt_entry)
  * This function will write error cq or eq entry, then release the packet entry.
  *
  * @param[in]	pkt_entry	pkt entry
- * @param[in]	err		libfabric error code
  * @param[in]	prov_errno	provider specific error code
  */
-void efa_rdm_pke_handle_rx_error(struct efa_rdm_pke *pkt_entry, int err, int prov_errno)
+void efa_rdm_pke_handle_rx_error(struct efa_rdm_pke *pkt_entry, int prov_errno)
 {
 	struct efa_rdm_ep *ep;
+	int err = to_fi_errno(prov_errno);
 
 	ep = pkt_entry->ep;
+	/*
+	 * we should still decrement the efa_rx_pkts_posted
+	 * when getting a failed rx completion.
+	 */
+	assert(ep->efa_rx_pkts_posted > 0);
+	ep->efa_rx_pkts_posted--;
 
 	EFA_DBG(FI_LOG_CQ, "Packet receive error: %s (%d)\n",
-	        efa_strerror(prov_errno, NULL), prov_errno);
+	        efa_strerror(prov_errno), prov_errno);
 
+	/*
+	 * pkes posted by efa_rdm_ep_bulk_post_internal_rx_pkts
+	 * are not associated with ope before being progressed
+	 */
 	if (!pkt_entry->ope) {
 		char ep_addr_str[OFI_ADDRSTRLEN];
 		size_t buflen=0;
@@ -700,9 +697,8 @@ void efa_rdm_pke_handle_rx_error(struct efa_rdm_pke *pkt_entry, int err, int pro
 	} else if (pkt_entry->ope->type == EFA_RDM_RXE) {
 		efa_rdm_rxe_handle_error(pkt_entry->ope, err, prov_errno);
 	} else {
-		EFA_WARN(FI_LOG_CQ,
-		"%s unknown x_entry type %d\n",
-			__func__, pkt_entry->ope->type);
+		EFA_WARN(FI_LOG_CQ, "unknown RDM operation entry type encountered: %d\n",
+			pkt_entry->ope->type);
 		assert(0 && "unknown x_entry state");
 		efa_base_ep_write_eq_error(&ep->base_ep, err, prov_errno);
 	}
@@ -739,10 +735,17 @@ fi_addr_t efa_rdm_pke_insert_addr(struct efa_rdm_pke *pkt_entry, void *raw_addr)
 
 	assert(base_hdr->type >= EFA_RDM_REQ_PKT_BEGIN);
 
+	/*
+	 * The message is from a peer through efa device, which means peer is not local
+	 * or shm is disabled for transmission.
+	 * We shouldn't insert shm av anyway in this case.
+	 * Also, calling fi_av_insert internally inside progress engine is violating
+	 * Libfabric standard for FI_AV_TABLE.
+	 */
 	ret = efa_av_insert_one(ep->base_ep.av, (struct efa_ep_addr *)raw_addr,
-	                        &rdm_addr, 0, NULL);
+	                        &rdm_addr, 0, NULL, false);
 	if (OFI_UNLIKELY(ret != 0)) {
-		efa_base_ep_write_eq_error(&ep->base_ep, FI_EINVAL, FI_EFA_ERR_AV_INSERT);
+		efa_base_ep_write_eq_error(&ep->base_ep, ret, FI_EFA_ERR_AV_INSERT);
 		return -1;
 	}
 
@@ -818,8 +821,8 @@ void efa_rdm_pke_proc_received(struct efa_rdm_pke *pkt_entry)
 	case EFA_RDM_LONGCTS_TAGRTM_PKT:
 	case EFA_RDM_DC_LONGCTS_MSGRTM_PKT:
 	case EFA_RDM_DC_LONGCTS_TAGRTM_PKT:
-	case EFA_RDM_LONGREAD_RTA_MSGRTM_PKT:
-	case EFA_RDM_LONGREAD_RTA_TAGRTM_PKT:
+	case EFA_RDM_LONGREAD_MSGRTM_PKT:
+	case EFA_RDM_LONGREAD_TAGRTM_PKT:
 	case EFA_RDM_RUNTREAD_MSGRTM_PKT:
 	case EFA_RDM_RUNTREAD_TAGRTM_PKT:
 	case EFA_RDM_WRITE_RTA_PKT:
@@ -835,7 +838,7 @@ void efa_rdm_pke_proc_received(struct efa_rdm_pke *pkt_entry)
 	case EFA_RDM_DC_LONGCTS_RTW_PKT:
 		efa_rdm_pke_handle_longcts_rtw_recv(pkt_entry);
 		return;
-	case EFA_RDM_LONGREAD_RTA_RTW_PKT:
+	case EFA_RDM_LONGREAD_RTW_PKT:
 		efa_rdm_pke_handle_longread_rtw_recv(pkt_entry);
 		return;
 	case EFA_RDM_SHORT_RTR_PKT:
@@ -844,6 +847,9 @@ void efa_rdm_pke_proc_received(struct efa_rdm_pke *pkt_entry)
 		return;
 	case EFA_RDM_DC_EAGER_RTW_PKT:
 		efa_rdm_pke_handle_dc_eager_rtw_recv(pkt_entry);
+		return;
+	case EFA_RDM_READ_NACK_PKT:
+		efa_rdm_pke_handle_read_nack_recv(pkt_entry);
 		return;
 	default:
 		EFA_WARN(FI_LOG_CQ,
@@ -904,7 +910,7 @@ void efa_rdm_pke_handle_recv_completion(struct efa_rdm_pke *pkt_entry)
 			"Peer %d is requesting feature %d, which this EP does not support.\n",
 			(int)pkt_entry->addr, base_hdr->type);
 
-		assert(0 && "invalid REQ packe type");
+		assert(0 && "invalid REQ packet type");
 		efa_base_ep_write_eq_error(&ep->base_ep, FI_EIO, FI_EFA_ERR_INVALID_PKT_TYPE);
 		efa_rdm_pke_release_rx(pkt_entry);
 		return;
@@ -931,7 +937,7 @@ void efa_rdm_pke_handle_recv_completion(struct efa_rdm_pke *pkt_entry)
 		dlist_remove(&pkt_entry->dbg_entry);
 		dlist_insert_tail(&pkt_entry->dbg_entry, &ep->rx_pkt_list);
 	}
-#ifdef ENABLE_efa_rdm_pke_DUMP
+#ifdef ENABLE_EFA_RDM_PKE_DUMP
 	efa_rdm_pke_print(pkt_entry, "Received");
 #endif
 #endif
@@ -970,7 +976,7 @@ void efa_rdm_pke_handle_recv_completion(struct efa_rdm_pke *pkt_entry)
  *  Functions used to dump packets
  */
 
-#define efa_rdm_pke_DUMP_DATA_LEN 64
+#define EFA_RDM_PKE_DUMP_DATA_LEN 64
 
 static
 void efa_rdm_pke_print_handshake(char *prefix,
@@ -1002,8 +1008,8 @@ static
 void efa_rdm_pke_print_data(char *prefix, struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_rdm_ctsdata_hdr *data_hdr;
-	char str[efa_rdm_pke_DUMP_DATA_LEN * 4];
-	size_t str_len = efa_rdm_pke_DUMP_DATA_LEN * 4, l, hdr_size;
+	char str[EFA_RDM_PKE_DUMP_DATA_LEN * 4];
+	size_t str_len = EFA_RDM_PKE_DUMP_DATA_LEN * 4, l, hdr_size;
 	uint8_t *data;
 	int i;
 
@@ -1031,7 +1037,7 @@ void efa_rdm_pke_print_data(char *prefix, struct efa_rdm_pke *pkt_entry)
 	data = (uint8_t *)pkt_entry->wiredata + hdr_size;
 
 	l = snprintf(str, str_len, ("\tdata:    "));
-	for (i = 0; i < MIN(data_hdr->seg_length, efa_rdm_pke_DUMP_DATA_LEN);
+	for (i = 0; i < MIN(data_hdr->seg_length, EFA_RDM_PKE_DUMP_DATA_LEN);
 	     i++)
 		l += snprintf(str + l, str_len - l, "%02x ",
 			      data[i]);

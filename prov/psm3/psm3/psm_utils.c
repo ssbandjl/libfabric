@@ -2550,10 +2550,12 @@ unsigned psmi_parse_gpudirect_rdma_send_limit(int force)
 
 	/* Default send threshold for Gpu-direct set to UINT_MAX
  	 * (always use GPUDIRECT) */
-	psm3_getenv("PSM3_GPUDIRECT_RDMA_SEND_LIMIT",
-		    "GPUDirect RDMA feature on send side will be switched off for messages larger than limit.",
+	psm3_getenv_range("PSM3_GPUDIRECT_RDMA_SEND_LIMIT",
+		    "GPUDirect RDMA feature on send side will be switched off for messages larger than limit.", NULL,
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
-		    (union psmi_envvar_val)UINT_MAX, &envval);
+		    (union psmi_envvar_val)UINT_MAX,
+		    (union psmi_envvar_val)0, (union psmi_envvar_val)UINT_MAX, 
+		    NULL, NULL, &envval);
 
 	saved = envval.e_uint;
 done:
@@ -2580,10 +2582,16 @@ unsigned psmi_parse_gpudirect_rdma_recv_limit(int force)
 
 	/* Default receive threshold for Gpu-direct set to UINT_MAX
  	 * (always use GPUDIRECT) */
-	psm3_getenv("PSM3_GPUDIRECT_RDMA_RECV_LIMIT",
-		    "GPUDirect RDMA feature on receive side will be switched off for messages larger than limit.",
+	psm3_getenv_range("PSM3_GPUDIRECT_RDMA_RECV_LIMIT",
+		    "GPUDirect RDMA feature on receive side will be switched off for messages larger than limit.", NULL,
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
-		    (union psmi_envvar_val)UINT_MAX, &envval);
+#ifdef PSM_CUDA
+		    (union psmi_envvar_val)UINT_MAX,
+#elif defined(PSM_ONEAPI)
+		    (union psmi_envvar_val)1,
+#endif
+		    (union psmi_envvar_val)0, (union psmi_envvar_val)UINT_MAX, 
+		    NULL, NULL, &envval);
 
 	saved = envval.e_uint;
 done:
@@ -2607,10 +2615,11 @@ unsigned psmi_parse_gpudirect_rv_gpu_cache_size(int reload)
 
 	// RV defaults are sufficient for default PSM parameters
 	// but for HALs with RDMA, if user adjusts ep->hfi_num_send_rdma or
-	// mq->hfi_base_window_rv they also need to increase the cache size.
+	// mq->ips_gpu_window_rv they also need to increase the cache size.
 	// psm3_verbs_alloc_mr_cache will verify cache size is sufficient.
 	// min size is (HFI_TF_NFLOWS + ep->hfi_num_send_rdma) *
-	// chunk size (mq->hfi_base_window_rv after psmi_mq_initialize_params)
+	// chunk size (psm3_mq_max_window_rv(mq, 1) after
+	// psmi_mq_initialize_params)
 	if (PSMI_IS_GPU_ENABLED && psmi_parse_gpudirect() ) {
 		psm3_getenv("PSM3_RV_GPU_CACHE_SIZE",
 				"kernel space GPU cache size"
@@ -2661,23 +2670,28 @@ int psm3_parse_identify(void)
 {
 	union psmi_envvar_val myenv;
 	static int have_value;
-	static unsigned saved_identify;
+	static int saved_identify;
 
 	// only parse once so doesn't appear in PSM3_VERBOSE_ENV multiple times
 	if (have_value)
 		return saved_identify;
 
-	psm3_getenv("PSM3_IDENTIFY", "Identify PSM version being run "
-				"(0 - disable, 1 - enable, 1: - limit output to rank 0, "
-				"1:pattern - limit output "
-				"to processes whose label matches "
+	psm3_getenv_range("PSM3_IDENTIFY", "Identify PSM version being run",
+				"  0 - disable\n"
+				"  1 - enable\n"
+				"  1: - limit output to rank 0\n"
+				"  1:pattern - limit output to processes whose label matches\n    "
 #ifdef FNM_EXTMATCH
 				"extended "
 #endif
 				"glob pattern)",
-				PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR_VAL_PAT,
-				(union psmi_envvar_val)"0", &myenv);
-	(void)psm3_parse_val_pattern(myenv.e_str, 0, &saved_identify);
+				PSMI_ENVVAR_LEVEL_USER|PSMI_ENVVAR_FLAG_NOABBREV,
+				PSMI_ENVVAR_TYPE_STR_VAL_PAT_INT,
+				(union psmi_envvar_val)"0",
+				(union psmi_envvar_val)0, (union psmi_envvar_val)1,
+				NULL, NULL, &myenv);
+	(void)psm3_parse_val_pattern_int(myenv.e_str, 0, &saved_identify,
+			PSMI_ENVVAR_FLAG_NOABBREV, 0, 1);
 	have_value = 1;
 
 	return saved_identify;
@@ -2799,9 +2813,33 @@ void psm3_print_rank_identify(void)
 	Dl_info info_psm;
 	char ofed_delta[100] = "";
 	static int identify_shown = 0;
+	char accel_vers[1024] = "";
 
 	if (identify_shown)
 		return;
+
+#ifdef PSM_CUDA
+	char cudart_ver[64] = "unknown";
+	if (cuda_runtime_ver)
+		snprintf(cudart_ver, sizeof(cudart_ver), "%d.%d",
+			cuda_runtime_ver / 1000, (cuda_runtime_ver % 1000) / 10);
+	snprintf(accel_vers, sizeof(accel_vers), "%s %s CUDA Runtime %s built against interface %d.%d\n",
+		psm3_get_mylabel(), psm3_ident_tag,
+		cudart_ver, CUDA_VERSION / 1000, (CUDA_VERSION % 1000) / 10);
+#elif defined(PSM_ONEAPI)
+	char ze_api_ver[64] = "unknown";
+	char ze_loader_ver[64] = "unknown";
+	if (zel_api_version)
+		snprintf(ze_api_ver, sizeof(ze_api_ver), "%d.%d",
+			ZE_MAJOR_VERSION(zel_api_version), ZE_MINOR_VERSION(zel_api_version));
+	if (zel_lib_version.major || zel_lib_version.minor || zel_lib_version.patch)
+		snprintf(ze_loader_ver, sizeof(ze_loader_ver), "v%d.%d.%d",
+			zel_lib_version.major, zel_lib_version.minor, zel_lib_version.patch);
+	snprintf(accel_vers, sizeof(accel_vers), "%s %s Level-Zero Runtime %s (%s) built against interface %d.%d\n",
+		psm3_get_mylabel(), psm3_ident_tag,
+		ze_api_ver, ze_loader_ver,
+		ZE_MAJOR_VERSION(ZE_API_VERSION_CURRENT), ZE_MINOR_VERSION(ZE_API_VERSION_CURRENT));
+#endif
 
 	identify_shown = 1;
 	strcat(strcat(ofed_delta," built for IEFS OFA DELTA "),psm3_IEFS_version);
@@ -2811,6 +2849,7 @@ void psm3_print_rank_identify(void)
 		"%s %s src checksum %s\n"
 		"%s %s git checksum %s\n"
 		"%s %s %s\n"
+		"%s"
 		"%s %s Global Rank %d (%d total) Local Rank %d (%d total)\n"
 		"%s %s CPU Core %d NUMA %d PID %d\n",
 		psm3_get_mylabel(), psm3_ident_tag,
@@ -2832,6 +2871,7 @@ void psm3_print_rank_identify(void)
 			(strcmp(psm3_git_checksum,"") != 0) ?
 				psm3_git_checksum : "<not available>",
 		psm3_get_mylabel(), psm3_ident_tag, psmi_hal_identify(),
+		accel_vers,
 		psm3_get_mylabel(), psm3_ident_tag,
 			psm3_get_myrank(), psm3_get_myrank_count(),
 			psm3_get_mylocalrank(),
@@ -2861,11 +2901,12 @@ void psm3_print_ep_identify(psm2_ep_t ep)
 
 	(void)psmi_hal_get_port_speed(ep->unit_id, ep->portnum, &link_speed);
 	psmi_hal_get_node_id(ep->unit_id, &node_id);
-	psm3_print_identify("%s %s NIC %u (%s) Port %u %"PRIu64" Mbps NUMA %d %s%s\n",
+	psm3_print_identify("%s %s NIC %u (%s) Port %u %"PRIu64" Mbps NUMA %d %s%s%s\n",
 		psm3_get_mylabel(), psm3_ident_tag,
 		ep->unit_id,  ep->dev_name,
 		ep->portnum, link_speed/(1000*1000),
 		node_id, psm3_epid_fmt_addr(ep->epid, 0),
+		ep->addl_nic_info?ep->addl_nic_info:"",
 		(! psm3_ep_device_is_enabled(ep, PTL_DEVID_AMSH)
 		 && (((struct ptl_ips *)(ep->ptl_ips.ptl))->proto.flags
 		 	& IPS_PROTO_FLAG_LOOPBACK))?" loopback":"");
@@ -2981,7 +3022,7 @@ void psm3_parse_multi_ep()
 
 #ifdef PSM_FI
 
-unsigned psm3_faultinj_enabled = 0;
+int psm3_faultinj_enabled = 0;
 int psm3_faultinj_verbose = 0;
 char *psm3_faultinj_outfile = NULL;
 int psm3_faultinj_sec_rail = 0;
@@ -2995,21 +3036,25 @@ void psm3_parse_faultinj()
 {
 	union psmi_envvar_val env_fi;
 
-	psm3_getenv("PSM3_FI", "PSM Fault Injection "
-				"(0 - disable, 1 - enable, "
-				"2 - enable but default each injector to 0 rate "
-				"#: - limit to rank 0, "
-				"#:pattern - limit "
-				"to processes whose label matches "
+	psm3_getenv_range("PSM3_FI", "PSM Fault Injection",
+				"  0 - disable\n"
+				"  1 - enable\n"
+				"  2 - enable but default each injector to 0 rate\n"
+				"  #: - limit to rank 0\n"
+				"  #:pattern - limit to processes whose label matches\n    "
 #ifdef FNM_EXTMATCH
 				"extended "
 #endif
-				"glob pattern) "
-				"mode 2 can be useful to generate full stats help "
-				"when PSM3_PRINT_STATS_HELP enabled",
-		    PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_STR_VAL_PAT,
-		    (union psmi_envvar_val)"0", &env_fi);
-	(void)psm3_parse_val_pattern(env_fi.e_str, 0, &psm3_faultinj_enabled);
+				"glob pattern\n"
+				"mode 2 can be useful to generate help for all injectors\n"
+				"when PSM3_PRINT_STATS_HELP=1 or PSM3_VERBOSE_ENV=3:",
+		    PSMI_ENVVAR_LEVEL_HIDDEN|PSMI_ENVVAR_FLAG_NOABBREV,
+		    PSMI_ENVVAR_TYPE_STR_VAL_PAT_INT,
+		    (union psmi_envvar_val)"0",
+		    (union psmi_envvar_val)0, (union psmi_envvar_val)2,
+		    NULL, NULL, &env_fi);
+	(void)psm3_parse_val_pattern_int(env_fi.e_str, 0,
+		 &psm3_faultinj_enabled, PSMI_ENVVAR_FLAG_NOABBREV, 0, 2);
 
 	if (psm3_faultinj_enabled) {
 		char *def = NULL;
@@ -3113,6 +3158,52 @@ void psm3_faultinj_fini()
 	return;
 }
 
+/* parse fault injection controls
+ * format is num:denom:initial_seed
+ * denom must be >= num and > 0
+ * Either field can be omitted in which case default (input fvals) is used
+ * for given field.
+ * 0 - successfully parsed, fvals updated
+ * -1 - str empty, fvals unchanged
+ * -2 - syntax error, fvals may have been changed
+ */
+static int parse_faultinj_control(const char *str,
+                size_t errstr_size, char errstr[],
+                int fvals[3])
+{
+	psmi_assert(fvals);
+	int ret = psm3_parse_str_tuples(str, 3, fvals);
+	if (ret < 0)
+		return ret;
+	if (! fvals[1]) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " denom must be non-zero");
+		return -2;
+	}
+	if (fvals[0] < 0 || fvals[1] < 0) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " Negative values for num and denom not allowed");
+		return -2;
+	}
+	if (fvals[0] > fvals[1]) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " num (%d) must be <= denom (%d)", fvals[0], fvals[1]);
+		return -2;
+	}
+	return 0;
+}
+
+static int parse_check_faultinj_control(int type,
+				const union psmi_envvar_val val, void *ptr,
+				size_t errstr_size, char errstr[])
+{
+	// parser will set fvals to result, use a copy to protect input of defaults
+	int fvals[3] = { ((int*)ptr)[0], ((int*)ptr)[1], ((int*)ptr)[2] };
+	psmi_assert(type == PSMI_ENVVAR_TYPE_STR_TUPLES);
+	return parse_faultinj_control(val.e_str, errstr_size, errstr, fvals);
+}
+
+
 /*
  * Intended to be used only once, not in the critical path
  */
@@ -3134,14 +3225,8 @@ struct psm3_faultinj_spec *psm3_faultinj_getspec(const char *spec_name,
 	fi = psmi_malloc(PSMI_EP_NONE, UNDEFINED,
 			 sizeof(struct psm3_faultinj_spec));
 	psmi_assert_always(fi != NULL);
-	/* Workaround for gcc11 bug where copying const char* into an unintialized
-	 * buffer, within a struct, can cause a false -Warray-bounds issue.
-	 */
-	fi->spec_name[0] = '\0';
-	strncpy(fi->spec_name, spec_name, PSM3_FAULTINJ_SPEC_NAMELEN - 1);
-	fi->spec_name[PSM3_FAULTINJ_SPEC_NAMELEN - 1] = '\0';
-	strncpy(fi->help, help, PSM3_FAULTINJ_HELPLEN - 1);
-	fi->help[PSM3_FAULTINJ_HELPLEN - 1] = '\0';
+	snprintf(fi->spec_name, sizeof(fi->spec_name), "%s", spec_name);
+	snprintf(fi->help, sizeof(fi->help), "%s", help);
 	fi->num = num;
 	fi->denom = denom;
 	fi->initial_seed = (int)getpid();
@@ -3162,27 +3247,34 @@ struct psm3_faultinj_spec *psm3_faultinj_getspec(const char *spec_name,
 	 * error condition.
 	 */
 	{
-		int fvals[3] = { num, denom, (int)getpid() };
+		int fvals[3] = { fi->num, fi->denom, fi->initial_seed };
 		union psmi_envvar_val env_fi;
 		char fvals_str[128];
 		char fname[128];
 		char fdesc[300];
+		int ret;
 
 		snprintf(fvals_str, sizeof(fvals_str), "%d:%d:%d",
 				fi->num, fi->denom, fi->initial_seed);
 		snprintf(fname, sizeof(fname), "PSM3_FI_%s", spec_name);
-		snprintf(fdesc, sizeof(fdesc), "Fault Injection - %s <%s>",
-			 help, fvals_str);
+		snprintf(fdesc, sizeof(fdesc), "Fault Injection - %s", help);
 
-		if (!psm3_getenv(fname, fdesc, PSMI_ENVVAR_LEVEL_HIDDEN,
-				 PSMI_ENVVAR_TYPE_STR_TUPLES,
-				 (union psmi_envvar_val)fvals_str, &env_fi)) {
+		ret = psm3_getenv_range(fname, fdesc,
+				"Specified as num:denom:seed, where num/denom is approx probability\nand seed seeds the random number generator",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_STR_TUPLES,
+				(union psmi_envvar_val)fvals_str,
+				(union psmi_envvar_val)NULL, (union psmi_envvar_val)NULL,
+				parse_check_faultinj_control, fvals, &env_fi);
+		if (ret == 0) {
 			/* not using default values */
-			(void)psm3_parse_str_tuples(env_fi.e_str, 3, fvals);
+			if (parse_faultinj_control(env_fi.e_str, 0, NULL, fvals) < 0) {
+				// already checked, shouldn't get parse errors nor empty strings
+				psmi_assert(0);
+			}
 			fi->num = fvals[0];
 			fi->denom = fvals[1];
 			fi->initial_seed = fvals[2];
-		} else if (psm3_faultinj_enabled == 2) {
+		} else if (ret == 1 && psm3_faultinj_enabled == 2) {
 			// default unspecified injectors to off
 			fi->num = 0;
 		}
@@ -4745,6 +4837,7 @@ void psmi_log_message(const char *fileName,
 		psm2_epid_t         toepid      = psm3_epid_zeroed_internal();
 		void            *dumpAddr[2] = {0};
 		size_t           dumpSize[2] = {0};
+		char             lnend       = '\n';
 
 #ifdef PSM_LOG_FAST_IO
 #define IO_PORT         0
@@ -4908,13 +5001,15 @@ void psmi_log_message(const char *fileName,
 		{
 			MY_FPRINTF(IO_PORT,"PKT_STRM: %s: imh: %p ", TxRxString(txrx),
 				   dumpAddr[0]);
+			/* Change the line-end to concatenate the packet data lines */
+			lnend = '#';
 			goto dumpit;
 		}
 		else if (format == PSM2_LOG_DUMP_MAGIC)
 		{
 		dumpit:
 			MY_VFPRINTF(IO_PORT,newFormat,ap);
-			MY_FPUTC('\n',IO_PORT);
+			MY_FPUTC(lnend, IO_PORT);
 		dumpmore:
 			M1();
 
@@ -4924,7 +5019,7 @@ void psmi_log_message(const char *fileName,
 			{
 				if ((i != 0) && ((i % 8) == 0))
 				{
-					MY_FPRINTF(IO_PORT," (%d)\n",(int)(i-8));
+					MY_FPRINTF(IO_PORT," (%d)%c",(int)(i-8), lnend);
 					M1();
 					cnt = 0;
 				}
@@ -4933,8 +5028,12 @@ void psmi_log_message(const char *fileName,
 				MY_FPRINTF(IO_PORT,"0x%02x", pu8[i]);
 				cnt++;
 			}
-			if (cnt)
-				MY_FPRINTF(IO_PORT," (%d)\n",(int)(i-8));
+			if (cnt) {
+				if (dumpSize[1])
+					MY_FPRINTF(IO_PORT," (%d)%c",(int)(i-8), lnend);
+				else
+					MY_FPRINTF(IO_PORT," (%d)\n",(int)(i-8));
+			}
 			if (dumpSize[1])
 			{
 				dumpSize[0] = dumpSize[1];

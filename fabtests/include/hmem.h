@@ -127,6 +127,7 @@ int init_libze_ops(void);
 int ft_ze_init(void);
 int ft_ze_cleanup(void);
 int ft_ze_alloc(uint64_t device, void **buf, size_t size);
+int ft_ze_alloc_host(void **buf, size_t size);
 int ft_ze_free(void *buf);
 int ft_ze_memset(uint64_t device, void *buf, int value, size_t size);
 int ft_ze_copy(uint64_t device, void *dst, const void *src, size_t size);
@@ -181,6 +182,8 @@ int ft_cuda_copy_to_hmem(uint64_t device, void *dst, const void *src,
 			 size_t size);
 int ft_cuda_copy_from_hmem(uint64_t device, void *dst, const void *src,
 			   size_t size);
+int ft_cuda_get_dmabuf_fd(void *buf, size_t len,
+			  int *fd, uint64_t *offset);
 int ft_rocr_init(void);
 int ft_rocr_cleanup(void);
 int ft_rocr_alloc(uint64_t device, void **buf, size_t size);
@@ -209,5 +212,10 @@ int ft_hmem_copy_to(enum fi_hmem_iface iface, uint64_t device, void *dst,
 		    const void *src, size_t size);
 int ft_hmem_copy_from(enum fi_hmem_iface iface, uint64_t device, void *dst,
 		      const void *src, size_t size);
+int ft_hmem_get_dmabuf_fd(enum fi_hmem_iface iface,
+			  void *buf, size_t len,
+			  int *fd, uint64_t *offset);
+int ft_hmem_no_get_dmabuf_fd(void *buf, size_t len,
+			     int *fd, uint64_t *offset);
 
 #endif /* _HMEM_H_ */

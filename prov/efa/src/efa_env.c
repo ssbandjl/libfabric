@@ -1,35 +1,5 @@
-/*
- * Copyright (c) 2019 Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #include <rdma/fi_errno.h>
 
@@ -43,10 +13,8 @@ struct efa_env efa_env = {
 	.tx_queue_size = 0,
 	.enable_shm_transfer = 1,
 	.use_zcpy_rx = 1,
-	.set_cuda_sync_memops = 1,
 	.zcpy_rx_seed = 0,
 	.shm_av_size = 256,
-	.shm_max_medium_size = 4096,
 	.recvwin_size = EFA_RDM_PEER_DEFAULT_REORDER_BUFFER_SIZE,
 	.ooo_pool_chunk_size = 64,
 	.unexp_pool_chunk_size = 1024,
@@ -105,15 +73,24 @@ void efa_env_param_get(void)
 	 * Therefore, its cap must be < INT_MAX/2 too.
 	 */
 	size_t max_rnr_backoff_wait_time_cap = INT_MAX/2 - 1;
+	char *abort_deprecated_env_vars[] = {"FI_EFA_MTU_SIZE", "FI_EFA_TX_IOV_LIMIT", "FI_EFA_RX_IOV_LIMIT"};
+	char *info_deprecated_env_vars[] = {"FI_EFA_SET_CUDA_SYNC_MEMOPS", "FI_EFA_SHM_MAX_MEDIUM_SIZE"};
+	int i;
 
-    char *deprecated_env_vars[] = {"FI_EFA_SHM_MAX_MEDIUM_SIZE", "FI_EFA_MTU_SIZE", "FI_EFA_TX_IOV_LIMIT", "FI_EFA_RX_IOV_LIMIT"};
-    for (int i = 0; i < sizeof(deprecated_env_vars) / sizeof(deprecated_env_vars[0]); i++) {
-	    if (getenv(deprecated_env_vars[i])) {
-	        fprintf(stderr,
-                "%s env variable detected! The use of this variable has been deprecated and as such execution cannot proceed.\n", deprecated_env_vars[i]);
-	        abort();
-	    };
-    }
+	for (i = 0; i < sizeof(abort_deprecated_env_vars) / sizeof(abort_deprecated_env_vars[0]); i++) {
+		if (getenv(abort_deprecated_env_vars[i])) {
+			fprintf(stderr, "%s env variable detected! The use of this variable has been deprecated "
+					"and as such execution cannot proceed.\n", abort_deprecated_env_vars[i]);
+			abort();
+		};
+	}
+
+	for (i = 0; i < sizeof(info_deprecated_env_vars) / sizeof(info_deprecated_env_vars[0]); i++) {
+		if (getenv(info_deprecated_env_vars[i])) {
+			EFA_INFO(FI_LOG_CORE, "%s env variable detected! The use of this variable "
+				 "has been deprecated\n", info_deprecated_env_vars[i]);
+		};
+	}
 
 	fi_param_get_int(&efa_prov, "tx_min_credits", &efa_env.tx_min_credits);
 	if (efa_env.tx_min_credits <= 0) {
@@ -129,7 +106,6 @@ void efa_env_param_get(void)
 	fi_param_get_int(&efa_prov, "tx_queue_size", &efa_env.tx_queue_size);
 	fi_param_get_int(&efa_prov, "enable_shm_transfer", &efa_env.enable_shm_transfer);
 	fi_param_get_int(&efa_prov, "use_zcpy_rx", &efa_env.use_zcpy_rx);
-	fi_param_get_int(&efa_prov, "set_cuda_sync_memops", &efa_env.set_cuda_sync_memops);
 	fi_param_get_int(&efa_prov, "zcpy_rx_seed", &efa_env.zcpy_rx_seed);
 	fi_param_get_int(&efa_prov, "shm_av_size", &efa_env.shm_av_size);
 	fi_param_get_int(&efa_prov, "recvwin_size", &efa_env.recvwin_size);
@@ -182,11 +158,9 @@ void efa_env_define()
 	fi_param_define(&efa_prov, "tx_queue_size", FI_PARAM_INT,
 			"Defines the maximum number of unacknowledged sends with the NIC.");
 	fi_param_define(&efa_prov, "enable_shm_transfer", FI_PARAM_INT,
-			"Enable using SHM provider to perform TX operations between processes on the same system. (Default: 1)");
+			"Enable using SHM provider to perform TX/RX operations between processes on the same system. (Default: 1)");
 	fi_param_define(&efa_prov, "use_zcpy_rx", FI_PARAM_INT,
 			"Enables the use of application's receive buffers in place of bounce-buffers when feasible. (Default: 1)");
-	fi_param_define(&efa_prov, "set_cuda_sync_memops", FI_PARAM_INT,
-			"Set CU_POINTER_ATTRIBUTE_SYNC_MEMOPS for cuda ptr. (Default: 1)");
 	fi_param_define(&efa_prov, "zcpy_rx_seed", FI_PARAM_INT,
 			"Defines the number of bounce-buffers the provider will prepost during EP initialization.  (Default: 0)");
 	fi_param_define(&efa_prov, "shm_av_size", FI_PARAM_INT,

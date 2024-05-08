@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include "efa_unit_tests.h"
 
 /**
@@ -99,6 +102,169 @@ void test_info_open_ep_with_api_1_1_info()
 	assert_int_equal(err, 0);
 }
 
+/**
+ * @brief Verify info->ep_attr is set according to hints.
+ *
+ */
+void test_info_ep_attr()
+{
+	struct fi_info *hints, *info;
+	int err;
+
+	hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	assert_non_null(hints);
+
+	hints->ep_attr->max_msg_size = 1024;
+
+	err = fi_getinfo(FI_VERSION(FI_MAJOR_VERSION, FI_MINOR_VERSION), NULL, NULL, 0ULL, hints, &info);
+
+	assert_int_equal(err, 0);
+	assert_int_equal(hints->ep_attr->max_msg_size, info->ep_attr->max_msg_size);
+
+	fi_freeinfo(info);
+}
+
+/**
+ * @brief Verify info->tx/rx_attr->msg_order is set according to hints.
+ *
+ */
+static void
+test_info_tx_rx_msg_order_from_hints(struct fi_info *hints, int expected_ret)
+{
+	struct fi_info *info;
+	int err;
+
+	err = fi_getinfo(FI_VERSION(FI_MAJOR_VERSION, FI_MINOR_VERSION), NULL, NULL, 0ULL, hints, &info);
+
+	assert_int_equal(err, expected_ret);
+
+	if (expected_ret == FI_SUCCESS) {
+		assert_true(hints->tx_attr->msg_order == info->tx_attr->msg_order);
+		assert_true(hints->rx_attr->msg_order == info->rx_attr->msg_order);
+	}
+
+	fi_freeinfo(info);
+}
+
+/**
+ * @brief Verify info->tx/rx_attr->op_flags is set according to hints.
+ *
+ */
+static void
+test_info_tx_rx_op_flags_from_hints(struct fi_info *hints, int expected_ret)
+{
+	struct fi_info *info;
+	int err;
+
+	err = fi_getinfo(FI_VERSION(FI_MAJOR_VERSION, FI_MINOR_VERSION), NULL, NULL, 0ULL, hints, &info);
+
+	assert_int_equal(err, expected_ret);
+
+	if (expected_ret == FI_SUCCESS) {
+		assert_true(hints->tx_attr->op_flags == info->tx_attr->op_flags);
+		assert_true(hints->rx_attr->op_flags == info->rx_attr->op_flags);
+	}
+
+	fi_freeinfo(info);
+}
+
+/**
+ * @brief Verify info->tx/rx_attr->size is set according to hints.
+ *
+ */
+static void test_info_tx_rx_size_from_hints(struct fi_info *hints, int expected_ret)
+{
+	struct fi_info *info;
+	int err;
+
+	err = fi_getinfo(FI_VERSION(FI_MAJOR_VERSION, FI_MINOR_VERSION), NULL, NULL, 0ULL, hints, &info);
+
+	assert_int_equal(err, expected_ret);
+
+	if (expected_ret == FI_SUCCESS) {
+		assert_true(hints->tx_attr->size == info->tx_attr->size);
+		assert_true(hints->rx_attr->size == info->rx_attr->size);
+	}
+
+	fi_freeinfo(info);
+}
+
+void test_info_tx_rx_msg_order_rdm_order_none(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	assert_non_null(resource->hints);
+
+	resource->hints->tx_attr->msg_order = FI_ORDER_NONE;
+	resource->hints->rx_attr->msg_order = FI_ORDER_NONE;
+	test_info_tx_rx_msg_order_from_hints(resource->hints, 0);
+}
+
+void test_info_tx_rx_msg_order_rdm_order_sas(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	assert_non_null(resource->hints);
+
+	resource->hints->tx_attr->msg_order = FI_ORDER_SAS;
+	resource->hints->rx_attr->msg_order = FI_ORDER_SAS;
+	test_info_tx_rx_msg_order_from_hints(resource->hints, 0);
+}
+
+void test_info_tx_rx_msg_order_dgram_order_none(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_DGRAM);
+	assert_non_null(resource->hints);
+
+	resource->hints->tx_attr->msg_order = FI_ORDER_NONE;
+	resource->hints->rx_attr->msg_order = FI_ORDER_NONE;
+	test_info_tx_rx_msg_order_from_hints(resource->hints, 0);
+}
+
+/**
+ * @brief dgram endpoint doesn't support any ordering, so fi_getinfo
+ * should return -FI_ENODATA if hints requests sas
+ */
+void test_info_tx_rx_msg_order_dgram_order_sas(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_DGRAM);
+	assert_non_null(resource->hints);
+
+	resource->hints->tx_attr->msg_order = FI_ORDER_SAS;
+	resource->hints->rx_attr->msg_order = FI_ORDER_SAS;
+	test_info_tx_rx_msg_order_from_hints(resource->hints, -FI_ENODATA);
+}
+
+void test_info_tx_rx_op_flags_rdm(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	assert_non_null(resource->hints);
+
+	resource->hints->tx_attr->op_flags = FI_DELIVERY_COMPLETE;
+	resource->hints->rx_attr->op_flags = FI_COMPLETION;
+	test_info_tx_rx_op_flags_from_hints(resource->hints, 0);
+}
+
+void test_info_tx_rx_size_rdm(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	assert_non_null(resource->hints);
+
+	resource->hints->tx_attr->size = 16;
+	resource->hints->rx_attr->size = 16;
+	test_info_tx_rx_size_from_hints(resource->hints, 0);
+}
+
 static void test_info_check_shm_info_from_hints(struct fi_info *hints)
 {
 	struct fi_info *info;
@@ -130,6 +296,11 @@ static void test_info_check_shm_info_from_hints(struct fi_info *hints)
 		assert_true(efa_domain->shm_info->tx_attr->op_flags == info->tx_attr->op_flags);
 
 		assert_true(efa_domain->shm_info->rx_attr->op_flags == info->rx_attr->op_flags);
+
+		if (hints->domain_attr->threading) {
+			assert_true(hints->domain_attr->threading == info->domain_attr->threading);
+			assert_true(hints->domain_attr->threading == efa_domain->shm_info->domain_attr->threading);
+		}
 	}
 
 	fi_close(&domain->fid);
@@ -143,7 +314,7 @@ static void test_info_check_shm_info_from_hints(struct fi_info *hints)
  * @brief Check shm info created by efa_domain() has correct caps.
  *
  */
-void test_info_check_shm_info()
+void test_info_check_shm_info_hmem()
 {
 	struct fi_info *hints;
 
@@ -154,6 +325,13 @@ void test_info_check_shm_info()
 
 	hints->caps &= ~FI_HMEM;
 	test_info_check_shm_info_from_hints(hints);
+}
+
+void test_info_check_shm_info_op_flags()
+{
+	struct fi_info *hints;
+
+	hints = efa_unit_test_alloc_hints(FI_EP_RDM);
 
 	hints->tx_attr->op_flags |= FI_COMPLETION;
 	hints->rx_attr->op_flags |= FI_COMPLETION;
@@ -162,8 +340,16 @@ void test_info_check_shm_info()
 	hints->tx_attr->op_flags |= FI_DELIVERY_COMPLETE;
 	hints->rx_attr->op_flags |= FI_MULTI_RECV;
 	test_info_check_shm_info_from_hints(hints);
+}
 
+void test_info_check_shm_info_threading()
+{
+	struct fi_info *hints;
 
+	hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+
+	hints->domain_attr->threading = FI_THREAD_DOMAIN;
+	test_info_check_shm_info_from_hints(hints);
 }
 
 /**
@@ -273,10 +459,10 @@ void test_use_device_rdma( const int env_val,
 	struct fid_ep *ep = NULL;
 	struct efa_rdm_ep *efa_rdm_ep;
 	bool rdma_capable_hw;
-	char env_str[8];
+	char env_str[16];
 
 	if (env_val >= 0) {
-		snprintf(env_str, 7, "%d", env_val);
+		snprintf(env_str, 15, "%d", env_val);
 		setenv("FI_EFA_USE_DEVICE_RDMA", env_str, 1);
 	} else {
 		unsetenv("FI_EFA_USE_DEVICE_RDMA");

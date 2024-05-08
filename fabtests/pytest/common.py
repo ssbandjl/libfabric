@@ -3,6 +3,7 @@ import time
 import json
 import errno
 import os
+import re
 import subprocess
 import functools
 from subprocess import Popen, TimeoutExpired, run
@@ -12,8 +13,12 @@ from time import sleep
 from retrying import retry
 import pytest
 
+
+perf_progress_model_cli = "--data-progress manual --control-progress unified"
 SERVER_RESTART_DELAY_MS = 10_1000
 CLIENT_RETRY_INTERVAL_MS = 1_000
+
+
 class SshConnectionError(Exception):
 
     def __init__(self):
@@ -25,12 +30,13 @@ def is_ssh_connection_error(exception):
 
 
 def has_ssh_connection_err_msg(output):
-    err_msgs = ["Connection closed by remote host",
+    err_msgs = ["Connection closed",
                 "Connection reset by peer",
-                "Connection refused"]
+                "Connection refused",
+                r"ssh_dispatch_run_fatal: .* incorrect signature"]
 
     for msg in err_msgs:
-        if output.find(msg) != -1:
+        if len(re.findall(msg, output)) > 0:
             return True
 
     return False
@@ -397,6 +403,10 @@ class ClientServerTest:
                 pytest.skip("no {} device".format(host_memory_type))
 
         command += " -D " + host_memory_type
+
+        if self._cmdline_args.do_dmabuf_reg_for_hmem:
+            command += " -R"
+
         additional_environment = None
 
         if "PYTEST_XDIST_WORKER" in os.environ:

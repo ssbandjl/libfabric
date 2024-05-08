@@ -1,35 +1,6 @@
-/*
- * Copyright (c) 2019-2023 Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+
 #ifndef EFA_RDM_PEER_H
 #define EFA_RDM_PEER_H
 
@@ -47,7 +18,7 @@ OFI_DECL_RECVWIN_BUF(struct efa_rdm_pke*, efa_rdm_robuf, uint32_t);
 #define EFA_RDM_PEER_IN_BACKOFF BIT_ULL(3) /**< peer is in backoff mode due to RNR (Endpoint should not send packet to this peer) */
 /**
  * @details
- * FI_EAGAIN error was encountered when sending handsahke to this peer,
+ * FI_EAGAIN error was encountered when sending handshake to this peer,
  * the peer was put in efa_rdm_ep->handshake_queued_peer_list.
  * Progress engine will retry sending handshake.
  */
@@ -56,6 +27,7 @@ OFI_DECL_RECVWIN_BUF(struct efa_rdm_pke*, efa_rdm_robuf, uint32_t);
 struct efa_rdm_peer {
 	bool is_self;			/**< flag indicating whether the peer is the endpoint itself */
 	bool is_local;			/**< flag indicating wehther the peer is local (on the same instance) */
+	uint32_t device_version;	/**< EFA device version */
 	fi_addr_t efa_fiaddr;		/**< libfabric addr from efa provider's perspective */
 	fi_addr_t shm_fiaddr;		/**< libfabric addr from shm provider's perspective */
 	uint64_t host_id; 		/* Optional peer host id. Default 0 */
@@ -86,11 +58,6 @@ struct efa_rdm_peer {
 	 * @details this value is capped by efa_env.efa_runt_size
 	 */
 	int64_t num_runt_bytes_in_flight;
-
-	/**
-	 * @brief number of messages that are using read based protocol
-	 */
-	int64_t num_read_msg_in_flight;
 };
 
 /**
@@ -140,6 +107,15 @@ bool efa_rdm_peer_support_delivery_complete(struct efa_rdm_peer *peer)
 	       (peer->extra_info[0] & EFA_RDM_EXTRA_FEATURE_DELIVERY_COMPLETE);
 }
 
+static inline
+bool efa_rdm_peer_support_read_nack(struct efa_rdm_peer *peer)
+{
+	/* EFA_RDM_READ_NACK_PKT introduced in Libfabric 1.20
+	 */
+	return (peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED) &&
+	       (peer->extra_info[0] & EFA_RDM_EXTRA_FEATURE_READ_NACK);
+}
+
 /**
  * @brief determine if both peers support RDMA read
  *
@@ -154,6 +130,43 @@ bool efa_both_support_rdma_read(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer
 {
 	return efa_rdm_ep_support_rdma_read(ep) &&
 	       (peer->is_self || efa_rdm_peer_support_rdma_read(peer));
+}
+
+/**
+ * @brief Determine interoperability for RDMA read between peers
+ *
+ * RDMA read is currently not interoperable between all EFA platforms; older
+ * platforms cannot fully interoperate with newer platforms. The platform
+ * version can be inferred from ibv_device_attr.vendor_part_id (see
+ * ibv_query_device(3)).
+ *
+ * In this context, version 0xEFA0 is considered "older", while versions 0xEFA1+
+ * are considered "newer"
+ *
+ * @todo Either:
+ * - Refactor this logic if the interoperability is ever reported
+ *   directly via firmware or rdma-core
+ * - Remove altogether if RDMA read becomes interoperable between all EFA
+ *   platforms
+ *
+ * @param[in]	ep	Endpoint for communication with peer
+ * @param[in]	peer	An EFA peer
+ *
+ * @return true if peers can interoperate via RDMA read; false otherwise
+ */
+static inline
+bool efa_rdm_interop_rdma_read(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer)
+{
+	bool rdma_read_support = efa_both_support_rdma_read(ep, peer);
+	uint32_t ep_dev_ver, peer_dev_ver;
+
+	if (!rdma_read_support)
+		return false;
+
+	ep_dev_ver = efa_rdm_ep_domain(ep)->device->ibv_attr.vendor_part_id;
+	peer_dev_ver = peer->device_version;
+
+	return (ep_dev_ver == 0xEFA0) ? (peer_dev_ver == 0xEFA0) : (peer_dev_ver != 0xEFA0);
 }
 
 /**
@@ -235,6 +248,8 @@ int efa_rdm_peer_reorder_msg(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep, s
 
 void efa_rdm_peer_proc_pending_items_in_robuf(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep);
 
-int efa_rdm_peer_select_readbase_rtm(struct efa_rdm_peer *peer, int op, uint64_t fi_flags, struct efa_hmem_info *hmem_info);
+size_t efa_rdm_peer_get_runt_size(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep, struct efa_rdm_ope *ope);
+
+int efa_rdm_peer_select_readbase_rtm(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep, struct efa_rdm_ope *ope);
 
 #endif /* EFA_RDM_PEER_H */

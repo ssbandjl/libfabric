@@ -86,10 +86,14 @@ ssize_t fi_tinjectdata(struct fid_ep *ep, const void *buf, size_t len,
   connected endpoints.
 
 *src_addr*
-: Source address to receive from for connectionless transfers.  Applies
-  only to connectionless endpoints with the FI_DIRECTED_RECV capability
-  enabled, otherwise this field is ignored.  If set to FI_ADDR_UNSPEC,
-  any source address may match.
+: Applies only to connectionless endpoints configured with the FI_DIRECTED_RECV.
+  For all other endpoint configurations, src_addr is ignored. src_addr defines
+  the source address to receive from. By default, the src_addr is treated as a
+  source endpoint address (i.e. fi_addr_t returned from fi_av_insert /
+  fi_av_insertsvc / fi_av_remove). If the FI_AUTH_KEY flag is specified with
+  fi_trecvmsg, src_addr is treated as a source authorization key (i.e. fi_addr_t
+  returned from fi_av_insert_auth_key). If set to FI_ADDR_UNSPEC, any source
+  address may match.
 
 *msg*
 : Message descriptor for send and receive operations.
@@ -234,10 +238,10 @@ fi_endpoint).  The following list of flags are usable with fi_trecvmsg
 and/or fi_tsendmsg.
 
 *FI_REMOTE_CQ_DATA*
-: Applies to fi_tsendmsg and fi_tsenddata.  Indicates
-  that remote CQ data is available and should be sent as part of the
-  request.  See fi_getinfo for additional details on
-  FI_REMOTE_CQ_DATA.
+: Applies to fi_tsendmsg.  Indicates that remote CQ data is available
+  and should be sent as part of the request.  See fi_getinfo for
+  additional details on FI_REMOTE_CQ_DATA.  This flag is implicitly
+  set for fi_tsenddata and fi_tinjectdata.
 
 *FI_COMPLETION*
 : Indicates that a completion entry should be generated for the
@@ -285,6 +289,12 @@ and/or fi_tsendmsg.
   operation (inclusive) to the posting of a subsequent fenced operation
   (exclusive) is controlled by the endpoint's ordering semantics.
 
+*FI_AUTH_KEY*
+: Only valid with domains configured with FI_AV_AUTH_KEY and connectionless
+  endpoints configured with FI_DIRECTED_RECV. When used with fi_trecvmsg, this
+  flag denotes that the src_addr is an authorization key fi_addr_t instead of
+  an endpoint fi_addr_t.
+
 The following flags may be used with fi_trecvmsg.
 
 *FI_PEEK*
@@ -305,20 +315,6 @@ The following flags may be used with fi_trecvmsg.
   available CQ data, tag, and source address.  The data available is subject to
   the completion entry format (e.g. struct fi_cq_tagged_entry).
 
-  An application may supply a buffer if it desires to receive data as
-  a part of the peek operation. In order to receive data as a part of
-  the peek operation, the buf and len fields must be available in the
-  CQ format. In particular, FI_CQ_FORMAT_CONTEXT and FI_CQ_FORMAT_MSG
-  cannot be used if peek operations desire to obtain a copy of the
-  data. The returned data is limited to the size of the input
-  buffer(s) or the message size, if smaller.  A provider indicates if
-  data is available by setting the buf field of the CQ entry to the
-  user's first input buffer.  If buf is NULL, no data was available to
-  return.  A provider may return NULL even if the peek operation
-  completes successfully.  Note that the CQ entry len field will
-  reference the size of the message, not necessarily the size of the
-  returned data.
-
 *FI_CLAIM*
 : If this flag is used in conjunction with FI_PEEK, it indicates if the
   peek request completes successfully -- indicating that a matching message
@@ -333,8 +329,8 @@ The following flags may be used with fi_trecvmsg.
   fi_context structure used for an FI_PEEK + FI_CLAIM operation must be used
   by the paired FI_CLAIM request.
 
-  This flag also applies to endpoints configured for FI_BUFFERED_RECV or
-  FI_VARIABLE_MSG.  When set, it is used to retrieve a tagged message that
+  This flag also applies to endpoints configured for FI_BUFFERED_RECV.
+  When set, it is used to retrieve a tagged message that
   was buffered by the provider.  See Buffered Tagged Receives section for
   details.
 
@@ -347,8 +343,8 @@ The following flags may be used with fi_trecvmsg.
   FI_CLAIM in order to discard a message previously claimed
   using an FI_PEEK + FI_CLAIM request.
 
-  This flag also applies to endpoints configured for FI_BUFFERED_RECV or
-  FI_VARIABLE_MSG.  When set, it indicates that the provider should free
+  This flag also applies to endpoints configured for FI_BUFFERED_RECV.
+  When set, it indicates that the provider should free
   a buffered messages.  See Buffered Tagged Receives section for details.
 
   If this flag is set, the input buffer(s) and length parameters are ignored.
@@ -388,12 +384,6 @@ set as defined in [`fi_msg`(3)](fi_msg.3.html).
 After being notified that a buffered receive has arrived,
 applications must either claim or discard the message as described in
 [`fi_msg`(3)](fi_msg.3.html).
-
-# Variable Length Tagged Messages
-
-Variable length messages are defined in [`fi_msg`(3)](fi_msg.3.html).
-The requirements for handling variable length tagged messages is identical
-to those defined above for buffered tagged receives.
 
 # RETURN VALUE
 

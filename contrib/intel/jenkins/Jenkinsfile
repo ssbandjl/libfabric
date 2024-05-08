@@ -3,12 +3,10 @@ import groovy.transform.Field
 properties([disableConcurrentBuilds(abortPrevious: true)])
 @Field def DO_RUN=true
 @Field def TARGET="main"
-@Field def SCRIPT_LOCATION="py_scripts/contrib/intel/jenkins"
 @Field def RELEASE=false
 @Field def BUILD_MODES=["reg", "dbg", "dl"]
-@Field def MPI_TYPES=["impi", "mpich", "ompi"]
 @Field def PYTHON_VERSION="3.9"
-@Field def TIMEOUT="3600"
+@Field def TIMEOUT="7200"
 
 def run_python(version, command, output=null) {
   if (output != null)
@@ -20,8 +18,9 @@ def run_python(version, command, output=null) {
 def slurm_batch(partition, node_num, output, command) {
   
   try {
-    sh """timeout $TIMEOUT sbatch --partition=${partition} -N ${node_num} \
-          --wait -o ${output} --open-mode=append --wrap=\'env; ${command}\'
+    sh """sbatch --partition=${partition} -N ${node_num} \
+          --wait -o ${output} --open-mode=append \
+          --wrap=\'env; timeout $TIMEOUT ${command}\'
        """
   } catch (Exception e) {
     sh "scancel \$(cat ${output} | grep SLURM_JOBID | cut -d \"=\" -f 2)"
@@ -31,17 +30,24 @@ def slurm_batch(partition, node_num, output, command) {
   sh "cat ${output}"
 }
 
-def run_fabtests(stage_name, partition, node_num, prov, util=null,
-                 user_env=null) {
-  def command = "python3.9 ${RUN_LOCATION}/runtests.py"
+def run_fabtests(stage_name, hw, partition, node_num, prov, util=null,
+                 user_env=null, way=null) {
+  def command = "python3.9 ${RUN_LOCATION}/runtests.py --build_hw=${hw}"
   def opts = "--prov=${prov} --test=fabtests"
+  def modes = BUILD_MODES
   if (util)
     opts = "${opts} --util=${util}"
 
   if (user_env)
     opts = "${opts} --user_env ${user_env}"
 
-  for (mode in BUILD_MODES) {
+  if (way) {
+    opts = "${opts} --way ${way}"
+    stage_name = "${stage_name}_${way}"
+    modes = ["reg"]
+  }
+
+  for (mode in modes) {
     echo "Running $stage_name fabtests $mode"
     slurm_batch("${partition}", "${node_num}",
                 "${env.LOG_DIR}/${stage_name}_fabtests_${mode}",
@@ -51,9 +57,9 @@ def run_fabtests(stage_name, partition, node_num, prov, util=null,
   echo "${stage_name} completed."
 }
 
-def run_middleware(providers, stage_name, test, partition, node_num, mpi=null,
-                   imb_grp=null) {
-  def base_cmd = "python3.9 ${RUN_LOCATION}/runtests.py --test=${test}"
+def run_middleware(providers, stage_name, test, hw, partition, node_num,
+                   mpi=null, imb_grp=null, user_env=null) {
+  def base_cmd = "python3.9 ${RUN_LOCATION}/runtests.py --test=${test} --build_hw=${hw}"
   def opts = ""
   def prefix = "${env.LOG_DIR}/${stage_name}_"
   def suffix = "_${test}_reg"
@@ -67,7 +73,10 @@ def run_middleware(providers, stage_name, test, partition, node_num, mpi=null,
 
   if (env.WEEKLY.toBoolean())
     base_cmd = "${base_cmd} --weekly=${env.WEEKLY}"
-    
+  
+  if (user_env)
+    base_cmd = "${base_cmd} --user_env ${user_env}"
+
   for (prov in providers) {
     if (prov[1]) {
       echo "Running ${prov[0]}-${prov[1]} ${stage_name}"
@@ -82,6 +91,14 @@ def run_middleware(providers, stage_name, test, partition, node_num, mpi=null,
     slurm_batch("${partition}", "${node_num}", "${output}",
                 "${base_cmd} ${opts}")
   }
+}
+
+def run_ci(stage_name, config_name) {
+  sh """source ${CI_LOCATION}/${env.CI_MODULE}/venv/bin/activate;\
+        python run.py \
+        --output=${env.LOG_DIR}/${stage_name} \
+        --job=${config_name}
+  """
 }
 
 def gather_logs(cluster, key, dest, source) {
@@ -124,29 +141,116 @@ def save_summary() {
   """
 }
 
-def checkout_py_scripts() {
+def checkout_upstream() {
+  def loc = "${env.WORKSPACE}/upstream/libfabric"
   sh """
-    if [[ ! -d ${env.WORKSPACE}/py_scripts ]]; then
-      mkdir ${env.WORKSPACE}/py_scripts
+    if [[ ! -d ${env.WORKSPACE}/upstream ]]; then
+      mkdir -p ${loc}
     else
-      rm -rf ${env.WORKSPACE}/py_scripts && mkdir ${env.WORKSPACE}/py_scripts
+      rm -rf ${env.WORKSPACE}/upstream && mkdir -p ${loc}
     fi
 
-    git clone --branch ${TARGET} ${env.UPSTREAM} ${env.WORKSPACE}/py_scripts
+    git clone --branch ${TARGET} ${env.UPSTREAM} ${loc}
   """
 }
 
-def build(item, mode=null, cluster=null, release=false, additional_args=null) {
+def checkout_ci_resources() {
+  sh """
+    if [[ ! -d ${env.WORKSPACE}/upstream ]]; then
+      mkdir ${env.WORKSPACE}/ci_resources
+    else
+      rm -rf ${env.WORKSPACE}/ci_resources && mkdir ${env.WORKSPACE}/ci_resources
+    fi
+
+    git clone ${env.CI_RESOURCES} ${env.WORKSPACE}/ci_resources
+
+  """
+}
+
+def checkout_ci() {
+  sh """
+   if [[ ! -d ${env.WORKSPACE}/ci ]]; then
+      mkdir ${env.WORKSPACE}/ci
+    else
+      rm -rf ${env.WORKSPACE}/ci && mkdir ${env.WORKSPACE}/ci
+    fi
+
+    git clone --recurse-submodules ${env.CI} ${env.WORKSPACE}/ci
+  """
+}
+
+def checkout_external_resources() {
+  checkout_ci_resources()
+  checkout_upstream()
+  checkout_ci()
+}
+
+def generate_diff(def branch_name, def output_loc) {
+  sh """
+    git remote add mainRepo ${env.UPSTREAM}
+    git fetch mainRepo
+    git diff --name-only HEAD..mainRepo/${branch_name} > ${output_loc}/commit_id
+    git remote remove mainRepo
+  """
+}
+
+def generate_release_num(def branch_name, def output_loc) {
+  sh """
+    git remote add mainRepo ${env.UPSTREAM}
+    git fetch mainRepo
+    git diff mainRepo/${branch_name}:Makefile.am Makefile.am > \
+        ${output_loc}/Makefile.am.diff
+    git diff mainRepo/${branch_name}:configure.ac configure.ac > \
+        ${output_loc}/configure.ac.diff
+    cat configure.ac | grep AC_INIT | cut -d ' ' -f 2 | \
+        cut -d '[' -f 2 | cut -d ']' -f 1 > ${output_loc}/release_num.txt
+    git remote remove mainRepo
+  """
+}
+
+def slurm_build(modes, partition, location, hw=null, additional_args=null) {
+  def cmd = "pwd; "
+  def prefix = "python${PYTHON_VERSION} ${RUN_LOCATION}/build.py"
+  def libfabric = "--build_item=libfabric --build_loc=${CUSTOM_WORKSPACE}/${location}/libfabric"
+  def fabtests = "--build_item=fabtests --build_loc=${CUSTOM_WORKSPACE}/${location}/libfabric/fabtests"
+  if (RELEASE) {
+    prefix = "${prefix} --release"
+  }
+
+  if (hw) {
+    prefix = "${prefix} --build_hw=${hw}"
+  }
+
+  if (additional_args) {
+    prefix = "${prefix} ${additional_args} "
+  }
+
+  for (mode in modes) {
+    cmd = "${cmd} ${prefix} ${libfabric} --ofi_build_mode=${mode};"
+    cmd = "${cmd} ${prefix} ${fabtests} --ofi_build_mode=${mode};"
+  }
+
+  slurm_batch(partition, "1", "${env.LOG_DIR}/libfabric_${partition}", cmd)
+}
+
+def build(item, mode=null, hw=null, additional_args=null) {
   def cmd = "${RUN_LOCATION}/build.py --build_item=${item}"
+
+  if (item == "fabtests") {
+    cmd ="${cmd} --build_loc=${CUSTOM_WORKSPACE}/source/libfabric/fabtests"
+  } else {
+    cmd ="${cmd} --build_loc=${CUSTOM_WORKSPACE}/source/libfabric"
+  }
+
   if (mode) {
     cmd = "${cmd} --ofi_build_mode=${mode} "
   }
 
-  if (cluster) {
-    cmd = "${cmd} --build_cluster=${cluster} "
+  if (hw) {
+    cmd = "${cmd} --build_hw=${hw} "
   }
 
-  if (release) {
+  if (RELEASE) {
     cmd = "${cmd} --release "
   }
 
@@ -155,6 +259,10 @@ def build(item, mode=null, cluster=null, release=false, additional_args=null) {
   }
 
   run_python(PYTHON_VERSION, cmd)
+}
+
+def build_ci() {
+  sh "${CI_LOCATION}/${env.CI_MODULE}/bootstrap.sh"
 }
 
 def check_target() {
@@ -194,7 +302,7 @@ def release() {
 }
 
 def skip() {
-  def file = "${env.WORKSPACE}/commit_id"
+  def file = "${env.WORKSPACE}/source/libfabric/commit_id"
   if (!fileExists(file)) {
     echo "CI Run has not rebased with ofiwg/libfabric. Please Rebase."
     return 1
@@ -208,7 +316,7 @@ def skip() {
   }
 
   echo "Changeset is: ${changeStrings.toArray()}"
-  if (changeStrings.toArray().every { it =~ /(?:fabtests\/pytests|man|prov\/efa|prov\/opx).*$/ }) {
+  if (changeStrings.toArray().every { it =~ /(?:fabtests\/pytests|man|prov\/efa|prov\/opx|contrib\/aws).*$/ }) {
     echo "DONT RUN!"
     return true
   }
@@ -231,24 +339,57 @@ pipeline {
   options {
       timestamps()
       timeout(activity: true, time: 6, unit: 'HOURS')
+      skipDefaultCheckout()
   }
   environment {
       JOB_CADENCE = 'PR'
-      LOG_DIR = "${env.JOB_INSTALL_DIR}/${env.JOB_NAME}/${env.BUILD_NUMBER}/log_dir"
       WITH_ENV="'PATH+EXTRA=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin:$PYTHONPATH'"
-      DELETE_LOCATION="${env.JOB_INSTALL_DIR}/${env.JOB_NAME}/${env.BUILD_NUMBER}"
-      RUN_LOCATION="${env.WORKSPACE}/${SCRIPT_LOCATION}/"
       CUSTOM_WORKSPACE="${CB_HOME}/workspace/${JOB_NAME}/${env.BUILD_NUMBER}"
+      DELETE_LOCATION="${env.CUSTOM_WORKSPACE}/middlewares"
+      RUN_LOCATION="${env.CUSTOM_WORKSPACE}/ci_resources/legacy_pipeline_scripts/"
+      CI_LOCATION="${env.CUSTOM_WORKSPACE}/ci"
+      LOG_DIR = "${env.CUSTOM_WORKSPACE}/log_dir"
   }
   stages {
+    stage ('checkout') {
+      steps {
+        script {
+          dir ("${CUSTOM_WORKSPACE}/source/libfabric") {
+            checkout scm
+          }
+          dir ("${CUSTOM_WORKSPACE}/grass/libfabric") {
+            checkout scm
+          }
+          dir ("${CUSTOM_WORKSPACE}/water/libfabric") {
+            checkout scm
+          }
+          dir ("${CUSTOM_WORKSPACE}/electric/libfabric") {
+            checkout scm
+          }
+          dir ("${CUSTOM_WORKSPACE}/ucx/libfabric") {
+            checkout scm
+          }
+          dir ("${CUSTOM_WORKSPACE}/cuda/libfabric") {
+            checkout scm
+          }
+          dir ("${CUSTOM_WORKSPACE}/iouring/libfabric") {
+            checkout scm
+          }
+          dir (CUSTOM_WORKSPACE) {
+            checkout_external_resources()
+          }
+        }
+      }
+    }
     stage ('opt-out') {
       steps {
         script {
           TARGET=check_target()
-          sh "mkdir ${env.WORKSPACE}/py_scripts"
-          sh "git clone --branch ${TARGET} ${env.UPSTREAM} ${env.WORKSPACE}/py_scripts"
-          sh "${env.SKIP_PATH}/skip.sh ${env.WORKSPACE} ${TARGET}"
-          sh "${env.SKIP_PATH}/release.sh ${env.WORKSPACE} ${TARGET}"
+          dir ("${CUSTOM_WORKSPACE}/source/libfabric") {
+            generate_diff("${TARGET}", "${env.WORKSPACE}/source/libfabric")
+            generate_release_num("${TARGET}", "${env.WORKSPACE}/source/libfabric")
+          }
+
           if (env.WEEKLY == null) {
             weekly = false
           } else {
@@ -272,41 +413,91 @@ pipeline {
           echo "Copying build dirs."
           build("builddir")
           echo "Copying log dirs."
-          build("logdir", null, null, RELEASE)
-          build("extract_mpich")
-          build("extract_impi_mpich")
+          build("logdir")
         }
       }
     }
     stage ('parallel-builds') {
       when { equals expected: true, actual: DO_RUN }
       parallel {
-        stage ('build') {
+        stage ('build-ci') {
           steps {
             script {
-              dir (CUSTOM_WORKSPACE) {
-                for (mode in  BUILD_MODES) {
-                  echo "Building Libfabric $mode"
-                  build("libfabric", "$mode")
-                  echo "Building Fabtests $mode"
-                  build("fabtests", "$mode")
-                }
-              }
+              build_ci()
             }
           }
         }
-        stage ('buildmpich-libfabric') {
+        stage ('build-water') {
+          environment {
+            build_type = "water"
+          }
           steps {
             script {
-              dir("${CUSTOM_WORKSPACE}/mpich"){
-                checkout scm
-                echo "Building Libfabric reg"
-                slurm_batch("squirtle,totodile", "1",
-                            "${env.LOG_DIR}/libfabric_mpich_log", 
+              slurm_build(BUILD_MODES, "water", "water", "water")
+              slurm_batch("squirtle,totodile", "1",
+                            "${env.LOG_DIR}/build_mpich_water_log",
                             """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
-                              --build_item=libfabric_mpich """
-                          )  
-              }
+                              --build_item=mpich --build_hw=water"""
+                          )
+              slurm_batch("water", "1",
+                          "${env.LOG_DIR}/build_shmem_water_log",
+                          """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
+                              --build_item=shmem --build_hw=water"""
+                         )
+            }
+          }
+        }
+        stage ('build-grass') {
+          environment {
+            build_type = "grass"
+          }
+          steps {
+            script {
+              slurm_build(BUILD_MODES, "grass", "grass", "grass")
+              slurm_batch("grass", "1",
+                            "${env.LOG_DIR}/build_mpich_grass_log",
+                            """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
+                              --build_item=mpich --build_hw=grass"""
+                          )
+              slurm_batch("grass", "1",
+                          "${env.LOG_DIR}/build_shmem_grass_log",
+                          """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
+                              --build_item=shmem --build_hw=grass"""
+                         )
+            }
+          }
+        }
+        stage ('build-electric') {
+          environment {
+            build_type = "electric"
+          }
+          steps {
+            script {
+              slurm_build(BUILD_MODES, "electric", "electric", "electric")
+            }
+          }
+        }
+        stage ('build-ucx') {
+          steps {
+            script {
+              slurm_build(BUILD_MODES, "totodile", "ucx", "ucx")
+            }
+          }
+        }
+        stage ('build-cuda') {
+          steps {
+            script {
+              slurm_build(BUILD_MODES, "cyndaquil", "cuda", "cyndaquil",
+                          "--cuda")
+              slurm_build(BUILD_MODES, "quilava", "cuda", "quilava",
+                          "--cuda")
+            }
+          }
+        }
+        stage ('build-iouring') {
+          steps {
+            script {
+              slurm_build(BUILD_MODES, "ivysaur", "iouring", "ivysaur")
             }
           }
         }
@@ -317,13 +508,15 @@ pipeline {
               customWorkspace CUSTOM_WORKSPACE
             }
           }
+          options { skipDefaultCheckout() }
           steps {
             script {
-              checkout_py_scripts()
+              dir ("${CUSTOM_WORKSPACE}/source/libfabric") { checkout scm }
+              checkout_external_resources()
               dir (CUSTOM_WORKSPACE) {
                 build("logdir")
                 build("libfabric", "reg", "daos")
-                build("fabtests", "reg")
+                build("fabtests", "reg", "daos")
               }
             }
           }
@@ -335,14 +528,16 @@ pipeline {
               customWorkspace CUSTOM_WORKSPACE
             }
           }
+          options { skipDefaultCheckout() }
           steps {
             script {
-              checkout_py_scripts()
+              dir ("${CUSTOM_WORKSPACE}/source/libfabric") { checkout scm }
+              checkout_external_resources()
               dir (CUSTOM_WORKSPACE) {
                 build("logdir")
                 build("builddir")
-                build("libfabric", "reg", "gpu")
-                build("fabtests", "reg")
+                build("libfabric", "reg", "gpu", "--gpu")
+                build("fabtests", "reg", "gpu")
               }
             }
           }
@@ -352,48 +547,50 @@ pipeline {
     stage('parallel-tests') {
       when { equals expected: true, actual: DO_RUN }
       parallel {
-        stage('MPI_verbs-rxm_IMB') {
+        stage ('CI_MPI_verbs-rxm_IMB') {
+          environment {
+            build_type = "water"
+          }
           steps {
             script {
-              dir (RUN_LOCATION) {
-                def providers = [["verbs", "rxm"]]
-                for (mpi in MPI_TYPES) {
-                  for (imb_grp = 1; imb_grp < 4; imb_grp++) {
-                    run_middleware(providers, "MPI", "IMB",
-                                   "squirtle,totodile", "2", "${mpi}",
-                                   "${imb_grp}")
-                  }
-                }
+              dir (CI_LOCATION) {
+                run_ci("CI_MPI_verbs-rxm_IMB", "pr_imb_water.json")
               }
             }
           }
         }
-        stage('MPI_verbs-rxm_OSU') {
+        stage ('CI_MPI_verbs-rxm_OSU') {
+          environment {
+            build_type = "water"
+          }
           steps {
             script {
-              dir (RUN_LOCATION) {
-                def providers = [["verbs", "rxm"]]
-                for (mpi in MPI_TYPES) {
-                  run_middleware(providers, "MPI", "osu", "squirtle,totodile",
-                                 "2", "${mpi}")
-                }
+              dir (CI_LOCATION) {
+                run_ci("CI_MPI_verbs-rxm_OSU", "pr_osu_water.json")
               }
             }
           }
         }
-        stage('MPI_tcp') {
+        stage ('CI_MPI_tcp_IMB') {
+          environment {
+            build_type = "grass"
+          }
           steps {
             script {
-              dir (RUN_LOCATION) {
-                def providers = [["tcp", null]]
-                for (mpi in MPI_TYPES) {
-                  for (imb_grp = 1; imb_grp < 4; imb_grp++) {
-                    run_middleware(providers, "MPI", "IMB",
-                                   "bulbasaur", "2", "${mpi}", "${imb_grp}")
-                  }
-                  run_middleware(providers, "MPI", "osu", "bulbasaur", "2",
-                                 "${mpi}")
-                }
+              dir (CI_LOCATION) {
+                run_ci("CI_MPI_tcp_IMB", "pr_imb_grass.json")
+              }
+            }
+          }
+        }
+        stage ('CI_MPI_tcp_OSU') {
+          environment {
+            build_type = "grass"
+          }
+          steps {
+            script {
+              dir (CI_LOCATION) {
+                run_ci("CI_MPI_tcp_OSU", "pr_osu_grass.json")
               }
             }
           }
@@ -402,7 +599,17 @@ pipeline {
            steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("tcp", "bulbasaur", "2", "tcp")
+                run_fabtests("tcp", "grass", "bulbasaur", "2", "tcp")
+              }
+            }
+          }
+        }
+        stage('tcp-iouring') {
+          steps {
+            script {
+              dir (RUN_LOCATION) {
+                run_fabtests("tcp-iouring", "ivysaur", "ivysaur", "2",
+                             "tcp", null, "FI_TCP_IO_URING=1")
               }
             }
           }
@@ -411,12 +618,12 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("verbs-rxm", "squirtle,totodile", "2", "verbs",
-                             "rxm")
-                run_fabtests("verbs-rxm", "squirtle,totodile", "2", "verbs",
-                             "rxm", "FI_MR_CACHE_MAX_COUNT=0")
-                run_fabtests("verbs-rxm", "squirtle,totodile", "2", "verbs",
-                             "rxm", "FI_MR_CACHE_MONITOR=userfaultfd")
+                run_fabtests("verbs-rxm", "water", "squirtle,totodile", "2",
+                             "verbs", "rxm")
+                run_fabtests("verbs-rxm", "water", "squirtle,totodile", "2",
+                             "verbs", "rxm", "FI_MR_CACHE_MAX_COUNT=0")
+                run_fabtests("verbs-rxm", "water", "squirtle,totodile", "2",
+                             "verbs", "rxm", "FI_MR_CACHE_MONITOR=userfaultfd")
               }
             }
           }
@@ -425,11 +632,11 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("verbs-rxd", "squirtle", "2", "verbs",
+                run_fabtests("verbs-rxd", "water", "squirtle", "2", "verbs",
                              "rxd")
-                run_fabtests("verbs-rxd", "squirtle", "2", "verbs",
+                run_fabtests("verbs-rxd", "water", "squirtle", "2", "verbs",
                              "rxd", "FI_MR_CACHE_MAX_COUNT=0")
-                run_fabtests("verbs-rxd", "squirtle", "2", "verbs",
+                run_fabtests("verbs-rxd", "water", "squirtle", "2", "verbs",
                              "rxd", "FI_MR_CACHE_MONITOR=userfaultfd")
               }
             }
@@ -439,7 +646,7 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("udp", "bulbasaur", "2", "udp")
+                run_fabtests("udp", "grass", "bulbasaur", "2", "udp")
               }
             }
           }
@@ -448,8 +655,8 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("shm", "bulbasaur", "1", "shm")
-                run_fabtests("shm", "bulbasaur", "1", "shm", null,
+                run_fabtests("shm", "grass", "bulbasaur", "1", "shm")
+                run_fabtests("shm", "grass", "bulbasaur", "1", "shm", null,
                             "FI_SHM_DISABLE_CMA=1")
               }
             }
@@ -459,7 +666,7 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("sockets", "bulbasaur", "2", "sockets")
+                run_fabtests("sockets", "grass", "bulbasaur", "2", "sockets")
               }
             }
           }
@@ -467,16 +674,8 @@ pipeline {
         stage('ucx') {
           steps {
             script {
-              dir (CUSTOM_WORKSPACE) {
-                for (mode in BUILD_MODES) {
-                  echo "Building Libfabric $mode"
-                  build("libfabric", "${mode}", null, false, "--ucx")
-                  echo "Building Fabtests $mode"
-                  build("fabtests", "${mode}", null, false, "--ucx")
-                }
-              }
               dir (RUN_LOCATION) {
-                run_fabtests("ucx", "totodile", "2", "ucx")
+                run_fabtests("ucx", "ucx", "totodile", "2", "ucx")
               }
             }
           }
@@ -485,8 +684,8 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("psm3", "squirtle", "2", "psm3", null,
-                            "PSM3_IDENTIFY=1")
+                run_fabtests("psm3", "water", "squirtle", "2", "psm3", null,
+                             "PSM3_IDENTIFY=1")
               }
             }
           }
@@ -496,21 +695,34 @@ pipeline {
             script {
               dir (RUN_LOCATION) {
                 def providers = [['tcp', null], ["verbs","rxm"]]
-                for (mpi in MPI_TYPES) {
+                def MPIS = ["mpich"]
+                if (env.WEEKLY.toBoolean()) {
+                  MPIS = ["impi", "mpich"]
+                }
+                for (def mpi in MPIS) {
                   run_middleware(providers, "mpichtestsuite", "mpichtestsuite",
-                                 "squirtle,totodile", "2", "${mpi}")
+                                 "water", "squirtle,totodile", "2", "${mpi}")
                 }
               }
             }
           }
         }
-        stage('SHMEM') {
+        stage('SHMEM_grass') {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_middleware([["verbs", null], ["tcp", null],
-                                ["sockets", null]], "SHMEM", "shmem",
-                                "squirtle,totodile", "2")
+                run_middleware([["tcp", null]], "SHMEM", "shmem",
+                                "grass", "grass", "2")
+              }
+            }
+          }
+        }
+        stage('SHMEM_water') {
+          steps {
+            script {
+              dir (RUN_LOCATION) {
+                run_middleware([["verbs", "rxm"], ["sockets", null]], "SHMEM",
+                                "shmem", "water", "squirtle,totodile", "2")
               }
             }
           }
@@ -520,27 +732,27 @@ pipeline {
             script {
               dir (RUN_LOCATION) {
                 run_middleware([["tcp", null]], "multinode_performance",
-                               "multinode", "bulbasaur", "2")
+                               "multinode", "grass", "bulbasaur", "2")
               }
             }
           }
         }
-        stage ('oneCCL') {
+	      stage ('oneCCL') {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_middleware([["tcp", "rxm"]/*, ["psm3", null]*/], "oneCCL",
-                               "oneccl", "bulbasaur", "2")
-              }
-            }
-          }
-        }
-        stage ('oneCCL-GPU') {
-          steps {
-            script {
-              dir (RUN_LOCATION) {
-                run_middleware([["verbs", "rxm"]], "oneCCL-GPU", "onecclgpu",
-                               "charmander", "2")
+		            run_middleware([["verbs", null]], "oneCCL",
+                               "oneccl", "water", "squirtle,totodile", "2")
+		            run_middleware([["shm", null]], "oneCCL",
+			                         "oneccl", "grass", "bulbasaur", "1")
+		            run_middleware([["psm3", null]], "oneCCL",
+			                         "oneccl", "water", "squirtle", "2")
+		            run_middleware([["tcp", null]], "oneCCL",
+			                         "oneccl", "grass", "bulbasaur", "2")
+                run_middleware([["shm", null]], "oneCCL_DSA",
+                               "oneccl", "electric", "pikachu", "1", null, null,
+                               """CCL_ATL_SHM=1 FI_SHM_DISABLE_CMA=1 \
+                               FI_SHM_USE_DSA_SAR=1 FI_LOG_LEVEL=warn""")
               }
             }
           }
@@ -551,9 +763,16 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_middleware([["verbs", "rxm"]], "oneCCL-GPU-v3", "onecclgpu",
-                               "fabrics-ci", "2")
-              } 
+		            run_middleware([["tcp", null]], "oneCCL-GPU-v3", "onecclgpu",
+			                         "gpu", "fabrics-ci", "2", null, null,
+                               "FI_HMEM_DISABLE_P2P=1")
+		            run_middleware([["psm3", null]], "oneCCL-GPU-v3", "onecclgpu",
+			                         "gpu", "fabrics-ci", "2", null, null,
+                               "FI_HMEM_DISABLE_P2P=1")
+		            run_middleware([["verbs", null]], "oneCCL-GPU-v3", "onecclgpu",
+                               "gpu", "fabrics-ci", "2", null, null,
+                               "FI_HMEM_DISABLE_P2P=1")
+              }
             }
           }
         }
@@ -565,7 +784,7 @@ pipeline {
               dir (RUN_LOCATION) {
                 run_python(PYTHON_VERSION,
                            """runtests.py --prov='tcp' --util='rxm' \
-                           --test=daos \
+                           --test=daos --build_hw=daos \
                            --log_file=${env.LOG_DIR}/daos_tcp-rxm_reg""")
               }
             }
@@ -579,7 +798,7 @@ pipeline {
               dir (RUN_LOCATION) {
                 run_python(PYTHON_VERSION,
                            """runtests.py --prov='verbs' --util='rxm' \
-                           --test=daos \
+                           --test=daos --build_hw=daos \
                            --log_file=${env.LOG_DIR}/daos_verbs-rxm_reg""")
               }
             }
@@ -590,41 +809,42 @@ pipeline {
           options { skipDefaultCheckout() }
           steps {
             script {
-              dir ("${env.WORKSPACE}/${SCRIPT_LOCATION}/") {
-                dmabuf_output = "${LOG_DIR}/DMABUF-Tests_verbs-rxm_dmabuf_reg"
+              dir (RUN_LOCATION) {
+                dmabuf_output = "${LOG_DIR}/DMABUF-Tests_verbs-rxm_dmabuf"
                 cmd = """ python3.9 runtests.py --test=dmabuf \
-                           --prov=verbs --util=rxm"""
-                slurm_batch("fabrics-ci", "1", "${dmabuf_output}", "${cmd}")
-                slurm_batch("fabrics-ci", "2", "${dmabuf_output}", "${cmd}")
+                           --prov=verbs --util=rxm --build_hw=gpu"""
+                slurm_batch("fabrics-ci", "1", "${dmabuf_output}_1_reg",
+                            "${cmd}")
+                slurm_batch("fabrics-ci", "2", "${dmabuf_output}_2_reg",
+                            "${cmd}")
               }
             }
           }
         }
-        stage ('ze-shm') {
+        stage ('cuda-shm-v1') {
           steps {
             script {
               dir (RUN_LOCATION) {
-                def providers = [["shm", null]]
-                def directions = ["h2d", "d2d", "xd2d"]
-                def base_cmd = "python3.9 runtests.py --device=ze"
-                def prefix = "${env.LOG_DIR}/ze_"
-                def suffix = "_reg"
-                for (prov in providers) {
-                  for (way in directions) {
-                    if (prov[1]) {
-                      echo "Running ${prov[0]}-${prov[1]} ze"
-                      slurm_batch("charmander", "1",
-                                "${prefix}${prov[0]}-${prov[1]}_${way}${suffix}",
-                                """${base_cmd} --prov=${prov[0]} \
-                                --util=${prov[1]} --way=${way}""")
-                    } else {
-                      echo "Running ${prov[0]} ze"
-                      slurm_batch("charmander", "1",
-                                  "${prefix}${prov[0]}_${way}${suffix}",
-                                  "${base_cmd} --prov=${prov[0]} --way=${way}")
-                    }
-                  }
-                }
+                run_fabtests("cuda_v1_shm", "cyndaquil", "cyndaquil", "1",
+                             "shm", null, null, "h2d")
+                run_fabtests("cuda_v1_shm", "cyndaquil", "cyndaquil", "1",
+                             "shm", null, null, "d2d")
+                // run_fabtests("cuda_v1_shm", "cyndaquil", "cyndaquil", "1",
+                //              "shm", null, null, "xd2d")
+              }
+            }
+          }
+        }
+        stage ('cuda-shm-v2') {
+          steps {
+            script {
+              dir (RUN_LOCATION) {
+                run_fabtests("cuda_v2_shm", "quilava", "quilava", "1", "shm",
+                             null, null, "h2d")
+                run_fabtests("cuda_v2_shm", "quilava", "quilava", "1", "shm",
+                             null, null, "d2d")
+                // run_fabtests("cuda_v2_shm", "quilava ", "quilava", "1", "shm",
+                //              null, null, "xd2d")
               }
             }
           }
@@ -635,27 +855,12 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                def providers = [["shm", null]]
-                def directions = ["h2d", "d2d", "xd2d"]
-                def base_cmd = "python3.9 runtests.py --device=ze"
-                def prefix = "${env.LOG_DIR}/ze_v3_"
-                def suffix = "_reg"
-                for (prov in providers) {
-                  for (way in directions) {
-                    if (prov[1]) {
-                      echo "Running ${prov[0]}-${prov[1]} ze"
-                      slurm_batch("fabrics-ci", "1",
-                                "${prefix}${prov[0]}-${prov[1]}_${way}${suffix}",
-                                """${base_cmd} --prov=${prov[0]} \
-                                --util=${prov[1]} --way=${way}""")
-                    } else {
-                      echo "Running ${prov[0]} ze"
-                      slurm_batch("fabrics-ci", "1",
-                                  "${prefix}${prov[0]}_${way}${suffix}",
-                                  "${base_cmd} --prov=${prov[0]} --way=${way}")
-                    }
-                  }
-                }
+                run_fabtests("ze_v3_shm", "gpu", "fabrics-ci", "1", "shm", null,
+                             "FI_HMEM_DISABLE_P2P=1", "h2d")
+                run_fabtests("ze_v3_shm", "gpu", "fabrics-ci", "1", "shm", null,
+                             "FI_HMEM_DISABLE_P2P=1", "d2d")
+                run_fabtests("ze_v3_shm", "gpu", "fabrics-ci", "1", "shm", null,
+                             "FI_HMEM_DISABLE_P2P=1", "xd2d")
               }
             }
           }
@@ -665,7 +870,7 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-                run_fabtests("shm_dsa", "mudkip", "1", "shm", null,
+                run_fabtests("shm_dsa", "electric", "pikachu", "1", "shm", null,
                              """FI_SHM_DISABLE_CMA=1 FI_SHM_USE_DSA_SAR=1 \
                                 FI_LOG_LEVEL=warn""")
               }
@@ -716,16 +921,13 @@ pipeline {
     }
     cleanup {
       node ('daos_head') {
-        dir ("${DELETE_LOCATION}") { deleteDir() }
         dir("${env.WORKSPACE}") { deleteDir() }
         dir("${env.WORKSPACE}@tmp") { deleteDir() }
       }
       node ('ze') {
-        dir("${DELETE_LOCATION}") { deleteDir() }
         dir("${env.WORKSPACE}") { deleteDir() }
         dir("${env.WORKSPACE}@tmp") { deleteDir() }
       }
-      dir("${DELETE_LOCATION}") { deleteDir() }
       dir("${env.WORKSPACE}") { deleteDir() }
       dir("${env.WORKSPACE}@tmp") { deleteDir() }
     }

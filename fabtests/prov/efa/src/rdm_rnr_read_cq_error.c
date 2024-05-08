@@ -41,8 +41,6 @@
 
 static int rnr_read_cq_error(void)
 {
-	struct fi_cq_data_entry comp;
-	struct fi_cq_err_entry comp_err = {0};
 	int total_send, expected_rnr_error;
 	int ret, i, cnt, rnr_flag;
 	const char *prov_errmsg;
@@ -60,7 +58,12 @@ static int rnr_read_cq_error(void)
 	for (i = 0; i < total_send; i++) {
 		do {
 			ret = fi_send(ep, tx_buf, 32, mr_desc, remote_fi_addr, &tx_ctx);
-			if (ret < 0 && ret != -FI_EAGAIN) {
+			if (ret == -FI_EAGAIN) {
+				(void) fi_cq_read(txcq, NULL, 0);
+				continue;
+			}
+
+			if (ret < 0) {
 				FT_PRINTERR("fi_send", -ret);
 				return ret;
 			}
@@ -69,6 +72,9 @@ static int rnr_read_cq_error(void)
 
 	cnt = total_send;
 	do {
+		struct fi_cq_data_entry comp = {0};
+		struct fi_cq_err_entry comp_err = {0};
+
 		ret = fi_cq_read(txcq, &comp, 1);
 		if (ret == 1) {
 			cnt--;

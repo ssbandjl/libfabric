@@ -205,6 +205,9 @@ extern "C" {
 #ifndef ESTALE
 # define ESTALE			246	/* Stale NFS file handle */
 #endif
+#ifndef EREMOTEIO
+# define EREMOTEIO		247	/* Remote I/O error */
+#endif
 
 /* MSG_NOSIGNAL doesn't exist on Windows */
 #ifndef MSG_NOSIGNAL
@@ -280,6 +283,9 @@ do						\
 #define ntohll _byteswap_uint64
 #define be64toh ntohll
 #define strncasecmp _strnicmp
+
+#define access(path, mode) _access(path, mode)
+#define F_OK 0
 
 typedef int pid_t;
 #define getpid (int)GetCurrentProcessId
@@ -684,6 +690,12 @@ static inline char* strsep(char **stringp, const char *delim)
 
 #define __attribute__(x)
 
+static inline int pthread_atfork(void (*prepare)(void), void (*parent)(void),
+				 void (*child)(void))
+{
+	return FI_ENOSYS;
+}
+
 static inline int ofi_mmap_anon_pages(void **memptr, size_t size, int flags)
 {
 	return -FI_ENOSYS;
@@ -918,6 +930,11 @@ static inline char *strcasestr(const char *haystack, const char *needle)
 	return pos;
 }
 
+static inline char *strtok_r(char *str, const char *delimiters, char **saveptr)
+{
+	return strtok_s(str, delimiters, saveptr);
+}
+
 #ifndef _SC_PAGESIZE
 #define _SC_PAGESIZE	0
 #endif
@@ -952,6 +969,11 @@ static inline long ofi_sysconf(int name)
 }
 
 int ofi_shm_unmap(struct util_shm *shm);
+
+static inline ssize_t ofi_get_addr_page_size(const void *addr)
+{
+	return ofi_sysconf(_SC_PAGESIZE);
+}
 
 static inline ssize_t ofi_get_hugepage_size(void)
 {

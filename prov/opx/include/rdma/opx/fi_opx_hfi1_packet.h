@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 by Argonne National Laboratory.
- * Copyright (C) 2021-2023 Cornelis Networks.
+ * Copyright (C) 2021-2024 Cornelis Networks.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -43,7 +43,12 @@
 #include "rdma/fabric.h"	/* only for 'fi_addr_t' ... which is a typedef to uint64_t */
 #include "rdma/opx/fi_opx_addr.h"
 
-
+#if defined(__riscv) && defined(__riscv_xlen) && (__riscv_xlen == 64)
+#ifndef PAGE_SIZE
+/* 4K pages default */
+#define PAGE_SIZE 4096
+#endif
+#endif
 
 #define FI_OPX_ADDR_SEP_RX_MAX			(4)
 #define FI_OPX_HFI1_PACKET_MTU			(8192)
@@ -246,6 +251,9 @@ struct fi_opx_hfi1_stl_packet_hdr {
 		(tid) |= FI_OPX_EXP_TID_SET(field, (value));			\
 	} while (0)
 
+#define FI_OPX_PKT_RZV_FLAGS_SHIFT		(16)
+#define FI_OPX_PKT_RZV_FLAGS_NONCONTIG		(1ul)
+#define FI_OPX_PKT_RZV_FLAGS_NONCONTIG_MASK	(FI_OPX_PKT_RZV_FLAGS_NONCONTIG << FI_OPX_PKT_RZV_FLAGS_SHIFT)
 
 #ifndef NDEBUG
 static inline
@@ -473,7 +481,8 @@ union fi_opx_hfi1_packet_hdr {
 
 		/* == quadword 4 == */
 		uint16_t	origin_rs;
-		uint16_t	unused[2];
+		uint8_t		flags;
+		uint8_t		unused[3];
 		uint16_t	niov;			/* number of non-contiguous buffers */
 
 		/* == quadword 5 == */
@@ -512,7 +521,7 @@ union fi_opx_hfi1_packet_hdr {
 
 				/* == quadword 5,6 == */
 				uintptr_t	origin_byte_counter_vaddr;
-				uintptr_t	target_byte_counter_vaddr;
+				uintptr_t	target_context_vaddr;
 			} vaddr;
 			struct {
 				/* == quadword 4 == */
@@ -524,7 +533,7 @@ union fi_opx_hfi1_packet_hdr {
 				uint16_t	niov;		/* number of non-contiguous buffers described in the packet payload */
 
 				/* == quadword 5,6 == */
-				uintptr_t	target_completion_counter_vaddr;
+				uintptr_t	rma_request_vaddr;
 				uint64_t	key;
 			} mr;
 			struct {
@@ -578,7 +587,7 @@ union fi_opx_hfi1_packet_hdr {
 				uint64_t	reserved; /* Common fields */
 
 				/* == quadword 5 == */
-				uintptr_t       completion_counter_vaddr; /*struct fi_opx_completion_counter * */
+				uintptr_t	rma_request_vaddr;
 				/* == quadword 6 == */
 				uintptr_t	rbuf;
 			} get;
@@ -588,7 +597,7 @@ union fi_opx_hfi1_packet_hdr {
 				uint64_t	reserved; /* Common fields */
 
 				/* == quadword 5 == */
-				uintptr_t       completion_vaddr; /* struct fi_opx_rzv_completion * */
+				uintptr_t	completion_vaddr; /* struct fi_opx_rzv_completion * */
 				/* == quadword 6 == */
 				uintptr_t	rbuf;
 			} rzv;
@@ -655,6 +664,8 @@ union fi_opx_hfi1_packet_hdr {
 	} __attribute__((__packed__)) service;		/* "reliability service" */
 } __attribute__((__aligned__(8)));
 
+static_assert(((offsetof(union fi_opx_hfi1_packet_hdr, rendezvous.flags) % 8) * 8) == FI_OPX_PKT_RZV_FLAGS_SHIFT,
+		"struct fi_opx_hfi1_packet_hdr.rendezvous.flags offset inconsistent with FLAGS_SHIFT!");
 
 static inline
 fi_opx_uid_t fi_opx_hfi1_packet_hdr_uid (const union fi_opx_hfi1_packet_hdr * const hdr) {
@@ -743,28 +754,28 @@ void fi_opx_hfi1_dump_packet_hdr (const union fi_opx_hfi1_packet_hdr * const hdr
 	return;
 }
 
-struct fi_opx_hfi1_fetch_metadata {
-	uint64_t			dst_paddr;
-	uint64_t			cq_paddr;
-	uint64_t			fifo_map;
-	uint64_t			unused;
-};
-
 union cacheline {
 	uint64_t			qw[8];
 	uint32_t			dw[16];
 	uint8_t				byte[64];
 };
 
-struct fi_opx_hfi1_dput_iov {
-	uintptr_t			rbuf;
-	uintptr_t			sbuf;
-	uint64_t			bytes;
+union fi_opx_hfi1_dput_iov {
+	uint64_t	qw[6];
+	struct {
+		uintptr_t			rbuf;
+		uintptr_t			sbuf;
+		uint64_t			bytes;
+		uint64_t			rbuf_device;
+		uint64_t			sbuf_device;
+		enum fi_hmem_iface		rbuf_iface;
+		enum fi_hmem_iface		sbuf_iface;
+	};
 };
 
 struct fi_opx_hfi1_dput_fetch {
 	uintptr_t			fetch_rbuf;
-	uintptr_t			fetch_counter_vaddr;
+	uintptr_t			rma_request_vaddr;
 };
 
 union fi_opx_hfi1_dput_rbuf {
@@ -772,9 +783,17 @@ union fi_opx_hfi1_dput_rbuf {
 	uint32_t dw[2];
 };
 
-#define FI_OPX_MAX_DPUT_IOV ((FI_OPX_HFI1_PACKET_MTU/sizeof(struct fi_opx_hfi1_dput_iov) - 4) + 3)
+struct fi_opx_hmem_iov {
+	uintptr_t buf;
+	uint64_t len;
+	uint64_t device;
+	enum fi_hmem_iface iface;
+} __attribute__((__packed__));
 
-#define FI_OPX_MAX_DPUT_TIDPAIRS ((FI_OPX_HFI1_PACKET_MTU - sizeof(struct fi_opx_hfi1_dput_iov) - (2 * sizeof(uint32_t)))/sizeof(uint32_t))
+#define FI_OPX_MAX_HMEM_IOV ((FI_OPX_HFI1_PACKET_MTU - sizeof(uintptr_t)) / sizeof(struct fi_opx_hmem_iov))
+#define FI_OPX_MAX_DPUT_IOV ((FI_OPX_HFI1_PACKET_MTU / sizeof(union fi_opx_hfi1_dput_iov) - 4) + 3)
+
+#define FI_OPX_MAX_DPUT_TIDPAIRS ((FI_OPX_HFI1_PACKET_MTU - sizeof(union fi_opx_hfi1_dput_iov) - (2 * sizeof(uint32_t)))/sizeof(uint32_t))
 
 union fi_opx_hfi1_rzv_rts_immediate_info {
 	uint64_t	qw0;
@@ -783,7 +802,6 @@ union fi_opx_hfi1_rzv_rts_immediate_info {
 		uint8_t	qw_count;	/* only need 3 bits (0..7 quadwords) */
 		uint8_t	block_count;	/* only need 1 bits (0 or 1) */
 		uint8_t	end_block_count;/* only need 1 bits (0 or 1) */
-
 		uint32_t unused;
 	};
 };
@@ -796,53 +814,64 @@ union fi_opx_hfi1_packet_payload {
 
 			uintptr_t		src_vaddr;
 			uint64_t		src_blocks;		/* number of 64-byte data blocks to transfer */
-			uint64_t		unused_src[2];          /* src_device_id/src_device_iface */
+			uint64_t		src_device_id;
+			uint64_t		src_iface;
 			uint64_t		immediate_info;
 			uintptr_t		origin_byte_counter_vaddr;
 			uint64_t		unused[2];
 
 			/* ==== CACHE LINE 1 ==== */
-
-			uint8_t		immediate_byte[8];
-			uint64_t	immediate_qw[7];
+			union {
+				struct {
+					uint8_t		immediate_byte[8];
+					uint64_t	immediate_qw[7];
+				};
+				
+				union cacheline	cache_line_1;
+			};
 
 			/* ==== CACHE LINE 2-127 ==== */
 
-			union cacheline	immediate_block[FI_OPX_HFI1_PACKET_MTU/64 - 2];
+			union cacheline	immediate_block[FI_OPX_HFI1_PACKET_MTU / sizeof(union cacheline) - 2];
 
 		} contiguous;
 		struct {
 			/* ==== CACHE LINE 0 ==== */
 
-			uintptr_t	origin_byte_counter_vaddr;
-			size_t   	unused;
-			struct iovec iov[3];
+			uintptr_t		origin_byte_counter_vaddr;
+			struct fi_opx_hmem_iov	iov[2];
 
 			/* ==== CACHE LINE 1-127 (for 8k mtu) ==== */
-			/* 4 = iovecs per cache line */
-			struct iovec iov_ext[FI_OPX_HFI1_PACKET_MTU/sizeof(struct iovec) - 4];
+			struct fi_opx_hmem_iov	iov_ext[FI_OPX_MAX_HMEM_IOV - 2];
+			size_t			unused;
 
 		} noncontiguous;
 	} rendezvous;
 
 	struct {
-		struct fi_opx_hfi1_dput_iov	iov[0];
+		union fi_opx_hfi1_dput_iov	iov[FI_OPX_MAX_DPUT_IOV];
 	} cts;
 
 	/* tid_cts extends cts*/
 	struct {
-		struct fi_opx_hfi1_dput_iov	iov[1];
+		union fi_opx_hfi1_dput_iov	iov[1];
 		uint32_t  tid_offset;
 		uint32_t  ntidpairs;
 		uint32_t  tidpairs[FI_OPX_MAX_DPUT_TIDPAIRS];
 	} tid_cts;
 
-	struct {
-		struct fi_opx_hfi1_fetch_metadata	metadata;
-		uint8_t				data[FI_OPX_HFI1_PACKET_MTU-sizeof(struct fi_opx_hfi1_fetch_metadata)];
-	} atomic_fetch;
 } __attribute__((__aligned__(32)));
 
+static_assert(offsetof(union fi_opx_hfi1_packet_payload, rendezvous.contiguous.immediate_byte) == 64,
+		"struct fi_opx_hfi1_packet_payload.rendezvous.contiguous.immediate_byte should be aligned on cacheline 1!");
+static_assert(offsetof(union fi_opx_hfi1_packet_payload, rendezvous.contiguous.immediate_block) == 128,
+		"struct fi_opx_hfi1_packet_payload.rendezvous.contiguous.immediate_block should be aligned on cacheline 2!");
+static_assert(offsetof(union fi_opx_hfi1_packet_payload, rendezvous.noncontiguous.iov) == 8,
+		"struct fi_opx_hfi1_packet_payload.rendezvous.noncontiguous.iov should be 8 bytes into cacheline 0!");
+static_assert(offsetof(union fi_opx_hfi1_packet_payload, rendezvous.noncontiguous.iov_ext) == 64,
+		"struct fi_opx_hfi1_packet_payload.rendezvous.noncontiguous.iov_ext should be aligned on cacheline 1!");
+static_assert(offsetof(union fi_opx_hfi1_packet_payload, rendezvous.noncontiguous.unused) == (FI_OPX_HFI1_PACKET_MTU - 8),
+		"struct fi_opx_hfi1_packet_payload.rendezvous.noncontiguous.unused should end at packet MTU!");
 
 
 

@@ -66,6 +66,31 @@
 #ifndef _XNET_H_
 #define _XNET_H_
 
+#ifdef HAVE_FABRIC_PROFILE
+
+#include <ofi_profile.h>
+
+typedef struct xnet_profile {
+	struct util_profile util_prof;
+	uint64_t unexp_msg_cnt;
+} xnet_profile_t;
+
+#define xnet_prof_unexp_msg(prof, delta)    \
+do {    \
+	uint32_t evt = ((delta) > 0) ? FI_EVENT_UNEXP_MSG_RECVD :    \
+		       FI_EVENT_UNEXP_MSG_MATCHED;    \
+	if ((prof)) {    \
+		(prof)->unexp_msg_cnt += (delta);    \
+		ofi_prof_event_notify(&((prof)->util_prof),    \
+				      evt, NULL, 0);    \
+	}    \
+} while (0)
+
+#else
+typedef void  xnet_profile_t;
+#define xnet_prof_unexp_msg(ep, delta)     do {} while (0)
+
+#endif
 
 #define XNET_DEF_INJECT		128
 #define XNET_DEF_BUF_SIZE	16384
@@ -199,6 +224,8 @@ struct xnet_srx {
 	struct xnet_rdm		*rdm;
 	struct xnet_cq		*cq;
 	struct util_cntr	*cntr;
+
+	xnet_profile_t *profile;
 };
 
 int xnet_srx_context(struct fid_domain *domain, struct fi_rx_attr *attr,
@@ -237,6 +264,8 @@ struct xnet_ep {
 	void (*hdr_bswap)(struct xnet_ep *ep, struct xnet_base_hdr *hdr);
 
 	short			pollflags;
+
+	xnet_profile_t *profile;
 };
 
 struct xnet_event {
@@ -269,6 +298,8 @@ struct xnet_rdm {
 	struct index_map	conn_idx_map;
 	struct xnet_conn	*rx_loopback;
 	union ofi_sock_ip	addr;
+
+	xnet_profile_t *profile;
 };
 
 int xnet_rdm_ep(struct fid_domain *domain, struct fi_info *info,
@@ -399,6 +430,10 @@ static inline void xnet_signal_progress(struct xnet_progress *progress)
 #define XNET_NEED_CTS		BIT(11)
 #define XNET_MULTI_RECV		FI_MULTI_RECV /* BIT(16) */
 
+struct xnet_mrecv {
+	size_t			ref_cnt;
+};
+
 struct xnet_xfer_entry {
 	struct slist_entry	entry;
 	void			*user_buf;
@@ -409,9 +444,10 @@ struct xnet_xfer_entry {
 	struct util_cntr	*cntr;
 	uint64_t		tag_seq_no;
 	uint64_t		tag;
-	struct {
-		uint64_t	ignore;
-		size_t		rts_iov_cnt;
+	union {
+		uint64_t		ignore;
+		size_t			rts_iov_cnt;
+		struct xnet_mrecv	*mrecv;
 	};
 	fi_addr_t		src_addr;
 	uint64_t		cq_flags;
@@ -578,18 +614,27 @@ xnet_set_commit_flags(struct xnet_xfer_entry *xfer, uint64_t flags)
 }
 
 static inline uint64_t
-xnet_tx_completion_flag(struct xnet_ep *ep, uint64_t op_flags)
+xnet_tx_completion_get_msgflags(struct xnet_ep *ep, uint64_t flags)
 {
-	/* Generate a completion if op flags indicate or we generate
-	 * completions by default
+	/* Generate a completion if msg flags indicate or app
+	 * requests
 	 */
-	return (ep->util_ep.tx_op_flags | op_flags) & FI_COMPLETION;
+	return (ep->util_ep.tx_msg_flags | flags) & FI_COMPLETION;
 }
 
 static inline uint64_t
 xnet_rx_completion_flag(struct xnet_ep *ep)
 {
 	return ep->util_ep.rx_op_flags & FI_COMPLETION;
+}
+
+static inline uint64_t
+xnet_tx_completion_get_opflags(struct xnet_ep *ep)
+{
+	/* Generate a completion if op flags indicate or we generate
+	 * completions by default
+	 */
+	return ep->util_ep.tx_op_flags & FI_COMPLETION;
 }
 
 static inline struct xnet_xfer_entry *
@@ -699,6 +744,11 @@ static inline uint64_t xnet_msg_len(union xnet_hdrs *hdr)
 		return hdr->base_hdr.size - hdr->base_hdr.hdr_size;
 	}
 }
+
+int xnet_ep_ops_open(struct fid *fid, const char *name,
+		     uint64_t flags, void **ops, void *context);
+int xnet_rdm_ops_open(struct fid *fid, const char *name,
+		      uint64_t flags, void **ops, void *context);
 
 #define XNET_WARN_ERR(subsystem, log_str, err) \
 	FI_WARN(&xnet_prov, subsystem, log_str "%s (%d)\n", \

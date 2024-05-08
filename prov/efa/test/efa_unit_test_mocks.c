@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <stdlib.h>
@@ -192,6 +195,12 @@ struct efa_unit_test_mocks g_efa_unit_test_mocks = {
 #endif
 	.ofi_copy_from_hmem_iov = __real_ofi_copy_from_hmem_iov,
 	.ibv_is_fork_initialized = __real_ibv_is_fork_initialized,
+#if HAVE_EFADV_QUERY_MR
+	.efadv_query_mr = __real_efadv_query_mr,
+#endif
+#if HAVE_EFA_DATA_IN_ORDER_ALIGNED_128_BYTES
+	.ibv_query_qp_data_in_order = __real_ibv_query_qp_data_in_order,
+#endif
 };
 
 struct ibv_ah *__wrap_ibv_create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr)
@@ -304,3 +313,62 @@ enum ibv_fork_status efa_mock_ibv_is_fork_initialized_return_mock(void)
 {
 	return mock();
 }
+
+#if HAVE_EFADV_QUERY_MR
+int __wrap_efadv_query_mr(struct ibv_mr *ibv_mr, struct efadv_mr_attr *attr, uint32_t inlen)
+{
+	return g_efa_unit_test_mocks.efadv_query_mr(ibv_mr, attr, inlen);
+}
+
+/* set recv_ic_id as 0 */
+int efa_mock_efadv_query_mr_recv_ic_id_0(struct ibv_mr *ibv_mr, struct efadv_mr_attr *attr, uint32_t inlen)
+{
+	attr->ic_id_validity = EFADV_MR_ATTR_VALIDITY_RECV_IC_ID;
+	attr->recv_ic_id = 0;
+	return 0;
+}
+
+/* set rdma_read_ic_id id as 1 */
+int efa_mock_efadv_query_mr_rdma_read_ic_id_1(struct ibv_mr *ibv_mr, struct efadv_mr_attr *attr, uint32_t inlen)
+{
+	attr->ic_id_validity = EFADV_MR_ATTR_VALIDITY_RDMA_READ_IC_ID;
+	attr->rdma_read_ic_id = 1;
+	return 0;
+}
+
+/* set rdma_recv_ic_id id as 2 */
+int efa_mock_efadv_query_mr_rdma_recv_ic_id_2(struct ibv_mr *ibv_mr, struct efadv_mr_attr *attr, uint32_t inlen)
+{
+	attr->ic_id_validity = EFADV_MR_ATTR_VALIDITY_RDMA_RECV_IC_ID;
+	attr->rdma_recv_ic_id = 2;
+	return 0;
+}
+
+/* set recv_ic_id id as 0, rdma_read_ic_id as 1 */
+int efa_mock_efadv_query_mr_recv_and_rdma_read_ic_id_0_1(struct ibv_mr *ibv_mr, struct efadv_mr_attr *attr, uint32_t inlen)
+{
+	attr->ic_id_validity = EFADV_MR_ATTR_VALIDITY_RECV_IC_ID;
+	attr->recv_ic_id = 0;
+	attr->ic_id_validity |= EFADV_MR_ATTR_VALIDITY_RDMA_READ_IC_ID;
+	attr->rdma_read_ic_id = 1;
+	return 0;
+}
+
+#endif /* HAVE_EFADV_QUERY_MR */
+
+#if HAVE_EFA_DATA_IN_ORDER_ALIGNED_128_BYTES
+int __wrap_ibv_query_qp_data_in_order(struct ibv_qp *qp, enum ibv_wr_opcode op, uint32_t flags)
+{
+	return g_efa_unit_test_mocks.ibv_query_qp_data_in_order(qp, op, flags);
+}
+
+int efa_mock_ibv_query_qp_data_in_order_return_0(struct ibv_qp *qp, enum ibv_wr_opcode op, uint32_t flags)
+{
+	return 0;
+}
+
+int efa_mock_ibv_query_qp_data_in_order_return_in_order_aligned_128_bytes(struct ibv_qp *qp, enum ibv_wr_opcode op, uint32_t flags)
+{
+	return IBV_QUERY_QP_DATA_IN_ORDER_ALIGNED_128_BYTES;
+}
+#endif

@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include "efa_unit_tests.h"
 #include "efa_rdm_pke_cmd.h"
 
@@ -37,7 +40,13 @@ void test_efa_rnr_queue_and_resend(struct efa_resource **state)
 	efa_rdm_ep->base_ep.qp->ibv_qp_ex->wr_complete = &efa_mock_ibv_wr_complete_no_op;
 	assert_true(dlist_empty(&efa_rdm_ep->txe_list));
 
-	efa_rdm_ep->use_shm_for_tx = false;
+	/* close shm_ep to force efa_rdm_ep to use efa device to send */
+	if (efa_rdm_ep->shm_ep) {
+		ret = fi_close(&efa_rdm_ep->shm_ep->fid);
+		assert_int_equal(ret, 0);
+		efa_rdm_ep->shm_ep = NULL;
+	}
+
 	ret = fi_send(resource->ep, send_buff.buff, send_buff.size, fi_mr_desc(send_buff.mr), peer_addr, NULL /* context */);
 	assert_int_equal(ret, 0);
 	assert_false(dlist_empty(&efa_rdm_ep->txe_list));

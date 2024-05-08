@@ -85,6 +85,7 @@ static int util_cq_insert_error(struct util_cq *cq,
 				const struct fi_cq_err_entry *err_entry)
 {
 	struct util_cq_aux_entry *entry;
+	void *err_data;
 
 	assert(ofi_genlock_held(&cq->cq_lock));
 	assert(err_entry->err);
@@ -93,6 +94,18 @@ static int util_cq_insert_error(struct util_cq *cq,
 		return -FI_ENOMEM;
 
 	entry->comp = *err_entry;
+
+	if (err_entry->err_data_size) {
+		err_data = mem_dup(err_entry->err_data,
+				   err_entry->err_data_size);
+		if (!err_data) {
+			free(entry);
+			return -FI_ENOMEM;
+		}
+
+		entry->comp.err_data = err_data;
+	}
+
 	util_cq_insert_aux(cq, entry);
 	return 0;
 }
@@ -269,15 +282,20 @@ ssize_t ofi_cq_readerr(struct fid_cq *cq_fid, struct fi_cq_err_entry *buf,
 {
 	struct util_cq_aux_entry *aux_entry;
 	struct util_cq *cq;
-	char *err_buf_save;
-	size_t err_data_size;
 	uint32_t api_version;
 	ssize_t ret;
+	size_t err_data_size = buf->err_data_size;
 
 	cq = container_of(cq_fid, struct util_cq, cq_fid);
 	api_version = cq->domain->fabric->fabric_fid.api_version;
 
 	ofi_genlock_lock(&cq->cq_lock);
+
+	if (cq->err_data) {
+		free(cq->err_data);
+		cq->err_data = NULL;
+	}
+
 	if (ofi_cirque_isempty(cq->cirq) ||
 	    !(ofi_cirque_head(cq->cirq)->flags & UTIL_FLAG_AUX)) {
 		ret = -FI_EAGAIN;
@@ -294,22 +312,27 @@ ssize_t ofi_cq_readerr(struct fid_cq *cq_fid, struct fi_cq_err_entry *buf,
 		goto unlock;
 	}
 
-	if ((FI_VERSION_GE(api_version, FI_VERSION(1, 5))) &&
-	    buf->err_data_size) {
-		err_buf_save = buf->err_data;
-		err_data_size = MIN(buf->err_data_size,
-				    aux_entry->comp.err_data_size);
+	ofi_cq_err_memcpy(api_version, buf, &aux_entry->comp);
 
-		*buf = aux_entry->comp;
-		memcpy(err_buf_save, aux_entry->comp.err_data, err_data_size);
-		buf->err_data = err_buf_save;
-		buf->err_data_size = err_data_size;
-	} else {
-		memcpy(buf, &aux_entry->comp,
-		       sizeof(struct fi_cq_err_entry_1_0));
+	/* For compatibility purposes, if err_data_size is 0 on input,
+	 * output err_data will be set to a data buffer owned by the provider.
+	 */
+	if (aux_entry->comp.err_data_size &&
+	    (err_data_size == 0 || FI_VERSION_LT(api_version, FI_VERSION(1, 5)))) {
+		cq->err_data = mem_dup(aux_entry->comp.err_data,
+				       aux_entry->comp.err_data_size);
+		if (!cq->err_data) {
+			ret = -FI_ENOMEM;
+			goto unlock;
+		}
+
+		buf->err_data = cq->err_data;
+		buf->err_data_size = aux_entry->comp.err_data_size;
 	}
 
 	slist_remove_head(&cq->aux_queue);
+	if (aux_entry->comp.err_data_size)
+		free(aux_entry->comp.err_data);
 	free(aux_entry);
 	if (slist_empty(&cq->aux_queue)) {
 		ofi_cirque_discard(cq->cirq);
@@ -420,8 +443,13 @@ int ofi_cq_cleanup(struct util_cq *cq)
 			fi_close(&cq->wait->wait_fid.fid);
 	}
 
+	if (cq->err_data) {
+		free(cq->err_data);
+		cq->err_data = NULL;
+	}
+
 	ofi_genlock_destroy(&cq->cq_lock);
-	ofi_mutex_destroy(&cq->ep_list_lock);
+	ofi_genlock_destroy(&cq->ep_list_lock);
 	ofi_atomic_dec32(&cq->domain->ref);
 	return 0;
 }
@@ -491,14 +519,14 @@ void ofi_cq_progress(struct util_cq *cq)
 	struct fid_list_entry *fid_entry;
 	struct dlist_entry *item;
 
-	ofi_mutex_lock(&cq->ep_list_lock);
+	ofi_genlock_lock(&cq->ep_list_lock);
 	dlist_foreach(&cq->ep_list, item) {
 		fid_entry = container_of(item, struct fid_list_entry, entry);
 		ep = container_of(fid_entry->fid, struct util_ep, ep_fid.fid);
 		ep->progress(ep);
 
 	}
-	ofi_mutex_unlock(&cq->ep_list_lock);
+	ofi_genlock_unlock(&cq->ep_list_lock);
 }
 
 static ssize_t util_peer_cq_write(struct fid_peer_cq *cq, void *context,
@@ -680,7 +708,8 @@ int ofi_cq_init(const struct fi_provider *prov, struct fid_domain *domain,
 {
 	struct fi_wait_attr wait_attr;
 	struct fid_wait *wait;
-	enum ofi_lock_type lock_type;
+	enum ofi_lock_type cq_lock_type;
+	enum ofi_lock_type ep_list_lock_type;
 	int ret;
 
 	assert(progress);
@@ -691,22 +720,26 @@ int ofi_cq_init(const struct fi_provider *prov, struct fid_domain *domain,
 	cq->cq_fid.fid.ops = &util_cq_fi_ops;
 	cq->cq_fid.ops = &util_cq_ops;
 	cq->progress = progress;
+	cq->err_data = NULL;
 
 	cq->domain = container_of(domain, struct util_domain, domain_fid);
 	ofi_atomic_initialize32(&cq->ref, 0);
 	ofi_atomic_initialize32(&cq->wakeup, 0);
 	dlist_init(&cq->ep_list);
-	ret = ofi_mutex_init(&cq->ep_list_lock);
-	if (ret)
-		return ret;
 
 	if (cq->domain->threading == FI_THREAD_COMPLETION ||
 	    cq->domain->threading == FI_THREAD_DOMAIN)
-		lock_type = OFI_LOCK_NOOP;
+		cq_lock_type = OFI_LOCK_NOOP;
 	else
-		lock_type = cq->domain->lock.lock_type;
+		cq_lock_type = cq->domain->lock.lock_type;
 
-	ret = ofi_genlock_init(&cq->cq_lock, lock_type);
+	ret = ofi_genlock_init(&cq->cq_lock, cq_lock_type);
+	if (ret)
+		return ret;
+
+	ep_list_lock_type = ofi_progress_lock_type(cq->domain->threading,
+						   cq->domain->control_progress);
+	ret = ofi_genlock_init(&cq->ep_list_lock, ep_list_lock_type);
 	if (ret)
 		goto destroy1;
 
@@ -767,9 +800,9 @@ int ofi_cq_init(const struct fi_provider *prov, struct fid_domain *domain,
 cleanup:
 	util_peer_cq_cleanup(cq);
 destroy2:
-	ofi_genlock_destroy(&cq->cq_lock);
+	ofi_genlock_destroy(&cq->ep_list_lock);
 destroy1:
-	ofi_mutex_destroy(&cq->ep_list_lock);
+	ofi_genlock_destroy(&cq->cq_lock);
 	return ret;
 }
 

@@ -214,8 +214,7 @@ static int init_caps(struct fi_info *hints, uint64_t bits)
 			 FI_MULTICAST | FI_NAMED_RX_CTX | FI_HMEM | \
 			 FI_COLLECTIVE)
 #define PRIMARY_RX_CAPS (FI_MSG | FI_RMA | FI_TAGGED | FI_ATOMIC | \
-			 FI_DIRECTED_RECV | FI_VARIABLE_MSG | \
-			 FI_HMEM | FI_COLLECTIVE)
+			 FI_DIRECTED_RECV | FI_HMEM | FI_COLLECTIVE)
 
 #define PRIMARY_CAPS (PRIMARY_TX_CAPS | PRIMARY_RX_CAPS)
 #define DOMAIN_CAPS (FI_LOCAL_COMM | FI_REMOTE_COMM | FI_SHARED_AV)
@@ -695,11 +694,16 @@ static int test_caps_regression(char *node, char *service, uint64_t flags,
 	struct fi_info *fi;
 	int ret;
 
+	if (!hints) {
+		printf("invalid test case: hints may not be null");
+		return -FI_EINVAL;
+	}
+
 	ret = fi_getinfo(FT_FIVERSION, node, service, flags, NULL, info);
 	if (ret)
 		return ret;
 
-	if (!hints || !hints->fabric_attr || !hints->fabric_attr->prov_name) {
+	if (!hints->fabric_attr || !hints->fabric_attr->prov_name) {
 		fi = *info;
 	} else {
 		for (fi = *info; fi; fi = fi->next) {
@@ -810,7 +814,7 @@ out:
 	 * At the moment, only invalid_dom does this and the domain name
 	 * is the only application owned memory. Free the application owned
 	 * memory so that fi_freeinfo only frees memory that it owns. */
-	if (init) {
+	if (init && !!test_hints) {
 		free(test_hints->domain_attr->name);
 		test_hints->domain_attr->name = NULL;
 	}

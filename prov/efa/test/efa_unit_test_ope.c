@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
+
 #include "efa_unit_tests.h"
 
 void test_efa_rdm_ope_prepare_to_post_send_impl(struct efa_resource *resource,
@@ -10,6 +13,7 @@ void test_efa_rdm_ope_prepare_to_post_send_impl(struct efa_resource *resource,
 	struct efa_ep_addr raw_addr;
 	struct efa_mr mock_mr;
 	struct efa_rdm_ope mock_txe;
+	struct efa_rdm_peer mock_peer;
 	size_t raw_addr_len = sizeof(raw_addr);
 	fi_addr_t addr;
 	int pkt_entry_cnt, pkt_entry_data_size_vec[1024];
@@ -31,8 +35,9 @@ void test_efa_rdm_ope_prepare_to_post_send_impl(struct efa_resource *resource,
 	mock_txe.iov[0].iov_base = NULL;
 	mock_txe.iov[0].iov_len = 9000;
 	mock_txe.desc[0] = &mock_mr;
-
 	mock_txe.ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	mock_txe.peer = &mock_peer;
+
 	err = efa_rdm_ope_prepare_to_post_send(&mock_txe,
 					       EFA_RDM_MEDIUM_MSGRTM_PKT,
 					       &pkt_entry_cnt,

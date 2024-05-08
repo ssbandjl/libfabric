@@ -389,33 +389,47 @@ hit:
 }
 
 struct ofi_mr_entry *ofi_mr_cache_find(struct ofi_mr_cache *cache,
-				       const struct fi_mr_attr *attr)
+				       const struct fi_mr_attr *attr,
+				       uint64_t flags)
 {
 	struct ofi_mr_info info;
 	struct ofi_mr_entry *entry;
+	struct ofi_mem_monitor *monitor;
 
 	assert(attr->iov_count == 1);
 	FI_DBG(cache->prov, FI_LOG_MR, "find %p (len: %zu)\n",
 	       attr->mr_iov->iov_base, attr->mr_iov->iov_len);
 
 	pthread_mutex_lock(&mm_lock);
+
+	if (!dlist_empty(&cache->dead_region_list)) {
+		pthread_mutex_unlock(&mm_lock);
+		ofi_mr_cache_flush(cache, false);
+		pthread_mutex_lock(&mm_lock);
+	}
+
 	cache->search_cnt++;
 
 	info.peer_id = 0;
-	info.iov = *attr->mr_iov;
+	ofi_mr_info_get_iov_from_mr_attr(&info, attr, flags);
 	entry = ofi_mr_rbt_find(&cache->tree, &info);
 	if (!entry) {
 		goto unlock;
 	}
 
-	if (!ofi_iov_within(attr->mr_iov, &entry->info.iov)) {
-		entry = NULL;
-		goto unlock;
-	}
+	monitor = cache->monitors[entry->info.iface];
 
-	cache->hit_cnt++;
-	if ((entry)->use_cnt++ == 0)
-		dlist_remove_init(&(entry)->list_entry);
+	if (ofi_iov_within(attr->mr_iov, &entry->info.iov) &&
+	    monitor->valid(monitor, entry->info.iov.iov_base, entry)) {
+		cache->hit_cnt++;
+		if ((entry)->use_cnt++ == 0)
+			dlist_remove_init(&(entry)->list_entry);
+	} else {
+		while (entry) {
+			util_mr_uncache_entry(cache, entry);
+			entry = ofi_mr_rbt_find(&cache->tree, &entry->info);
+		}
+	}
 
 unlock:
 	pthread_mutex_unlock(&mm_lock);
@@ -423,7 +437,7 @@ unlock:
 }
 
 int ofi_mr_cache_reg(struct ofi_mr_cache *cache, const struct fi_mr_attr *attr,
-		     struct ofi_mr_entry **entry)
+		     struct ofi_mr_entry **entry, uint64_t flags)
 {
 	int ret;
 
@@ -440,7 +454,7 @@ int ofi_mr_cache_reg(struct ofi_mr_cache *cache, const struct fi_mr_attr *attr,
 	cache->uncached_size += attr->mr_iov->iov_len;
 	pthread_mutex_unlock(&mm_lock);
 
-	(*entry)->info.iov = *attr->mr_iov;
+	ofi_mr_info_get_iov_from_mr_attr(&(*entry)->info, attr, flags);
 	(*entry)->use_cnt = 1;
 	(*entry)->node = NULL;
 
@@ -501,6 +515,8 @@ int ofi_mr_cache_init(struct util_domain *domain,
 	dlist_init(&cache->dead_region_list);
 	cache->cached_cnt = 0;
 	cache->cached_size = 0;
+	cache->cached_max_cnt = cache_params.max_cnt;
+	cache->cached_max_size = cache_params.max_size;
 	cache->uncached_cnt = 0;
 	cache->uncached_size = 0;
 	cache->search_cnt = 0;

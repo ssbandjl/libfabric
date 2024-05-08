@@ -1,35 +1,5 @@
-/*
- * Copyright (c) Amazon.com, Inc. or its affiliates.
- * All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only */
+/* SPDX-FileCopyrightText: Copyright Amazon.com, Inc. or its affiliates. All rights reserved. */
 
 #ifndef _EFA_RDM_OPE_H
 #define _EFA_RDM_OPE_H
@@ -61,7 +31,7 @@ enum efa_rdm_ope_state {
 
 /**
  * @brief basic information of an atomic operation
- * used by all 3 types of atomic operations: fetch, compare and write  
+ * used by all 3 types of atomic operations: fetch, compare and write
  */
 struct efa_rdm_atomic_hdr {
 	/* atomic_op is different from tx_op */
@@ -96,7 +66,7 @@ enum efa_rdm_cuda_copy_method {
 
 /**
  * @brief EFA RDM operation entry (ope)
- * 
+ *
  */
 struct efa_rdm_ope {
 	enum efa_rdm_ope_type type;
@@ -216,9 +186,10 @@ struct efa_rdm_ope {
 };
 
 void efa_rdm_txe_construct(struct efa_rdm_ope *txe,
-			    struct efa_rdm_ep *ep,
-			    const struct fi_msg *msg,
-			    uint32_t op, uint64_t flags);
+			   struct efa_rdm_ep *ep,
+		      	   struct efa_rdm_peer *peer,
+			   const struct fi_msg *msg,
+			   uint32_t op, uint64_t flags);
 
 void efa_rdm_txe_release(struct efa_rdm_ope *txe);
 
@@ -231,7 +202,7 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 
 /**
  * @brief indicate an ope's receive has been cancel
- * 
+ *
  * @todo: In future we will send RECV_CANCEL signal to sender,
  * to stop transmitting large message, this flag is also
  * used for fi_discard which has similar behavior.
@@ -246,7 +217,7 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 
 /**
  * @brief flag to tell if an ope encouter RNR when sending packets
- * 
+ *
  * If an ope has this flag, it is on the ope_queued_rnr_list
  * of the endpoint.
  */
@@ -254,7 +225,7 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 
 /**
  * @brief Flag to indicate an rxe has an EOR in flight
- * 
+ *
  * In flag means the EOR has been sent or queued, and has not got send completion.
  * hence the rxe cannot be released
  */
@@ -262,7 +233,7 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 
 /**
  * @brief flag to indicate a txe has already written an cq error entry for RNR
- * 
+ *
  * This flag is used to prevent writing multiple cq error entries
  * for the same txe
  */
@@ -278,15 +249,15 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 
 /**
  * @brief flag to indicate an ope does not need to report completion to user
- * 
+ *
  * This flag is used to by emulated injection and #efa_rdm_ep_trigger_handshake
  */
 #define EFA_RDM_TXE_NO_COMPLETION	BIT_ULL(60)
 /**
  * @brief flag to indicate an ope does not need to increase counter
- * 
+ *
  * This flag is used to implement #efa_rdm_ep_trigger_handshake
- * 
+ *
  */
 #define EFA_RDM_TXE_NO_COUNTER		BIT_ULL(61)
 
@@ -297,6 +268,13 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
  * of the endpoint
  */
 #define EFA_RDM_OPE_QUEUED_READ 	BIT_ULL(12)
+
+/**
+ * @brief flag to indicate that the ope corresponds to a long CTS transfer
+ * that's used as a fallback for long read protocol
+ *
+ */
+#define EFA_RDM_OPE_READ_NACK 	BIT_ULL(13)
 
 void efa_rdm_ope_try_fill_desc(struct efa_rdm_ope *ope, int mr_iov_start, uint64_t access);
 
@@ -340,6 +318,9 @@ ssize_t efa_rdm_ope_prepare_to_post_send(struct efa_rdm_ope *ope,
 					 int *pkt_entry_data_size_vec);
 
 ssize_t efa_rdm_ope_post_send(struct efa_rdm_ope *ope, int pkt_type);
+
+ssize_t efa_rdm_ope_post_send_fallback(struct efa_rdm_ope *ope,
+					   int pkt_type, ssize_t err);
 
 ssize_t efa_rdm_ope_post_send_or_queue(struct efa_rdm_ope *ope, int pkt_type);
 

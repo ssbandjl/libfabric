@@ -6,12 +6,16 @@ on:
       - main
     paths:
       - 'man/*.md'
+      - 'fabtests/man/*.md'
   workflow_dispatch:
 
 jobs:
     gh-man-update:
         name: GH Man Page Updater
         runs-on: ubuntu-latest
+        permissions:
+          contents: write
+          pull-requests: write
         steps:
           - name: Debug information
             env:
@@ -21,7 +25,7 @@ jobs:
               echo "$GITHUB_DATA"
 
           - name: Check out the git repo
-            uses: actions/checkout@v3
+            uses: actions/checkout@v4
 
           - name: Update the man pages in branch gh-pages
             run: .github/workflows/gh-man.sh

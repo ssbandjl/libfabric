@@ -1,8 +1,12 @@
 name: Nightly Coverity Scan
 on:
   schedule:
-  # Every night, at midnight
-  - cron: '0 0 * * *'
+  # UTC time, 'minute hour day-of-month month day-of-week'
+  - cron: '0 5 * * *'
+
+permissions:
+  contents: read
+  
 env:
   APT_PACKAGES: >-
     abi-compliance-checker
@@ -47,7 +51,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.APT_PACKAGES }}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Download Coverity tools
         run: |
           wget https://scan.coverity.com/download/linux64 --post-data "token=${{ secrets.COVERITY_SCAN_TOKEN }}&project=ofiwg%2Flibfabric" -O coverity_tool.tgz
@@ -58,7 +62,7 @@ jobs:
           set -x
           git clone --depth 1 -b ${{ env.RDMA_CORE_VERSION }} https://github.com/linux-rdma/rdma-core.git
           pushd rdma-core; bash build.sh; popd
-          export LD_LIBRARY_PATH="${{ env.RDMA_CORE_PATH }}/lib:$LD_LIBRARY_PATH"
+          export LD_LIBRARY_PATH="$PWD/${{ env.RDMA_CORE_PATH }}/lib:$LD_LIBRARY_PATH"
 
           # We use a compiler extension that supports broader complex type
           # definitions than what's defined in C99 standard (which only defines
@@ -71,8 +75,13 @@ jobs:
 
           ./autogen.sh
           ./configure --prefix=$PWD/install ${{ env.OFI_PROVIDER_FLAGS }} CC=clang
-          cov-build --dir cov-int make
           make install
+          make clean
+          pushd fabtests
+          ./autogen.sh
+          ./configure --with-libfabric=$PWD/../install CC=clang
+          popd
+          cov-build --dir cov-int bash -c "make && make -C fabtests LDFLAGS=\"-L$PWD/${{ env.RDMA_CORE_PATH }}/lib -L$PWD/install/lib\""
       - name: Submit results
         run: |
           tar czvf libfabric.tgz cov-int

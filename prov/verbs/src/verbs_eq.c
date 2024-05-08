@@ -540,6 +540,13 @@ vrb_eq_xrc_connreq_event(struct vrb_eq *eq, struct fi_eq_cm_entry *entry,
 send_reject:
 	if (rdma_reject(connreq->id, *priv_data, *priv_datalen))
 		VRB_WARN(FI_LOG_EP_CTRL, "rdma_reject %d\n", -errno);
+	if (rdma_destroy_id(connreq->id))
+		VRB_WARN(FI_LOG_EP_CTRL, "rdma_destroy_id %d\n", -errno);
+
+	ep->base_ep.info_attr.handle = NULL;
+	ep->tgt_id = NULL;
+	ep->recip_req_received = 0;
+	connreq->id = NULL;
 
 	return -FI_EAGAIN;
 }
@@ -854,6 +861,63 @@ vrb_eq_xrc_disconnect_event(struct vrb_eq *eq,
 	}
 }
 
+static int
+vrb_eq_addr_resolved_event(struct vrb_ep *ep)
+{
+	struct vrb_recv_wr *wr;
+	struct slist_entry *entry;
+	struct ibv_qp_init_attr attr = { 0 };
+	int ret;
+
+	assert(ofi_genlock_held(&vrb_ep2_progress(ep)->ep_lock));
+	assert(ep->state == VRB_RESOLVE_ADDR);
+
+	if (ep->util_ep.type == FI_EP_MSG) {
+		vrb_msg_ep_get_qp_attr(ep, &attr);
+
+		/* Client-side QP creation */
+		if (rdma_create_qp(ep->id, vrb_ep2_domain(ep)->pd, &attr)) {
+			ep->state = VRB_DISCONNECTED;
+			ret = -errno;
+			VRB_WARN(FI_LOG_EP_CTRL,
+				 "rdma_create_qp failed: %d\n", -ret);
+			return ret;
+		}
+
+		/* Allow shared XRC INI QP not controlled by RDMA CM
+		 * to share same post functions as RC QP. */
+		ep->ibv_qp = ep->id->qp;
+	}
+
+	assert(ep->ibv_qp);
+	while (!slist_empty(&ep->prepost_wr_list)) {
+		entry = ep->prepost_wr_list.head;
+		wr = container_of(entry, struct vrb_recv_wr, entry);
+
+		ret = vrb_post_recv_internal(ep, &wr->wr);
+		if (ret) {
+			VRB_WARN(FI_LOG_EP_CTRL,
+			         "Failed to post receive buffers: %d\n", -ret);
+
+			return ret;
+		}
+		vrb_free_recv_wr(vrb_ep2_progress(ep), wr);
+		slist_remove_head(&ep->prepost_wr_list);
+	}
+
+	ep->state = VRB_RESOLVE_ROUTE;
+	if (rdma_resolve_route(ep->id, VERBS_RESOLVE_TIMEOUT)) {
+		ep->state = VRB_DISCONNECTED;
+		ret = -errno;
+		VRB_WARN(FI_LOG_EP_CTRL,
+			"rdma_resolve_route failed: %d\n",
+			-ret);
+		return ret;
+	}
+
+	return -FI_EAGAIN;
+}
+
 static ssize_t
 vrb_eq_cm_process_event(struct vrb_eq *eq,
 	struct rdma_cm_event *cma_event, uint32_t *event,
@@ -872,11 +936,31 @@ vrb_eq_cm_process_event(struct vrb_eq *eq,
 
 	assert(ofi_mutex_held(&eq->event_lock));
 	switch (cma_event->event) {
+	case RDMA_CM_EVENT_ADDR_RESOLVED:
+		ep = container_of(fid, struct vrb_ep, util_ep.ep_fid);
+		ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
+		ret = vrb_eq_addr_resolved_event(ep);
+		ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
+		if (ret != -FI_EAGAIN) {
+			eq->err.err = -ret;
+			eq->err.prov_errno = ret;
+			goto err;
+		}
+		goto ack;
+
 	case RDMA_CM_EVENT_ROUTE_RESOLVED:
 		ep = container_of(fid, struct vrb_ep, util_ep.ep_fid);
 		ofi_genlock_lock(&vrb_ep2_progress(ep)->ep_lock);
 		assert(ep->state == VRB_RESOLVE_ROUTE);
 		ep->state = VRB_CONNECTING;
+
+		if (cma_event->id->route.addr.src_addr.sa_family != AF_IB) {
+			vrb_eq_skip_rdma_cm_hdr((const void **)&ep->conn_param.private_data,
+						(size_t *)&ep->conn_param.private_data_len);
+		} else {
+			vrb_msg_ep_prepare_rdma_cm_hdr(ep->cm_priv_data, ep->id);
+		}
+
 		if (rdma_connect(ep->id, &ep->conn_param)) {
 			ep->state = VRB_DISCONNECTED;
 			ret = -errno;
@@ -892,6 +976,11 @@ vrb_eq_cm_process_event(struct vrb_eq *eq,
 			ret = -FI_EAGAIN;
 		}
 		ofi_genlock_unlock(&vrb_ep2_progress(ep)->ep_lock);
+		if (ret != -FI_EAGAIN) {
+			eq->err.err = -ret;
+			eq->err.prov_errno = ret;
+			goto err;
+		}
 		goto ack;
 	case RDMA_CM_EVENT_CONNECT_REQUEST:
 		*event = FI_CONNREQ;

@@ -2,6 +2,7 @@
 [<img alt="libfabric Coverity scan build status" src="https://scan.coverity.com/projects/4274/badge.svg"/>](https://scan.coverity.com/projects/4274)
 [<img alt="libfabric main branch AppVeyor CI status" src="https://ci.appveyor.com/api/projects/status/github/ofiwg/libfabric?svg=true"/>](https://ci.appveyor.com/api/projects/status/github/ofiwg/libfabric)
 [![libfabric release version](https://img.shields.io/github/release/ofiwg/libfabric.svg)](https://github.com/ofiwg/libfabric/releases/latest)
+[![openssf scorecard](https://api.securityscorecards.dev/projects/github.com/ofiwg/libfabric/badge)](https://securityscorecards.dev/viewer/?uri=github.com/ofiwg/libfabric)
 
 # libfabric
 
@@ -130,22 +131,6 @@ A more comprehensive test package is available via the fabtests package.
 
 ## Providers
 
-### gni
-
-***
-
-The `gni` provider runs on Cray XC (TM) systems utilizing the user-space
-Generic Network Interface (`uGNI`), which provides low-level access to
-the Aries interconnect.  The Aries interconnect is designed for
-low-latency one-sided messaging and also includes direct hardware
-support for common atomic operations and optimized collectives.
-
-See the `fi_gni(7)` man page for more details.
-
-#### Dependencies
-
-- The `gni` provider requires `gcc` version 4.9 or higher.
-
 ### opx
 
 ***
@@ -218,11 +203,12 @@ See the `fi_sockets(7)` man page for more details.
 ***
 
 The tcp provider is an optimized socket based provider that supports
-reliable connected endpoints.  It is intended to be used directly by
-apps that need MSG endpoint support, or in conjunction with the rxm
-provider for apps that need RDM endpoints.  The tcp provider targets
-replacing the sockets provider for applications using standard
-networking hardware.
+reliable connected endpoints.  The current version is the redesigned
+one previously called the net provider.  This version supports both
+MSG endpoints and RDM endpoints. It can also work in conjunction with
+the rxm provider for apps that need similar RDM behavior as the old
+tcp provider.  The tcp provider targets replacing the sockets provider
+for applications using standard networking hardware.
 
 See the `fi_tcp(7)` man page for more details.
 
@@ -281,6 +267,9 @@ transport and translates OFI calls to appropriate verbs API calls.
 It uses librdmacm for communication management and libibverbs for other control
 and data transfer operations.
 
+The verbs provider can also be built on Windows using the Microsoft Network
+Direct SPI for network transport.
+
 See the `fi_verbs(7)` man page for more details.
 
 #### Dependencies
@@ -291,62 +280,10 @@ See the `fi_verbs(7)` man page for more details.
   If the libraries and header files are not in default paths, specify them in CFLAGS,
   LDFLAGS and LD_LIBRARY_PATH environment variables.
 
-### bgq
-
-***
-
-The `bgq` provider is a native provider that directly utilizes the hardware
-interfaces of the Blue Gene/Q system to implement aspects of the libfabric
-interface to fully support MPICH3 CH4.
-
-See the `fi_bgq(7)` man page for more details.
-
-#### Dependencies
-
-- The `bgq` provider depends on the system programming interfaces (SPI) and
-  the hardware interfaces (HWI) located in the Blue Gene/Q driver installation.
-  Additionally, the open source Blue Gene/Q system files are required.
-
-#### Configure options
-
-```
---with-bgq-progress=(auto|manual)
-```
-
-If specified, set the progress mode enabled in FABRIC_DIRECT (default is FI_PROGRESS_MANUAL).
-
-```
---with-bgq-mr=(basic|scalable)
-```
-
-If specified, set the memory registration mode (default is FI_MR_BASIC).
-
-### Network Direct
-
-***
-
-The Network Direct provider enables applications using OFI to be run over
-any verbs hardware (Infiniband, iWarp, and RoCE). It uses the Microsoft Network
-Direct SPI for network transport and provides a translation of OFI calls to
-appropriate Network Direct API calls.
-The Network Direct providers enables OFI-based applications to utilize
-zero-copy data transfers between applications, kernel-bypass I/O generation and
-one-sided data transfer operations on Microsoft Windows OS.
-An application can use OFI with the Network Direct provider enabled on
-Windows OS to expose the capabilities of the networking devices if the hardware
-vendors of the devices implemented the Network Direct service provider interface
-(SPI) for their hardware.
-
-See the `fi_netdir(7)` man page for more details.
-
-#### Dependencies
-
-- The Network Direct provider requires Network Direct SPI. If you are compiling
-  libfabric from source and want to enable Network Direct support, you will also
-  need the matching header files for the Network Direct SPI.
-  If the libraries and header files are not in default paths (the default path is
-  root of provier directory, i.e. \prov\netdir\NetDirect, where NetDirect contains
-  the header files), specify them in the configuration properties of the VS project.
+- Windows built requires Network Direct SPI. If you are compiling libfabric from
+  source, you will also need the matching header files for the Network Direct SPI.
+  If the libraries and header files are not in default paths, specify them in the
+  configuration properties of the VS project.
 
 ### shm
 
@@ -388,8 +325,8 @@ It is possible to compile and link libfabric with windows applications.
   on page press Download button and select NetworkDirect_DDK.zip.
 
   Extract header files from downloaded
-  NetworkDirect_DDK.zip:`\NetDirect\include\` file into `<libfabricroot>\prov\netdir\NetDirect\`,
-  or add path to NetDirect headers into VS include paths
+  NetworkDirect_DDK.zip:`\NetDirect\include\` into `include\windows`, or
+  add the path to NetDirect headers into VS include paths
 
 - 2. compiling:
   libfabric has 6 Visual Studio solution configurations:
@@ -407,3 +344,26 @@ It is possible to compile and link libfabric with windows applications.
   - choose C/C++ > General and add `<libfabricroot>\include` to "Additional include Directories"
   - choose Linker > Input and add `<libfabricroot>\x64\<yourconfigchoice>\libfabric.lib` to "Additional Dependencies"
   - depending on what you are building you may also need to copy `libfabric.dll` into the target folder of your own project.
+
+### cxi
+
+The CXI provider enables libfabric on Cray's Slingshot network. Slingshot is
+comprised of the Rosetta switch and Cassini NIC. Slingshot is an
+Ethernet-compliant network. However, The provider takes advantage of proprietary
+extensions to support HPC applications.
+
+The CXI provider supports reliable, connection-less endpoint semantics. It
+supports two-sided messaging interfaces with message matching offloaded by the
+Cassini NIC. It also supports one-sided RMA and AMO interfaces, light-weight
+counting events, triggered operations (via the deferred work API), and
+fabric-accelerated small reductions.
+
+See the `fi_cxi(7)` man page for more details.
+
+#### Dependencies
+
+- The CXI Provider requires Cassini's optimized HPC protocol which is only
+  supported in combination with the Rosetta switch.
+
+- The provider uses the libCXI library for control operations and a set of
+  Cassini-specific header files to enable direct hardware access in the data path.
