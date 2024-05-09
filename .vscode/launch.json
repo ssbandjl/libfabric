@@ -87,5 +87,34 @@
           }
       ]
     },
+    {
+      "name": "fi_info",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/fi_info",
+      // "args": ["-e", "rdm", "-o", "write", "-I", "5", "-p", "verbs", "172.17.29.63"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build/bin",
+      // "environment": [
+      //   {
+      //       "name": "FI_LOG_LEVEL",
+      //       "value": "debug"
+      //   }],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/bin/gdb",
+      "setupCommands": [
+          {
+              "description": "Enable pretty-printing for gdb",
+              "text": "-enable-pretty-printing",
+              "ignoreFailures": true
+          },
+          {
+              "description": "Set Disassembly Flavor to Intel",
+              "text": "-gdb-set disassembly-flavor intel",
+              "ignoreFailures": true
+          }
+      ]
+    },
   ]
 }
