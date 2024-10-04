@@ -84,6 +84,15 @@ No support for counters for the DGRAM endpoint.
 
 No support for inject.
 
+## [zero-copy receive mode](../prov/efa/docs/efa_rdm_protocol_v4.md#48-user-receive-qp-feature--request-and-zero-copy-receive)
+- The receive operation cannot be cancelled via `fi_cancel()`.
+- Zero-copy receive mode can be enabled only if SHM transfer is disabled.
+- Unless the application explicitly disables P2P, e.g. via FI_HMEM_P2P_DISABLED,
+  zero-copy receive can be enabled only if available FI_HMEM devices all have
+  P2P support.
+  
+
+
 When using FI_HMEM for AWS Neuron or Habana SynapseAI buffers, the provider
 requires peer to peer transaction support between the EFA and the FI_HMEM
 device. Therefore, the FI_HMEM_P2P_DISABLED option is not supported by the EFA
@@ -196,8 +205,16 @@ struct fi_efa_mr_attr {
 **query_mr()** returns 0 on success, or the value of errno on failure
 (which indicates the failure reason).
 
+# Traffic Class (tclass) in EFA
+To prioritize the messages from a given endpoint, user can specify `fi_info->tx_attr->tclass = FI_TC_LOW_LATENCY` in the fi_endpoint() call to set the service level in rdma-core. All other tclass values will be ignored.
 
 # RUNTIME PARAMETERS
+
+*FI_EFA_IFACE*
+: A comma-delimited list of EFA device, i.e. NIC, names that should be visible to
+  the application. This paramater can be used to include/exclude NICs to enforce
+  process affinity based on the hardware topology. The default value is "all" which
+  allows all available NICs to be discovered.
 
 *FI_EFA_TX_SIZE*
 : Maximum number of transmit operations before the provider returns -FI_EAGAIN.
@@ -308,6 +325,18 @@ These OFI runtime parameters apply only to the RDM endpoint.
 Using huge page memory has a small performance advantage, but can
 cause system to run out of huge page memory. By default, EFA provider
 will use huge page unless FI_EFA_FORK_SAFE is set to 1/on/true.
+
+*FI_EFA_USE_ZCPY_RX*
+: Enables the use of application's receive buffers in place of bounce-buffers when feasible.
+(Default: 1). Setting this environment variable to 0 can disable this feature.
+Explicitly setting this variable to 1 does not guarantee this feature
+due to other requirements. See
+https://github.com/ofiwg/libfabric/blob/main/prov/efa/docs/efa_rdm_protocol_v4.md
+for details.
+
+*FI_EFA_USE_UNSOLICITED_WRITE_RECV*
+: Use device's unsolicited write recv functionality when it's available. (Default: 1).
+Setting this environment variable to 0 can disable this feature.
 
 # SEE ALSO
 

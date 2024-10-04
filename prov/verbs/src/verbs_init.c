@@ -126,6 +126,7 @@ vrb_get_rdmacm_rai(const char *node, const char *service, uint64_t flags,
 		rai_hints.ai_flags |= RAI_PASSIVE;
 	}
 
+	vrb_prof_func_start("rdma_getaddrinfo");
 	ret = rdma_getaddrinfo((char *) node, (char *) service, &rai_hints, &_rai);
 	if (ret) {
 		VRB_WARN_ERRNO(FI_LOG_FABRIC, "rdma_getaddrinfo");
@@ -133,6 +134,7 @@ vrb_get_rdmacm_rai(const char *node, const char *service, uint64_t flags,
 			ret = -errno;
 		goto out;
 	}
+	vrb_prof_func_end("rdma_getaddrinfo");
 
 	/*
 	 * Remove ib_rai entries added by IBACM to
@@ -275,8 +277,10 @@ int vrb_get_rai_id(const char *node, const char *service, uint64_t flags,
 	if (ret)
 		return ret;
 
+	vrb_prof_func_start("rdma_create_id");
 	ret = rdma_create_id(NULL, id, NULL, vrb_get_port_space(hints ? hints->addr_format:
 					FI_FORMAT_UNSPEC));
+	vrb_prof_func_end("rdma_create_id");
 	if (ret) {
 		VRB_WARN_ERRNO(FI_LOG_FABRIC, "rdma_create_id");
 		ret = -errno;
@@ -296,8 +300,10 @@ int vrb_get_rai_id(const char *node, const char *service, uint64_t flags,
 	}
 
 	if (node || (hints && hints->dest_addr)) {
+		vrb_prof_func_start("rdma_resolve_addr1");
 		ret = rdma_resolve_addr(*id, (*rai)->ai_src_addr,
 					(*rai)->ai_dst_addr, VERBS_RESOLVE_TIMEOUT);
+		vrb_prof_func_end("rdma_resolve_addr1");
 		if (ret) {
 			VRB_WARN_ERRNO(FI_LOG_FABRIC, "rdma_resolve_addr");
 			ofi_straddr_log(&vrb_prov, FI_LOG_INFO, FI_LOG_FABRIC,
@@ -332,11 +338,13 @@ int vrb_create_ep(struct vrb_ep *ep, enum rdma_port_space ps,
 		return ret;
 	}
 
+	vrb_prof_func_start("rdma_create_id");
 	if (rdma_create_id(NULL, id, NULL, ps)) {
 		ret = -errno;
 		VRB_WARN_ERRNO(FI_LOG_FABRIC, "rdma_create_id");
 		goto err1;
 	}
+	vrb_prof_func_end("rdma_create_id");
 
 	rdma_freeaddrinfo(rai);
 	return 0;
@@ -469,9 +477,11 @@ int vrb_find_max_inline(struct ibv_pd *pd, struct ibv_context *context,
 	struct ibv_cq *cq;
 	int max_inline = 2;
 	int rst = 0;
+	int pos, neg;
 	const char *dev_name = ibv_get_device_name(context->device);
 	uint8_t i;
 
+	vrb_prof_func_start(__func__);
 	for (i = 0; i < count_of(verbs_dev_presets); i++) {
 		if (!strncmp(dev_name, verbs_dev_presets[i].dev_name_prefix,
 			     strlen(verbs_dev_presets[i].dev_name_prefix)))
@@ -492,6 +502,21 @@ int vrb_find_max_inline(struct ibv_pd *pd, struct ibv_context *context,
 		qp_attr.cap.max_recv_sge = 1;
 	}
 	qp_attr.sq_sig_all = 1;
+
+	if (vrb_gl_data.def_inline_size >= max_inline) {
+		qp_attr.cap.max_inline_data = vrb_gl_data.def_inline_size;
+		qp = ibv_create_qp(pd, &qp_attr);
+		if (qp) {
+			rst = qp_attr.cap.max_inline_data;
+			goto out;
+		}
+
+		/*
+		 * Truescale and iWarp will not reach here.
+		 */
+		max_inline = vrb_gl_data.def_inline_size;
+		goto backwards_query;
+	}
 
 	do {
 		if (qp)
@@ -518,7 +543,8 @@ int vrb_find_max_inline(struct ibv_pd *pd, struct ibv_context *context,
 	} while (qp && (max_inline < INT_MAX / 2) && (max_inline *= 2));
 
 	if (rst != 0) {
-		int pos = rst, neg = max_inline;
+backwards_query: ;
+		pos = rst, neg = max_inline;
 		do {
 			max_inline = pos + (neg - pos) / 2;
 			if (qp)
@@ -536,6 +562,7 @@ int vrb_find_max_inline(struct ibv_pd *pd, struct ibv_context *context,
 		rst = pos;
 	}
 
+out:
 	if (qp) {
 		ibv_destroy_qp(qp);
 	}
@@ -543,6 +570,8 @@ int vrb_find_max_inline(struct ibv_pd *pd, struct ibv_context *context,
 	if (cq) {
 		ibv_destroy_cq(cq);
 	}
+
+	vrb_prof_func_end(__func__);
 
 	return rst;
 }
@@ -632,9 +661,14 @@ int vrb_read_params(void)
 		VRB_WARN(FI_LOG_CORE, "Invalid value of rx_iov_limit\n");
 		return -FI_EINVAL;
 	}
-	if (vrb_get_param_int("inline_size", "Default maximum inline size. "
-			      "Actual inject size returned in fi_info may be "
-			      "greater", &vrb_gl_data.def_inline_size) ||
+	if (vrb_get_param_int("inline_size", "Maximum inline size for the "
+			      "verbs device. Actual inline size returned may "
+			      "be different depending on device capability. "
+			      "This value will be returned by fi_info as the "
+			      "inject size for the application to use. Set to "
+			      "0 for the maximum device inline size to be "
+			      "used. (default: 256).",
+			      &vrb_gl_data.def_inline_size) ||
 	    (vrb_gl_data.def_inline_size < 0)) {
 		VRB_WARN(FI_LOG_CORE, "Invalid value of inline_size\n");
 		return -FI_EINVAL;
@@ -775,6 +809,8 @@ VERBS_INI
 
 	if (vrb_os_ini())
 		return NULL;
+
+	vrb_prof_init();
 
 	return &vrb_prov;
 }

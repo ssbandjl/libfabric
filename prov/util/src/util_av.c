@@ -258,18 +258,6 @@ void *ofi_av_addr_context(struct util_av *av, fi_addr_t fi_addr)
 
 int ofi_verify_av_insert(struct util_av *av, uint64_t flags, void *context)
 {
-	if (av->flags & FI_EVENT) {
-		if (!av->eq) {
-			FI_WARN(av->prov, FI_LOG_AV, "no EQ bound to AV\n");
-			return -FI_ENOEQ;
-		}
-
-		if (flags & FI_SYNC_ERR) {
-			FI_WARN(av->prov, FI_LOG_AV, "invalid flag\n");
-			return -FI_EBADFLAGS;
-		}
-	}
-
 	if (flags & ~(FI_MORE | FI_SYNC_ERR)) {
 		FI_WARN(av->prov, FI_LOG_AV, "unsupported flags\n");
 		return -FI_EBADFLAGS;
@@ -283,19 +271,45 @@ int ofi_verify_av_insert(struct util_av *av, uint64_t flags, void *context)
 	return 0;
 }
 
+int ofi_av_insert_addr_at(struct util_av *av, const void *addr, fi_addr_t fi_addr)
+{
+	struct util_av_entry *entry = NULL;
+
+	assert(ofi_mutex_held(&av->lock));
+	ofi_av_straddr_log(av, FI_LOG_INFO, "inserting addr", addr);
+	HASH_FIND(hh, av->hash, addr, av->addrlen, entry);
+	if (entry) {
+		if (fi_addr == ofi_buf_index(entry))
+			return FI_SUCCESS;
+
+		ofi_av_straddr_log(av, FI_LOG_WARN, "addr already in AV", addr);
+		return -FI_EALREADY;
+	}
+
+	entry = ofi_ibuf_alloc_at(av->av_entry_pool, fi_addr);
+	if (!entry)
+		return -FI_ENOMEM;
+
+	memcpy(entry->data, addr, av->addrlen);
+	ofi_atomic_initialize32(&entry->use_cnt, 1);
+	HASH_ADD(hh, av->hash, data, av->addrlen, entry);
+	FI_INFO(av->prov, FI_LOG_AV, "fi_addr: %" PRIu64 "\n",
+		ofi_buf_index(entry));
+	return 0;
+}
+
 int ofi_av_insert_addr(struct util_av *av, const void *addr, fi_addr_t *fi_addr)
 {
 	struct util_av_entry *entry = NULL;
 
 	assert(ofi_mutex_held(&av->lock));
-	ofi_straddr_log(av->prov, FI_LOG_INFO, FI_LOG_AV, "inserting addr", addr);
+	ofi_av_straddr_log(av, FI_LOG_INFO, "inserting addr", addr);
 	HASH_FIND(hh, av->hash, addr, av->addrlen, entry);
 	if (entry) {
 		if (fi_addr)
 			*fi_addr = ofi_buf_index(entry);
 		if (ofi_atomic_inc32(&entry->use_cnt) > 1) {
-			ofi_straddr_log(av->prov, FI_LOG_WARN, FI_LOG_AV,
-							"addr already in AV", addr);
+			ofi_av_straddr_log(av, FI_LOG_WARN, "addr already in AV", addr);
 		}
 	} else {
 		entry = ofi_ibuf_alloc(av->av_entry_pool);
@@ -358,35 +372,6 @@ ofi_av_lookup_addr(struct util_av *av, fi_addr_t fi_addr, size_t *addrlen)
 	return ofi_av_get_addr(av, fi_addr);
 }
 
-int ofi_av_bind(struct fid *av_fid, struct fid *eq_fid, uint64_t flags)
-{
-	struct util_av *av;
-	struct util_eq *eq;
-
-	av = container_of(av_fid, struct util_av, av_fid.fid);
-	if (eq_fid->fclass != FI_CLASS_EQ) {
-		FI_WARN(av->prov, FI_LOG_AV, "invalid fid class\n");
-		return -FI_EINVAL;
-	}
-
-	if (!(av->flags & FI_EVENT)) {
-		FI_WARN(av->prov, FI_LOG_AV, "cannot bind EQ to an AV that was "
-			"configured for synchronous operation: FI_EVENT flag was"
-			" not specified in fi_av_attr when AV was opened\n");
-		return -FI_EINVAL;
-	}
-
-	if (flags) {
-		FI_WARN(av->prov, FI_LOG_AV, "invalid flags\n");
-		return -FI_EINVAL;
-	}
-
-	eq = container_of(eq_fid, struct util_eq, eq_fid.fid);
-	av->eq = eq;
-	ofi_atomic_inc32(&eq->ref);
-	return 0;
-}
-
 static void util_av_close(struct util_av *av)
 {
 	HASH_CLEAR(hh, av->hash);
@@ -399,9 +384,6 @@ int ofi_av_close_lightweight(struct util_av *av)
 		FI_WARN(av->prov, FI_LOG_AV, "AV is busy\n");
 		return -FI_EBUSY;
 	}
-
-	if (av->eq)
-		ofi_atomic_dec32(&av->eq->ref);
 
 	ofi_genlock_destroy(&av->ep_list_lock);
 
@@ -580,34 +562,6 @@ int ofi_av_init(struct util_domain *domain, const struct fi_av_attr *attr,
 	return ret;
 }
 
-void ofi_av_write_event(struct util_av *av, uint64_t data,
-			int err, void *context)
-{
-	struct fi_eq_err_entry entry = { 0 };
-	size_t size;
-	ssize_t ret;
-	uint64_t flags;
-
-	entry.fid = &av->av_fid.fid;
-	entry.context = context;
-	entry.data = data;
-
-	if (err) {
-		FI_INFO(av->prov, FI_LOG_AV, "writing error entry to EQ\n");
-		entry.err = err;
-		size = sizeof(struct fi_eq_err_entry);
-		flags = UTIL_FLAG_ERROR;
-	} else {
-		FI_DBG(av->prov, FI_LOG_AV, "writing entry to EQ\n");
-		size = sizeof(struct fi_eq_entry);
-		flags = 0;
-	}
-
-	ret = fi_eq_write(&av->eq->eq_fid, FI_AV_COMPLETE, &entry,
-			  size, flags);
-	if ((size_t) ret != size)
-		FI_WARN(av->prov, FI_LOG_AV, "error writing to EQ\n");
-}
 
 /*************************************************************************
  *
@@ -677,20 +631,13 @@ int ofi_ip_av_insertv(struct util_av *av, const void *addr, size_t addrlen,
 					fi_addr ? &fi_addr[i] : NULL, context);
 		if (!ret)
 			success_cnt++;
-		else if (av->eq)
-			ofi_av_write_event(av, i, -ret, context);
 		else if (sync_err)
 			sync_err[i] = -ret;
 	}
 
 done:
 	FI_DBG(av->prov, FI_LOG_AV, "%d addresses successful\n", success_cnt);
-	if (av->eq) {
-		ofi_av_write_event(av, success_cnt, 0, context);
-		ret = 0;
-	} else {
-		ret = success_cnt;
-	}
+	ret = success_cnt;
 	return ret;
 }
 
@@ -709,9 +656,9 @@ int ofi_ip_av_insert(struct fid_av *av_fid, const void *addr, size_t count,
 				 count, fi_addr, flags, context);
 }
 
-static int ip_av_insertsvc(struct fid_av *av, const char *node,
-			   const char *service, fi_addr_t *fi_addr,
-			   uint64_t flags, void *context)
+int ofi_ip_av_insertsvc(struct fid_av *av, const char *node,
+			const char *service, fi_addr_t *fi_addr,
+			uint64_t flags, void *context)
 {
 	return fi_av_insertsym(av, node, 1, service, 1, fi_addr, flags, context);
 }
@@ -781,8 +728,8 @@ static int ip_av_nodesym_getaddr(struct util_av *av, const char *node,
 {
 	struct addrinfo hints, *ai;
 	void *addr_temp;
-	char name[FI_NAME_MAX];
-	char svc[FI_NAME_MAX];
+	char name[OFI_NAME_MAX];
+	char svc[OFI_NAME_MAX];
 	size_t name_len, n, s;
 	int ret, name_index, svc_index, count = (int)(nodecnt * svccnt);
 
@@ -819,7 +766,7 @@ static int ip_av_nodesym_getaddr(struct util_av *av, const char *node,
 	for (n = 0; n < nodecnt; n++) {
 		if (nodecnt == 1) {
 			strncpy(name, node, sizeof(name) - 1);
-			name[FI_NAME_MAX - 1] = '\0';
+			name[OFI_NAME_MAX - 1] = '\0';
 		} else {
 			snprintf(name + name_len, sizeof(name) - name_len - 1,
 				 "%zu", name_index + n);
@@ -828,7 +775,7 @@ static int ip_av_nodesym_getaddr(struct util_av *av, const char *node,
 		for (s = 0; s < svccnt; s++) {
 			if (svccnt == 1) {
 				strncpy(svc, service, sizeof(svc) - 1);
-				svc[FI_NAME_MAX - 1] = '\0';
+				svc[OFI_NAME_MAX - 1] = '\0';
 			} else {
 				snprintf(svc, sizeof(svc) - 1,
 					 "%zu", svc_index + s);
@@ -862,7 +809,7 @@ int ofi_ip_av_sym_getaddr(struct util_av *av, const char *node,
 	struct in_addr ip4;
 	int ret;
 
-	if (strlen(node) >= FI_NAME_MAX || strlen(service) >= FI_NAME_MAX) {
+	if (strlen(node) >= OFI_NAME_MAX || strlen(service) >= OFI_NAME_MAX) {
 		FI_WARN(av->prov, FI_LOG_AV,
 			"node or service name is too long\n");
 		return -FI_ENOSYS;
@@ -889,9 +836,9 @@ int ofi_ip_av_sym_getaddr(struct util_av *av, const char *node,
 				     svccnt, addr, addrlen);
 }
 
-static int ip_av_insertsym(struct fid_av *av_fid, const char *node,
-			   size_t nodecnt, const char *service, size_t svccnt,
-			   fi_addr_t *fi_addr, uint64_t flags, void *context)
+int ofi_ip_av_insertsym(struct fid_av *av_fid, const char *node,
+			size_t nodecnt, const char *service, size_t svccnt,
+			fi_addr_t *fi_addr, uint64_t flags, void *context)
 {
 	struct util_av *av;
 	void *addr;
@@ -946,6 +893,14 @@ int ofi_ip_av_remove(struct fid_av *av_fid, fi_addr_t *fi_addr,
 	return 0;
 }
 
+bool ofi_ip_av_is_valid(struct fid_av *av_fid, fi_addr_t fi_addr)
+{
+	struct util_av *av =
+		container_of(av_fid, struct util_av, av_fid);
+
+	return ofi_bufpool_ibuf_is_valid(av->av_entry_pool, fi_addr);
+}
+
 int ofi_ip_av_lookup(struct fid_av *av_fid, fi_addr_t fi_addr,
 		     void *addr, size_t *addrlen)
 {
@@ -969,8 +924,8 @@ ofi_ip_av_straddr(struct fid_av *av, const void *addr, char *buf, size_t *len)
 static struct fi_ops_av ip_av_ops = {
 	.size = sizeof(struct fi_ops_av),
 	.insert = ofi_ip_av_insert,
-	.insertsvc = ip_av_insertsvc,
-	.insertsym = ip_av_insertsym,
+	.insertsvc = ofi_ip_av_insertsvc,
+	.insertsym = ofi_ip_av_insertsym,
 	.remove = ofi_ip_av_remove,
 	.lookup = ofi_ip_av_lookup,
 	.straddr = ofi_ip_av_straddr,
@@ -992,7 +947,7 @@ static int ip_av_close(struct fid *av_fid)
 static struct fi_ops ip_av_fi_ops = {
 	.size = sizeof(struct fi_ops),
 	.close = ip_av_close,
-	.bind = ofi_av_bind,
+	.bind = fi_no_bind,
 	.control = fi_no_control,
 	.ops_open = fi_no_ops_open,
 };

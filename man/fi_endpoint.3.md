@@ -124,8 +124,9 @@ DEPRECATED ssize_t fi_tx_size_left(struct fid_ep *ep);
   associated resource.
 
 *info*
-: Details about the fabric interface endpoint to be opened, obtained
-  from fi_getinfo.
+: Details about the fabric interface endpoint to be opened.
+  The struct fi_info must have been obtained using either fi_getinfo()
+  or fi_dupinfo().
 
 *ep*
 : A fabric endpoint.
@@ -445,18 +446,18 @@ The base operation of an endpoint is selected during creation using
 struct fi_info.  The following control commands and arguments may be
 assigned to an endpoint.
 
-**FI_BACKLOG - int *value**
+*FI_BACKLOG - int \*value*
 : This option only applies to passive endpoints.  It is used to set the
   connection request backlog for listening endpoints.
 
-**FI_GETOPSFLAG -- uint64_t *flags**
+*FI_GETOPSFLAG -- uint64_t \*flags*
 : Used to retrieve the current value of flags associated with the data
   transfer operations initiated on the endpoint. The control argument must
   include FI_TRANSMIT or FI_RECV (not both) flags to indicate the type of
   data transfer flags to be returned.
   See below for a list of control flags.
 
-**FI_GETWAIT -- void \*\***
+*FI_GETWAIT -- void \*\**
 : This command allows the user to retrieve the file descriptor associated
   with a socket endpoint.  The fi_control arg parameter should be an address
   where a pointer to the returned file descriptor will be written.  See fi_eq.3
@@ -464,7 +465,7 @@ assigned to an endpoint.
   may be used for notification that the endpoint is ready to send or receive
   data.
 
-**FI_SETOPSFLAG -- uint64_t *flags**
+*FI_SETOPSFLAG -- uint64_t \*flags*
 : Used to change the data transfer operation flags associated with an
   endpoint. The control argument must include FI_TRANSMIT or FI_RECV (not both)
   to indicate the type of data transfer that the flags should apply to, with other
@@ -484,34 +485,6 @@ and must be called before the endpoint is enabled (fi_enable).
 The following option levels and option names and parameters are defined.
 
 *FI_OPT_ENDPOINT*
-
-- *FI_OPT_BUFFERED_LIMIT - size_t*
-: Defines the maximum size of a buffered message that will be reported
-  to users as part of a receive completion when the FI_BUFFERED_RECV mode
-  is enabled on an endpoint.
-
-  fi_getopt() will return the currently configured threshold, or the
-  provider's default threshold if one has not be set by the application.
-  fi_setopt() allows an application to configure the threshold.  If the
-  provider cannot support the requested threshold, it will fail the
-  fi_setopt() call with FI_EMSGSIZE.  Calling fi_setopt() with the
-  threshold set to SIZE_MAX will set the threshold to the maximum
-  supported by the provider.  fi_getopt() can then be used to retrieve
-  the set size.
-
-  In most cases, the sending and receiving endpoints must be
-  configured to use the same threshold value, and the threshold must be
-  set prior to enabling the endpoint.
-
-- *FI_OPT_BUFFERED_MIN - size_t*
-: Defines the minimum size of a buffered message that will be reported.
-  Applications would set this to a size that's big enough to decide whether
-  to discard or claim a buffered receive or when to claim a buffered receive
-  on getting a buffered receive completion. The value is typically used by a
-  provider when sending a rendezvous protocol request where it would send
-  at least FI_OPT_BUFFERED_MIN bytes of application data along with it. A smaller
-  sized rendezvous protocol message usually results in better latency for the
-  overall transfer of a large message.
 
 - *FI_OPT_CM_DATA_SIZE - size_t*
 : Defines the size of available space in CM messages for user-defined
@@ -546,12 +519,13 @@ The following option levels and option names and parameters are defined.
 	  to copy the data to initiate the transfer if peer to peer support is
 	  unavailable.
 	* FI_HMEM_P2P_DISABLED: Peer to peer support should not be used.
-: fi_setopt() will return -FI_EOPNOTSUPP if the mode requested cannot be supported
+
+  fi_setopt() will return -FI_EOPNOTSUPP if the mode requested cannot be supported
   by the provider.
-: The FI_HMEM_DISABLE_P2P environment variable discussed in
+  The FI_HMEM_DISABLE_P2P environment variable discussed in
   [`fi_mr`(3)](fi_mr.3.html) takes precedence over this setopt option.
 
-- *FI_OPT_CUDA_API_PERMITTED - bool \**
+- *FI_OPT_CUDA_API_PERMITTED - bool*
 : This option only applies to the fi_setopt call. It is used to control
   endpoint's behavior in making calls to CUDA API. By default, an endpoint
   is permitted to call CUDA API. If user wish to prohibit an endpoint from
@@ -562,11 +536,75 @@ The following option levels and option names and parameters are defined.
   return -FI_EINVAL.
   All providers that support FI_HMEM capability implement this option.
 
-- *FI_OPT_SHARED_MEMORY_PERMITTED - bool \**
+- *FI_OPT_SHARED_MEMORY_PERMITTED - bool*
 : This option controls the use of shared memory for intra-node communication.
   Setting it to true will allow the use of shared memory. When set to false,
   shared memory will not be used and the implementation of intra-node communication
   is provider dependent.
+
+- *FI_OPT_MAX_MSG_SIZE - size_t*
+: Define the maximum message size that can be transferred by the endpoint
+  in a single untagged message. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `ep_attr->max_msg_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `ep_attr->max_msg_size` should be used.
+
+- *FI_OPT_MAX_TAGGED_SIZE - size_t*
+: Define the maximum message size that can be transferred by the endpoint
+  in a single tagged message. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `ep_attr->max_msg_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `ep_attr->max_msg_size` should be used.
+
+- *FI_OPT_MAX_RMA_SIZE - size_t*
+: Define the maximum message size that can be transferred by the endpoint
+  via a single RMA operation. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `ep_attr->max_msg_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `ep_attr->max_msg_size` should be used.
+
+- *FI_OPT_MAX_ATOMIC_SIZE - size_t*
+: Define the maximum data size that can be transferred by the endpoint
+  via a single atomic operation. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `ep_attr->max_msg_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `ep_attr->max_msg_size` should be used.
+
+- *FI_OPT_INJECT_MSG_SIZE - size_t*
+: Define the maximum message size that can be injected by the endpoint
+  in a single untagged message. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `tx_attr->inject_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `tx_attr->inject_size` should be used.
+
+- *FI_OPT_INJECT_TAGGED_SIZE - size_t*
+: Define the maximum message size that can be injected by the endpoint
+  in a single tagged message. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `tx_attr->inject_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `tx_attr->inject_size` should be used.
+
+- *FI_OPT_INJECT_RMA_SIZE - size_t*
+: Define the maximum data size that can be injected by the endpoint
+  in a single RMA operation. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `tx_attr->inject_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `tx_attr->inject_size` should be used.
+
+- *FI_OPT_INJECT_ATOMIC_SIZE - size_t*
+: Define the maximum data size that can be injected by the endpoint
+  in a single atomic operation. The size is limited by the endpoint's configuration
+  and the provider's capabilities, and must be less than or equal to
+  `tx_attr->inject_size`.
+  Providers that don't support this option will return -FI_ENOPROTOOPT. In that
+  case, `tx_attr->inject_size` should be used.
 
 ## fi_tc_dscp_set
 
@@ -822,40 +860,109 @@ A value of -1 guarantees ordering for any data size.
 
 ## mem_tag_format - Memory Tag Format
 
-The memory tag format is a bit array used to convey the number of
-tagged bits supported by a provider.  Additionally, it may be used to
-divide the bit array into separate fields.  The mem_tag_format
-optionally begins with a series of bits set to 0, to signify bits
-which are ignored by the provider.  Following the initial prefix of
-ignored bits, the array will consist of alternating groups of bits set
-to all 1's or all 0's.  Each group of bits corresponds to a tagged
-field.  The implication of defining a tagged field is that when a mask
-is applied to the tagged bit array, all bits belonging to a single
-field will either be set to 1 or 0, collectively.
+The memory tag format field is used to convey information on
+the use of the tag and ignore parameters in the fi_tagged API calls,
+as well as matching criteria.  This information is used by the
+provider to optimize tag matching support, including alignment with
+wire protocols.  The following tag formats are defined:
 
-For example, a mem_tag_format of 0x30FF indicates support for 14
-tagged bits, separated into 3 fields.  The first field consists of
-2-bits, the second field 4-bits, and the final field 8-bits.  Valid
-masks for such a tagged field would be a bitwise OR'ing of zero or
-more of the following values: 0x3000, 0x0F00, and 0x00FF. The provider
-may not validate the mask provided by the application for performance
-reasons.
+*FI_TAG_BITS*
 
-By identifying fields within a tag, a provider may be able to optimize
-their search routines.  An application which requests tag fields must
-provide tag masks that either set all mask bits corresponding to a
-field to all 0 or all 1.  When negotiating tag fields, an application
-can request a specific number of fields of a given size.  A provider
-must return a tag format that supports the requested number of fields,
-with each field being at least the size requested, or fail the
-request.  A provider may increase the size of the fields. When reporting
-completions (see FI_CQ_FORMAT_TAGGED), it is not guaranteed that the
-provider would clear out any unsupported tag bits in the tag field of
-the completion entry.
+: If specified on input to fi_getinfo, this indicates that tags
+  contain up to 64-bits of data, and the receiver must apply ignore_bits
+  to tags when matching receive buffers with sends.  The output of
+  fi_getinfo will set 0 or more upper bits of mem_tag_format to 0 to
+  indicate those tag bits which are ignored or reserved by the provider.
+  Applications must check the number of upper bits which are 0 and
+  set them to 0 on all tag and ignore bits.
 
-It is recommended that field sizes be ordered from smallest to
-largest.  A generic, unstructured tag and mask can be achieved by
-requesting a bit array consisting of alternating 1's and 0's.
+  The value of FI_TAG_BITS is 0, making this the default behavior if
+  the hints are left uninialized after being allocated by fi_allocinfo().
+  This format provides the most flexibility to applications, but limits
+  provider optimization options.  FI_TAG_BITS aligns with the behavior
+  defined for libfabric versions 1.x.
+
+*FI_TAG_MPI*
+
+: FI_TAG_MPI is a constrained usage of FI_TAG_BITS.  When selected, applications
+  treat the tag as fields of data, rather than bits, with the ability to
+  wildcard each field.  The MPI tag format specifically targets MPI based
+  implementations and applications.  An MPI formatted tag consists of 2 fields:
+  a message tag and a payload identier.  The message tag is a 32-bit searchable
+  tag.  Matching on a message tag requires searching through a list of posted
+  buffers at the receiver, which we refer to as a searchable tag.
+  The integer tag in MPI point-to-point messages can map directly to
+  the libfabric message tag field.
+
+  The second field is an identifier that corresponds to the operation or
+  data being carried in the message payload.  For example, this field may
+  be used to identify the type of collective operation associated with a
+  message payload.  Note that only the size and behavior for the MPI tag
+  formats are defined.  Described use of the fields are only suggestions.
+
+  Applications that use the MPI format should initialize their tags using
+  the fi_tag_mpi() function.  Ignore bits should be specified as
+  FI_MPI_IGNORE_TAG, FI_MPI_IGNORE_PAYLOAD, or their bitwise OR'ing.
+
+*FI_TAG_CCL*
+
+: The FI_TAG_CCL format further restricts the FI_TAG_MPI format.  When used,
+  only a single tag field may be set, which must match exactly at the target.
+  The field may not be wild carded.  The CCL tag format targets collective
+  communication libraries and applications.  The CCL format consists of a single
+  field: a payload identifier.  The identifier corresponds to the operation or
+  data being carried in the message payload.  For example, this field may be
+  used to identify whether a message is for point-to-point communication or
+  part of a collective operation, and in the latter case, the type of
+  collective operation.
+
+  The CCL tag format does not require searching for matching receive
+  buffers, only directing the message to the correct virtual message queue
+  based on to the payload identifier.
+
+  Applications that use the CCL format pass in the payload identifier
+  directly as the tag and set ignore bits to 0.
+
+*FI_TAG_MAX_FORMAT*
+: If the value of mem_tag_format is >= FI_TAG_MAX_FORMAT, the tag format
+  is treated as a set of bit fields.  The behavior is functionally the same
+  as FI_TAG_BITS.  The following description is for backwards compatibility
+  and describes how the provider may interpret the mem_tag_format field
+  if the value is >= FI_TAG_MAX_FORMAT.
+
+  The memory tag format may be used to
+  divide the bit array into separate fields.  The mem_tag_format
+  optionally begins with a series of bits set to 0, to signify bits
+  which are ignored by the provider.  Following the initial prefix of
+  ignored bits, the array will consist of alternating groups of bits set
+  to all 1's or all 0's.  Each group of bits corresponds to a tagged
+  field.  The implication of defining a tagged field is that when a mask
+  is applied to the tagged bit array, all bits belonging to a single
+  field will either be set to 1 or 0, collectively.
+
+  For example, a mem_tag_format of 0x30FF indicates support for 14
+  tagged bits, separated into 3 fields.  The first field consists of
+  2-bits, the second field 4-bits, and the final field 8-bits.  Valid
+  masks for such a tagged field would be a bitwise OR'ing of zero or
+  more of the following values: 0x3000, 0x0F00, and 0x00FF. The provider
+  may not validate the mask provided by the application for performance
+  reasons.
+
+  By identifying fields within a tag, a provider may be able to optimize
+  their search routines.  An application which requests tag fields must
+  provide tag masks that either set all mask bits corresponding to a
+  field to all 0 or all 1.  When negotiating tag fields, an application
+  can request a specific number of fields of a given size.  A provider
+  must return a tag format that supports the requested number of fields,
+  with each field being at least the size requested, or fail the
+  request.  A provider may increase the size of the fields. When reporting
+  completions (see FI_CQ_FORMAT_TAGGED), it is not guaranteed that the
+  provider would clear out any unsupported tag bits in the tag field of
+  the completion entry.
+
+  It is recommended that field sizes be ordered from smallest to
+  largest.  A generic, unstructured tag and mask can be achieved by
+  requesting a bit array consisting of alternating 1's and 0's.
 
 ## tx_ctx_cnt - Transmit Context Count
 
@@ -985,13 +1092,18 @@ Message order is determined using a set of ordering bits.  Each set
 bit indicates that ordering is maintained between data transfers of
 the specified type.  Message order is defined for [read | write |
 send] operations submitted by an application after [read | write |
-send] operations.
+send] operations.  Value 0 indicates that no ordering is specified.
+Value 0 may be used as input in order to obtain the default message
+order supported by the provider.
 
 Message ordering only applies to the end to end transmission of transport
 headers.  Message ordering is necessary, but does not guarantee, the order in
 which message data is sent or received by the transport layer.  Message
 ordering requires matching ordering semantics on the receiving side of a data
 transfer operation in order to guarantee that ordering is met.
+
+*FI_ORDER_NONE* (deprecated)
+: This is an alias for value 0. It is deprecated and should not be used.
 
 *FI_ORDER_ATOMIC_RAR*
 : Atomic read after read.  If set, atomic fetch operations are
@@ -1016,11 +1128,6 @@ transfer operation in order to guarantee that ordering is met.
   transmitted in the order submitted relative to other atomic
   update operations.  If not atomic updates may be
   transmitted out of order from their submission.
-
-*FI_ORDER_NONE*
-: No ordering is specified.  This value may be used as input in order
-  to obtain the default message order supported by the provider. FI_ORDER_NONE
-  is an alias for the value 0.
 
 *FI_ORDER_RAR*
 : Read after read.  If set, RMA and atomic read operations are
@@ -1102,34 +1209,19 @@ transfer operation in order to guarantee that ordering is met.
 
 ## comp_order - Completion Ordering
 
+This field is provided for version 1 compatibility and should be set
+to 0.
+
+**Deprecated**
+
 Completion ordering refers to the order in which completed requests are
-written into the completion queue.  Completion ordering is similar to
-message order.  Relaxed completion order may enable faster reporting of
-completed transfers, allow acknowledgments to be sent over different
-fabric paths, and support more sophisticated retry mechanisms.
-This can result in lower-latency completions, particularly when
-using connectionless endpoints.  Strict completion ordering may require
-that providers queue completed operations or limit available optimizations.
+written into the completion queue.  Supported completion order values are:
 
-For transmit requests, completion ordering depends on the endpoint
-communication type.  For unreliable communication, completion ordering
-applies to all data transfer requests submitted to an endpoint.
-For reliable communication, completion ordering only applies to requests
-that target a single destination endpoint.  Completion ordering of
-requests that target different endpoints over a reliable transport
-is not defined.
-
-Applications should specify the completion ordering that they support
-or require.  Providers should return the completion order that they
-actually provide, with the constraint that the returned ordering is
-stricter than that specified by the application.  Supported completion
-order values are:
-
-*FI_ORDER_NONE*
+*FI_ORDER_NONE* (deprecated)
 : No ordering is defined for completed operations.  Requests submitted
   to the transmit context may complete in any order.
 
-*FI_ORDER_STRICT*
+*FI_ORDER_STRICT* (deprecated)
 : Requests complete in the order in which they are submitted to the
   transmit context.
 
@@ -1237,7 +1329,6 @@ struct fi_rx_attr {
 	uint64_t  op_flags;
 	uint64_t  msg_order;
 	uint64_t  comp_order;
-	size_t    total_buffered_recv;
 	size_t    size;
 	size_t    iov_limit;
 };
@@ -1292,7 +1383,7 @@ that messages will be handled in order based on a message level sequence
 number.
 
 The following ordering flags, as defined for transmit ordering, also
-apply to the processing of received operations: FI_ORDER_NONE,
+apply to the processing of received operations:
 FI_ORDER_RAR, FI_ORDER_RAW, FI_ORDER_RAS, FI_ORDER_WAR, FI_ORDER_WAW,
 FI_ORDER_WAS, FI_ORDER_SAR, FI_ORDER_SAW, FI_ORDER_SAS, FI_ORDER_RMA_RAR,
 FI_ORDER_RMA_RAW, FI_ORDER_RMA_WAR, FI_ORDER_RMA_WAW, FI_ORDER_ATOMIC_RAR,
@@ -1300,39 +1391,31 @@ FI_ORDER_ATOMIC_RAW, FI_ORDER_ATOMIC_WAR, and FI_ORDER_ATOMIC_WAW.
 
 ## comp_order - Completion Ordering
 
-For a description of completion ordering, see the comp_order field in
-the _Transmit Context Attribute_ section.
+This field is provided for version 1 compatibility and should be set
+to 0.
 
-*FI_ORDER_DATA*
+**Deprecated**
+
+Completion ordering refers to the order in which completed requests are
+written into the completion queue.  Supported completion order values are:
+
+*FI_ORDER_DATA* (deprecated)
 : When set, this bit indicates that received data is written into memory
   in order.  Data ordering applies to memory accessed as part of a single
   operation and between operations if message ordering is guaranteed.
 
-*FI_ORDER_NONE*
-: No ordering is defined for completed operations.  Receive operations may
-  complete in any order, regardless of their submission order.
+*FI_ORDER_NONE* (deprecated)
+: No ordering is defined for completed operations.  Requests submitted
+  to the transmit context may complete in any order.
 
-*FI_ORDER_STRICT*
-: Receive operations complete in the order in which they are processed by
-  the receive context, based on the receive side msg_order attribute.
+*FI_ORDER_STRICT* (deprecated)
+: Requests complete in the order in which they are submitted to the
+  transmit context.
 
 ## total_buffered_recv
 
-This field is supported for backwards compatibility purposes.
-It is a hint to the provider of the total available space
-that may be needed to buffer messages that are received for which there
-is no matching receive operation.  The provider may adjust or ignore
-this value.  The allocation of internal network buffering among received
-message is provider specific.  For instance, a provider may limit the size
-of messages which can be buffered or the amount of buffering allocated to
-a single message.
-
-If receive side buffering is disabled (total_buffered_recv = 0)
-and a message is received by an endpoint, then the behavior is dependent on
-whether resource management has been enabled (FI_RM_ENABLED has be set or not).
-See the Resource Management section of fi_domain.3 for further clarification.
-It is recommended that applications enable resource management if they
-anticipate receiving unexpected messages, rather than modifying this value.
+This field is provided for version 1 compatibility and should be set
+to 0.
 
 ## size
 
@@ -1614,7 +1697,7 @@ can return provider info structures that can support the minimal set
 of requirements (such that the application maintains correctness).
 However, it can also return provider info structures that exceed
 application requirements. As an example, consider an application
-requesting msg_order as FI_ORDER_NONE. The resulting output from
+requesting no msg_order. The resulting output from
 fi_getinfo may have all the ordering bits set. The application can reset
 the ordering bits it does not require before creating the endpoint.
 The provider is free to implement a stricter ordering than is

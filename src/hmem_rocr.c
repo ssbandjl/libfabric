@@ -125,10 +125,10 @@ struct hsa_ops {
 	hsa_status_t (*hsa_iterate_agents)(
 		hsa_status_t (*callback)(hsa_agent_t agent, void *data),
 		void *data);
-	hsa_status_t (*hsa_system_get_info)(hsa_system_info_t attribute, 
+	hsa_status_t (*hsa_system_get_info)(hsa_system_info_t attribute,
 					    void* value);
 #if HAVE_HSA_AMD_PORTABLE_EXPORT_DMABUF
-	hsa_status_t (*hsa_amd_portable_export_dmabuf)(const void* ptr, size_t size, 
+	hsa_status_t (*hsa_amd_portable_export_dmabuf)(const void* ptr, size_t size,
 						       int* dmabuf, uint64_t* offset);
 #endif
 };
@@ -604,6 +604,10 @@ bool rocr_is_addr_valid(const void *addr, uint64_t *device, uint64_t *flags)
 	hsa_ret = ofi_hsa_amd_pointer_info((void *)addr, &hsa_info, NULL, NULL,
 					   NULL);
 	if (hsa_ret == HSA_STATUS_SUCCESS) {
+		if (hsa_info.type == HSA_EXT_POINTER_TYPE_UNKNOWN) {
+			return false;
+		}
+
 		hsa_ret = ofi_hsa_agent_get_info(hsa_info.agentOwner,
 						 HSA_AGENT_INFO_DEVICE,
 						 (void *) &hsa_dev_type);
@@ -672,7 +676,7 @@ int rocr_open_handle(void **handle, size_t len, uint64_t device, void **ipc_ptr)
 	return -FI_EINVAL;
 }
 
-int rocr_close_handle(void *ipc_ptr)
+int rocr_close_handle(void *ipc_ptr, void **handle)
 {
 	hsa_status_t hsa_ret;
 
@@ -844,6 +848,22 @@ static int rocr_hmem_dl_init(void)
 			"Failed to find hsa_iterate_agents\n");
 		goto err;
 	}
+
+	hsa_ops.hsa_system_get_info = dlsym(hsa_handle, "hsa_system_get_info");
+	if (!hsa_ops.hsa_system_get_info) {
+		FI_WARN(&core_prov, FI_LOG_CORE,
+			"Failed to find hsa_system_get_info\n");
+		goto err;
+	}
+
+#if HAVE_HSA_AMD_PORTABLE_EXPORT_DMABUF
+	hsa_ops.hsa_amd_portable_export_dmabuf = dlsym(hsa_handle, "hsa_amd_portable_export_dmabuf");
+	if (!hsa_ops.hsa_amd_portable_export_dmabuf) {
+		FI_WARN(&core_prov, FI_LOG_CORE,
+			"Failed to find hsa_amd_portable_export_dmabuf\n");
+		goto err;
+	}
+#endif
 
 	return FI_SUCCESS;
 
@@ -1213,7 +1233,7 @@ int rocr_open_handle(void **handle, size_t len, uint64_t device, void **ipc_ptr)
 	return -FI_ENOSYS;
 }
 
-int rocr_close_handle(void *ipc_ptr)
+int rocr_close_handle(void *ipc_ptr, void **handle)
 {
 	return -FI_ENOSYS;
 }

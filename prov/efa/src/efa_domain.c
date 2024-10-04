@@ -160,6 +160,11 @@ static int efa_domain_init_rdm(struct efa_domain *efa_domain, struct fi_info *in
 	efa_domain->rdm_cq_size = MAX(info->rx_attr->size + info->tx_attr->size,
 				  efa_env.cq_size);
 	efa_domain->num_read_msg_in_flight = 0;
+
+	dlist_init(&efa_domain->ope_queued_list);
+	dlist_init(&efa_domain->ope_longcts_send_list);
+	dlist_init(&efa_domain->peer_backoff_list);
+	dlist_init(&efa_domain->handshake_queued_peer_list);
 	return 0;
 }
 
@@ -195,6 +200,9 @@ int efa_domain_open(struct fid_fabric *fabric_fid, struct fi_info *info,
 		ret = err;
 		goto err_free;
 	}
+
+	efa_domain->ibv_mr_reg_ct = 0;
+	efa_domain->ibv_mr_reg_sz = 0;
 
 	err = ofi_genlock_init(&efa_domain->srx_lock, efa_domain->util_domain.threading != FI_THREAD_SAFE ?
 			       OFI_LOCK_NOOP : OFI_LOCK_MUTEX);
@@ -429,4 +437,191 @@ efa_domain_ops_open(struct fid *fid, const char *ops_name, uint64_t flags,
 	}
 
 	return ret;
+}
+
+void efa_domain_progress_rdm_peers_and_queues(struct efa_domain *domain)
+{
+	struct efa_rdm_peer *peer;
+	struct dlist_entry *tmp;
+	struct efa_rdm_ope *ope;
+	int ret;
+
+	assert(domain->info->ep_attr->type == FI_EP_RDM);
+
+	/* Update timers for peers that are in backoff list*/
+	dlist_foreach_container_safe(&domain->peer_backoff_list, struct efa_rdm_peer,
+				     peer, rnr_backoff_entry, tmp) {
+		if (ofi_gettime_us() >= peer->rnr_backoff_begin_ts +
+					peer->rnr_backoff_wait_time) {
+			peer->flags &= ~EFA_RDM_PEER_IN_BACKOFF;
+			dlist_remove(&peer->rnr_backoff_entry);
+		}
+	}
+
+	/*
+	 * Resend handshake packet for any peers where the first
+	 * handshake send failed.
+	 */
+	dlist_foreach_container_safe(&domain->handshake_queued_peer_list,
+				     struct efa_rdm_peer, peer,
+				     handshake_queued_entry, tmp) {
+		if (peer->flags & EFA_RDM_PEER_IN_BACKOFF)
+			continue;
+
+		ret = efa_rdm_ep_post_handshake(peer->ep, peer);
+		if (ret == -FI_EAGAIN)
+			continue;
+
+		if (OFI_UNLIKELY(ret)) {
+			EFA_WARN(FI_LOG_EP_CTRL,
+				"Failed to post HANDSHAKE to peer %ld: %s\n",
+				peer->efa_fiaddr, fi_strerror(-ret));
+			efa_base_ep_write_eq_error(&peer->ep->base_ep, -ret, FI_EFA_ERR_PEER_HANDSHAKE);
+			continue;
+		}
+
+		dlist_remove(&peer->handshake_queued_entry);
+		peer->flags &= ~EFA_RDM_PEER_HANDSHAKE_QUEUED;
+		peer->flags |= EFA_RDM_PEER_HANDSHAKE_SENT;
+	}
+
+	/*
+	 * Repost pkts for all queued op entries
+	 */
+	dlist_foreach_container_safe(&domain->ope_queued_list,
+				     struct efa_rdm_ope,
+				     ope, queued_entry, tmp) {
+		peer = efa_rdm_ep_get_peer(ope->ep, ope->addr);
+
+		if (peer && (peer->flags & EFA_RDM_PEER_IN_BACKOFF))
+			continue;
+
+		if (ope->internal_flags & EFA_RDM_OPE_QUEUED_BEFORE_HANDSHAKE) {
+			ret = efa_rdm_ope_repost_ope_queued_before_handshake(ope);
+			if (ret == -FI_EAGAIN)
+				continue;
+
+			if (OFI_UNLIKELY(ret)) {
+				assert(ope->type == EFA_RDM_TXE);
+				/* efa_rdm_txe_handle_error will remove ope from the queued_list */
+				ope->ep->ope_queued_before_handshake_cnt--;
+				efa_rdm_txe_handle_error(ope, -ret, FI_EFA_ERR_PKT_POST);
+				continue;
+			}
+
+			dlist_remove(&ope->queued_entry);
+			ope->internal_flags &= ~EFA_RDM_OPE_QUEUED_BEFORE_HANDSHAKE;
+			ope->ep->ope_queued_before_handshake_cnt--;
+		}
+
+		if (ope->internal_flags & EFA_RDM_OPE_QUEUED_RNR) {
+			assert(!dlist_empty(&ope->queued_pkts));
+			ret = efa_rdm_ep_post_queued_pkts(ope->ep, &ope->queued_pkts);
+
+			if (ret == -FI_EAGAIN)
+				continue;
+
+			if (OFI_UNLIKELY(ret)) {
+				assert(ope->type == EFA_RDM_RXE || ope->type == EFA_RDM_TXE);
+				if (ope->type == EFA_RDM_RXE)
+					efa_rdm_rxe_handle_error(ope, -ret, FI_EFA_ERR_PKT_SEND);
+				else
+					efa_rdm_txe_handle_error(ope, -ret, FI_EFA_ERR_PKT_SEND);
+				continue;
+			}
+
+			dlist_remove(&ope->queued_entry);
+			ope->internal_flags &= ~EFA_RDM_OPE_QUEUED_RNR;
+		}
+
+		if (ope->internal_flags & EFA_RDM_OPE_QUEUED_CTRL) {
+			ret = efa_rdm_ope_post_send(ope, ope->queued_ctrl_type);
+			if (ret == -FI_EAGAIN)
+				continue;
+
+			if (OFI_UNLIKELY(ret)) {
+				assert(ope->type == EFA_RDM_TXE || ope->type == EFA_RDM_RXE);
+				if (ope->type == EFA_RDM_TXE)
+					efa_rdm_txe_handle_error(ope, -ret, FI_EFA_ERR_PKT_POST);
+				else
+					efa_rdm_rxe_handle_error(ope, -ret, FI_EFA_ERR_PKT_POST);
+				continue;
+			}
+
+			/* it can happen that efa_rdm_ope_post_send() released ope
+			 * (if the ope is rxe and packet type is EOR and inject is used). In
+			 * that case rxe's state has been set to EFA_RDM_OPE_FREE and
+			 * it has been removed from ep->op_queued_entry_list, so nothing
+			 * is left to do.
+			 */
+			if (ope->state == EFA_RDM_OPE_FREE)
+				continue;
+
+			ope->internal_flags &= ~EFA_RDM_OPE_QUEUED_CTRL;
+			dlist_remove(&ope->queued_entry);
+		}
+
+		if (ope->internal_flags & EFA_RDM_OPE_QUEUED_READ) {
+			ret = efa_rdm_ope_post_read(ope);
+			if (ret == -FI_EAGAIN)
+				continue;
+
+			if (OFI_UNLIKELY(ret)) {
+				assert(ope->type == EFA_RDM_TXE || ope->type == EFA_RDM_RXE);
+				if (ope->type == EFA_RDM_TXE)
+					efa_rdm_txe_handle_error(ope, -ret, FI_EFA_ERR_READ_POST);
+				else
+					efa_rdm_rxe_handle_error(ope, -ret, FI_EFA_ERR_READ_POST);
+				continue;
+			}
+
+			ope->internal_flags &= ~EFA_RDM_OPE_QUEUED_READ;
+			dlist_remove(&ope->queued_entry);
+		}
+	}
+	/*
+	 * Send data packets until window or data queue is exhausted.
+	 */
+	dlist_foreach_container(&domain->ope_longcts_send_list, struct efa_rdm_ope,
+				ope, entry) {
+		peer = efa_rdm_ep_get_peer(ope->ep, ope->addr);
+		assert(peer);
+		if (peer->flags & EFA_RDM_PEER_IN_BACKOFF)
+			continue;
+
+		/*
+		 * Do not send DATA packet until we received HANDSHAKE packet from the peer,
+		 * this is because endpoint does not know whether peer need connid in header
+		 * until it get the HANDSHAKE packet.
+		 *
+		 * We only do this for DATA packet because other types of packets always
+		 * has connid in there packet header. If peer does not make use of the connid,
+		 * the connid can be safely ignored.
+		 *
+		 * DATA packet is different because for DATA packet connid is an optional
+		 * header inserted between the mandatory header and the application data.
+		 * Therefore if peer does not use/understand connid, it will take connid
+		 * as application data thus cause data corruption.
+		 *
+		 * This will not cause deadlock because peer will send a HANDSHAKE packet
+		 * back upon receiving 1st packet from the endpoint, and in all 3 sub0protocols
+		 * (long-CTS message, emulated long-CTS write and emulated long-CTS read)
+		 * where DATA packet is used, endpoint will send other types of packet to
+		 * peer before sending DATA packets. The workflow of the 3 sub-protocol
+		 * can be found in protocol v4 document chapter 3.
+		 */
+		if (!(peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED))
+			continue;
+
+		if (ope->window > 0) {
+			ret = efa_rdm_ope_post_send(ope, EFA_RDM_CTSDATA_PKT);
+			if (OFI_UNLIKELY(ret)) {
+				if (ret == -FI_EAGAIN)
+					continue;
+
+				efa_rdm_txe_handle_error(ope, -ret, FI_EFA_ERR_PKT_POST);
+				continue;
+			}
+		}
+	}
 }

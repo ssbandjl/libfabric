@@ -74,15 +74,15 @@ AC_DEFUN([FI_OPX_CONFIGURE],[
 		AC_DEFINE_UNQUOTED(OPX_AV, [$OPX_AV_MODE], [fabric direct address vector])
 
 		AS_CASE([x$OPX_MR],
-			[xscalable], [OPX_MR_MODE=FI_MR_SCALABLE],
-			[xbasic], [OPX_MR_MODE=FI_MR_BASIC],
-			[OPX_MR_MODE=FI_MR_SCALABLE])
+			[xscalable], [OPX_MR_MODE=OFI_MR_SCALABLE],
+			[xbasic], [OPX_MR_MODE=OFI_MR_BASIC],
+			[OPX_MR_MODE=OFI_MR_SCALABLE])
 
 		AC_SUBST(opx_mr, [$OPX_MR_MODE])
 		AC_DEFINE_UNQUOTED(OPX_MR, [$OPX_MR_MODE], [fabric direct memory region])
 
-		dnl Only FI_THREAD_ENDPOINT is supported by the opx provider
-		OPX_THREAD_MODE=FI_THREAD_ENDPOINT
+		dnl Only FI_THREAD_DOMAIN is supported by the opx provider
+		OPX_THREAD_MODE=FI_THREAD_DOMAIN
 
 		AC_SUBST(opx_thread, [$OPX_THREAD_MODE])
 		AC_DEFINE_UNQUOTED(OPX_THREAD, [$OPX_THREAD_MODE], [fabric direct thread])
@@ -90,7 +90,7 @@ AC_DEFUN([FI_OPX_CONFIGURE],[
 		AS_CASE([x$OPX_RELIABILITY],
 			[xnone], [OPX_RELIABILITY=OFI_RELIABILITY_KIND_NONE],
 			[xoffload], [OPX_RELIABILITY=OFI_RELIABILITY_KIND_OFFLOAD],
-			dnl [xruntime], [OPX_RELIABILITY=OFI_RELIABILITY_KIND_RUNTIME],
+			dnl [xruntime], [OPX_RELIABILITY=OFI_RELIABILITY_KIND_ONLOAD],
 			[OPX_RELIABILITY=OFI_RELIABILITY_KIND_ONLOAD])
 
 		AC_SUBST(opx_reliability, [$OPX_RELIABILITY])
@@ -155,9 +155,9 @@ AC_DEFUN([FI_OPX_CONFIGURE],[
 				opx_happy=0
 				])
 			CPPFLAGS=$save_CPPFLAGS
-			opx_hfi_version=$(modinfo hfi1 -F version)
+			opx_hfi_version=$(/sbin/modinfo hfi1 -F version)
 			opx_hfi_version_sorted=$(echo -e "10.14.0.0\n$opx_hfi_version" | sort -V | tail -n 1)
-			opx_hfi_srcversion=$(modinfo hfi1 -F srcversion)
+			opx_hfi_srcversion=$(/sbin/modinfo hfi1 -F srcversion)
 			opx_hfi_sys_srcversion=$(cat /sys/module/hfi1/srcversion)
 			AS_IF([test $opx_hfi_srcversion != $opx_hfi_sys_srcversion ||
 				test -z $opx_hfi_version ||

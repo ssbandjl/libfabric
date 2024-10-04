@@ -30,6 +30,7 @@ ssize_t efa_rdm_pke_init_handshake(struct efa_rdm_pke *pkt_entry,
 	struct efa_rdm_handshake_opt_connid_hdr *connid_hdr;
 	struct efa_rdm_handshake_opt_host_id_hdr *host_id_hdr;
 	struct efa_rdm_handshake_opt_device_version_hdr *device_version_hdr;
+	struct efa_rdm_handshake_opt_user_recv_qp_hdr *user_recv_qp_hdr;
 
 	handshake_hdr = (struct efa_rdm_handshake_hdr *)pkt_entry->wiredata;
 	handshake_hdr->type = EFA_RDM_HANDSHAKE_PKT;
@@ -75,6 +76,16 @@ ssize_t efa_rdm_pke_init_handshake(struct efa_rdm_pke *pkt_entry,
 	handshake_hdr->flags |= EFA_RDM_HANDSHAKE_DEVICE_VERSION_HDR;
 	pkt_entry->pkt_size += sizeof (struct efa_rdm_handshake_opt_device_version_hdr);
 
+	/* Include the user recv qp information (qpn and qkey) */
+	if (pkt_entry->ep->extra_info[0] & EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP) {
+		user_recv_qp_hdr = (struct efa_rdm_handshake_opt_user_recv_qp_hdr *) (pkt_entry->wiredata + pkt_entry->pkt_size);
+		assert(pkt_entry->ep->base_ep.user_recv_qp);
+		user_recv_qp_hdr->qpn = pkt_entry->ep->base_ep.user_recv_qp->qp_num;
+		user_recv_qp_hdr->qkey = pkt_entry->ep->base_ep.user_recv_qp->qkey;
+		handshake_hdr->flags |= EFA_RDM_HANDSHAKE_USER_RECV_QP_HDR;
+		pkt_entry->pkt_size += sizeof (struct efa_rdm_handshake_opt_user_recv_qp_hdr);
+	}
+
 	pkt_entry->addr = addr;
 	return 0;
 }
@@ -110,6 +121,13 @@ void efa_rdm_pke_handle_handshake_recv(struct efa_rdm_pke *pkt_entry)
 
 	peer->device_version = efa_rdm_pke_get_handshake_opt_device_version(pkt_entry);
 	EFA_INFO(FI_LOG_CQ, "Received peer EFA device version: 0x%x\n", peer->device_version);
+
+	if (peer->extra_info[0] & EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP) {
+		struct efa_rdm_handshake_opt_user_recv_qp_hdr *user_recv_qp_hdr;
+		user_recv_qp_hdr = efa_rdm_pke_get_handshake_opt_user_recv_qp_ptr(pkt_entry);
+		peer->user_recv_qp.qpn = user_recv_qp_hdr->qpn;
+		peer->user_recv_qp.qkey = user_recv_qp_hdr->qkey;
+	}
 
 	efa_rdm_pke_release_rx(pkt_entry);
 }
@@ -187,7 +205,7 @@ void efa_rdm_pke_handle_cts_recv(struct efa_rdm_pke *pkt_entry)
 
 	if (ope->state != EFA_RDM_TXE_SEND) {
 		ope->state = EFA_RDM_TXE_SEND;
-		dlist_insert_tail(&ope->entry, &ep->ope_longcts_send_list);
+		dlist_insert_tail(&ope->entry, &efa_rdm_ep_domain(ep)->ope_longcts_send_list);
 	}
 }
 
@@ -391,7 +409,7 @@ void efa_rdm_pke_handle_readrsp_sent(struct efa_rdm_pke *pkt_entry)
 			efa_rdm_ope_try_fill_desc(rxe, 0, FI_SEND);
 
 		rxe->state = EFA_RDM_TXE_SEND;
-		dlist_insert_tail(&rxe->entry, &pkt_entry->ep->ope_longcts_send_list);
+		dlist_insert_tail(&rxe->entry, &efa_rdm_ep_domain(pkt_entry->ep)->ope_longcts_send_list);
 	}
 }
 
@@ -502,6 +520,7 @@ void efa_rdm_pke_handle_rma_read_completion(struct efa_rdm_pke *context_pkt_entr
 					assert(txe->ep->efa_rx_pkts_held > 0);
 					txe->ep->efa_rx_pkts_held--;
 				}
+				efa_rdm_tracepoint(rx_pke_local_read_copy_payload_end, (size_t) data_pkt_entry, data_pkt_entry->payload_size, data_pkt_entry->ope->msg_id, (size_t) data_pkt_entry->ope->cq_entry.op_context, data_pkt_entry->ope->total_len);
 				efa_rdm_pke_handle_data_copied(data_pkt_entry);
 			} else {
 				assert(txe && txe->cq_entry.flags & FI_READ);
@@ -671,6 +690,7 @@ void efa_rdm_pke_handle_read_nack_recv(struct efa_rdm_pke *pkt_entry)
 {
 	struct efa_rdm_read_nack_hdr *nack_hdr;
 	struct efa_rdm_ope *txe;
+	bool delivery_complete_requested;
 
 	efa_rdm_ep_domain(pkt_entry->ep)->num_read_msg_in_flight -= 1;
 
@@ -681,18 +701,34 @@ void efa_rdm_pke_handle_read_nack_recv(struct efa_rdm_pke *pkt_entry)
 	efa_rdm_pke_release_rx(pkt_entry);
 	txe->internal_flags |= EFA_RDM_OPE_READ_NACK;
 
-	if (txe->op == ofi_op_tagged) {
-		EFA_WARN(FI_LOG_EP_CTRL,
+	delivery_complete_requested = txe->fi_flags & FI_DELIVERY_COMPLETE;
+
+	if (txe->op == ofi_op_write) {
+		EFA_INFO(FI_LOG_EP_CTRL,
+			 "Sender fallback to emulated long CTS write "
+			 "protocol because p2p is not available\n");
+		efa_rdm_ope_post_send_or_queue(
+			txe, delivery_complete_requested ?
+			     EFA_RDM_DC_LONGCTS_RTW_PKT :
+			     EFA_RDM_LONGCTS_RTW_PKT);
+	} else if (txe->op == ofi_op_tagged) {
+		EFA_INFO(FI_LOG_EP_CTRL,
 			 "Sender fallback to long CTS tagged "
 			 "protocol because memory registration limit "
 			 "was reached on the receiver\n");
-		efa_rdm_ope_post_send_or_queue(txe, EFA_RDM_LONGCTS_TAGRTM_PKT);
+		efa_rdm_ope_post_send_or_queue(
+			txe, delivery_complete_requested ?
+			     EFA_RDM_DC_LONGCTS_TAGRTM_PKT :
+			     EFA_RDM_LONGCTS_TAGRTM_PKT);
 	} else {
-		EFA_WARN(FI_LOG_EP_CTRL,
+		EFA_INFO(FI_LOG_EP_CTRL,
 			 "Sender fallback to long CTS untagged "
 			 "protocol because memory registration limit "
 			 "was reached on the receiver\n");
-		efa_rdm_ope_post_send_or_queue(txe, EFA_RDM_LONGCTS_MSGRTM_PKT);
+		efa_rdm_ope_post_send_or_queue(
+			txe, delivery_complete_requested ?
+			     EFA_RDM_DC_LONGCTS_MSGRTM_PKT :
+			     EFA_RDM_LONGCTS_MSGRTM_PKT);
 	}
 }
 

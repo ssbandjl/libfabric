@@ -40,21 +40,26 @@
 #include "rdma/opx/fi_opx_hmem.h"
 #include "ofi_prov.h"
 #include "opa_service.h"
+#include "rdma/opx/fi_opx_hfi1_version.h"
 
 #include "rdma/opx/fi_opx_addr.h"
+
+#include "rdma/opx/opx_tracer.h"
 
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <dlfcn.h>
 
 #include "fi_opx_tid_cache.h"
+#include "opx_hmem_cache.h"
 
 union fi_opx_addr opx_default_addr = {
 	.hfi1_rx = 0,
 	.hfi1_unit = 0xff,
 	.reliability_rx = 0,
-	.uid = { .lid = 0xffff, .endpoint_id = 0xffff },
+	.uid = {.lid = 0xffff, .lid_3B = 0xff, .endpoint_id = 0xff },
 	.rx_index = 0,
 };
 
@@ -65,6 +70,12 @@ int fi_opx_check_info(const struct fi_info *info)
 {
 	int ret;
 	/* TODO: check caps, mode */
+
+	if (info->domain_attr == NULL) {
+		FI_LOG(fi_opx_global.prov, FI_LOG_DEBUG, FI_LOG_FABRIC,
+				"The domain_attr structure is null, there must be an issue in provider initialization\n");
+		goto err;
+	}
 
 	if ((info->tx_attr) && ((info->tx_attr->caps | info->caps) != info->caps)) {
 		FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA, "info->tx_attr->caps = 0x%016lx, info->caps = 0x%016lx\n", info->tx_attr->caps, info->caps);
@@ -80,6 +91,20 @@ int fi_opx_check_info(const struct fi_info *info)
 				"The rx_attr capabilities (0x%016lx) must be a subset of those requested of the associated endpoint (0x%016lx)",
 				info->rx_attr->caps, info->caps);
 		goto err;
+	}
+
+	if (info->caps & FI_HMEM) {
+	/* Add FI_MR_HMEM to mr_mode when claiming support of FI_HMEM
+	 * because OPX provider's HMEM support performance relies on
+	 * application to provide descriptor for device buffer.
+	*/
+		if (info->domain_attr && !(info->domain_attr->mr_mode & FI_MR_HMEM)) {
+			FI_WARN(fi_opx_global.prov, FI_LOG_MR,
+			"FI_HMEM capability requires device registrations (FI_MR_HMEM)\n");
+			goto err;
+		}
+		FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA,
+			"FI_HMEM capability has been successfully enforced by OPX\n");
 	}
 
 	switch (info->addr_format) {
@@ -139,7 +164,7 @@ static int fi_opx_fillinfo(struct fi_info *fi, const char *node,
 	uint64_t caps;
 	union fi_opx_addr *addr;
 	uint32_t fmt;
-	size_t len;	
+	size_t len;
 
 	if (!fi)
 		goto err;
@@ -323,9 +348,6 @@ static int fi_opx_fillinfo(struct fi_info *fi, const char *node,
 
 		/* adjust parameters down from what requested if required */
 		fi->rx_attr->op_flags = hints->rx_attr->op_flags;
-		if (hints->rx_attr->total_buffered_recv > 0 &&
-			hints->rx_attr->total_buffered_recv < fi_opx_global.default_rx_attr->total_buffered_recv)
-				fi->rx_attr->total_buffered_recv = hints->rx_attr->total_buffered_recv;
 	} else if (hints && hints->caps) {
 		fi->rx_attr->caps = hints->caps;
 	}
@@ -517,7 +539,7 @@ static int fi_opx_getinfo(uint32_t version, const char *node,
 	*info = NULL;
 	fi_opx_count = opx_hfi_get_hfi1_count();
 	FI_LOG(fi_opx_global.prov, FI_LOG_TRACE, FI_LOG_FABRIC,
-			"Detected %d hfi1(s) in the system\n", fi_opx_count);	
+		"Detected %d hfi1(s) in the system\n", fi_opx_count);
 
 	if (!fi_opx_count) {
 		return -FI_ENODATA;
@@ -533,7 +555,7 @@ static int fi_opx_getinfo(uint32_t version, const char *node,
 		}
 
 		FI_LOG(fi_opx_global.prov, FI_LOG_TRACE, FI_LOG_FABRIC,
-				"Successfully got getinfo for HFI %d\n", i);	
+			"Successfully got getinfo for HFI %d\n", i);
 
 		if (!*info) {
 			*info = cur;
@@ -559,7 +581,7 @@ static void fi_opx_fini()
 	 * so do our best and free storage */
 	pthread_mutex_trylock(&mm_lock);
 	int locked = pthread_mutex_unlock(&mm_lock); /* rc 0 is unlocked */
-	
+
 	struct dlist_entry *tmp;
 	struct opx_tid_domain *tid_domain;
 
@@ -567,16 +589,22 @@ static void fi_opx_fini()
 				     struct opx_tid_domain,
 				     tid_domain, list_entry, tmp) {
 
-		if (tid_domain->tid_cache) {
-			if(!locked) opx_tid_cache_cleanup(tid_domain->tid_cache);
-			free(tid_domain->tid_cache);
-			tid_domain->tid_cache = NULL;
-		}
-		free(tid_domain);
-		tid_domain = NULL;
+		opx_close_tid_domain(tid_domain, locked);
 	}
 
+#ifdef OPX_HMEM
+	struct opx_hmem_domain *hmem_domain;
+
+	dlist_foreach_container_safe(&(fi_opx_global.hmem_domain_list),
+					struct opx_hmem_domain,
+					hmem_domain, list_entry, tmp) {
+
+		opx_hmem_close_domain(hmem_domain, locked);
+	}
+#endif
+
 	fi_freeinfo(fi_opx_global.info);
+	OPX_TRACER_EXIT();
 
 	if (fi_opx_global.daos_hfi_rank_hashmap) {
 		struct fi_opx_daos_hfi_rank *cur_hfi_rank = NULL;
@@ -621,10 +649,10 @@ struct fi_provider fi_opx_provider = {
  */
 static void do_static_assert_tests()
 {
-	// Verify that pio_state is exactly one cache-line long. */
+	// Verify that pio_state is exactly one cache-line long.
 	OPX_COMPILE_TIME_ASSERT((sizeof(union fi_opx_hfi1_pio_state) == 8),
 		"fi_opx_hfi1_pio_state size error.");
-	// Verify that pointers are exactly one cache-line long. */
+	// Verify that pointers are exactly one cache-line long.
 	OPX_COMPILE_TIME_ASSERT((sizeof(union fi_opx_hfi1_pio_state*) == 8),
 		"fi_opx_hfi1_pio_state pointer size error.");
 
@@ -656,7 +684,7 @@ OPX_INI
 	fi_opx_global.progress = FI_PROGRESS_MANUAL;
 	fi_opx_set_default_info(); // TODO: fold into fi_opx_set_defaults
 
-	/* Refrain from allocating memory dynamically in this INI function. 
+	/* Refrain from allocating memory dynamically in this INI function.
 	   That sort of behavior will results in memory leaks for the fi_info
 	   executable. */
 
@@ -677,26 +705,59 @@ OPX_INI
 		OPX_DEFAULT_JOB_KEY_STR);
 	fi_param_define(&fi_opx_provider, "force_cpuaffinity", FI_PARAM_BOOL, "Causes the thread to bind itself to the cpu core it is running on. Defaults to \"No\"");
 	fi_param_define(&fi_opx_provider, "reliability_service_usec_max", FI_PARAM_INT, "The number of microseconds between pings for un-acknowledged packets. Defaults to 500 usec.");
+	fi_param_define(&fi_opx_provider, "reliability_max_uncongested_pings", FI_PARAM_INT, "The maximum number of reliability pings sent in a single timer iteration when the network link is uncongested. Value must be between %d and %d. Defaults to %d.", OPX_RELIABILITY_MAX_UNCONGESTED_PINGS_MIN, OPX_RELIABILITY_MAX_UNCONGESTED_PINGS_MAX, OPX_RELIABILITY_MAX_UNCONGESTED_PINGS_DEFAULT);
+	fi_param_define(&fi_opx_provider, "reliability_max_congested_pings", FI_PARAM_INT, "The maximum number of reliability pings sent in a single timer iteration when the network link is congested. Value must be between %d and %d. Defaults to %d.", OPX_RELIABILITY_MAX_CONGESTED_PINGS_MIN, OPX_RELIABILITY_MAX_CONGESTED_PINGS_MAX, OPX_RELIABILITY_MAX_CONGESTED_PINGS_DEFAULT);
 	fi_param_define(&fi_opx_provider, "reliability_service_pre_ack_rate", FI_PARAM_INT, "The number of packets to receive from a particular sender before preemptively acknowledging them without waiting for a ping. Valid values are powers of 2 in the range of 0-32,768, where 0 indicates no preemptive acking. Defaults to 64.");
 	fi_param_define(&fi_opx_provider, "selinux", FI_PARAM_BOOL, "Set to true if you're running a security-enhanced Linux. This enables updating the Jkey used based on system settings. Defaults to \"No\"");
 	fi_param_define(&fi_opx_provider, "hfi_select", FI_PARAM_STRING, "Overrides the normal algorithm used to choose which HFI a process will use. See the documentation for more information.");
+	fi_param_define(&fi_opx_provider, "mp_eager_disable", FI_PARAM_BOOL, "Disables tx multi-packet eager use. Defaults to %d\n", OPX_MP_EGR_DISABLE_DEFAULT);
+	fi_param_define(&fi_opx_provider, "rzv_min_payload_bytes", FI_PARAM_INT, "The minimum length in bytes where rendezvous will be used. For messages smaller than this threshold, the send will first try to be completed using eager or multi-packet eager. Defaults to %d\n", OPX_RZV_MIN_PAYLOAD_BYTES_DEFAULT);
 	fi_param_define(&fi_opx_provider, "delivery_completion_threshold", FI_PARAM_INT, "Will be deprecated. Please use FI_OPX_SDMA_BOUNCE_BUF_THRESHOLD");
 	fi_param_define(&fi_opx_provider, "sdma_bounce_buf_threshold", FI_PARAM_INT, "The maximum message length in bytes that will be copied to the SDMA bounce buffer. For messages larger than this threshold, the send will not be completed until receiver has ACKed. Value must be between %d and %d. Defaults to %d.", OPX_SDMA_BOUNCE_BUF_MIN, OPX_SDMA_BOUNCE_BUF_MAX, OPX_SDMA_BOUNCE_BUF_THRESHOLD);
  	fi_param_define(&fi_opx_provider, "sdma_disable", FI_PARAM_INT, "Disables SDMA offload hardware. Default is 0");
-	fi_param_define(&fi_opx_provider, "expected_receive_enable", FI_PARAM_BOOL, "Enables expected receive rendezvous using Token ID (TID). Defaults to \"No\". This feature is not currently supported.");
+	fi_param_define(&fi_opx_provider, "sdma_min_payload_bytes", FI_PARAM_INT, "The minimum message length in bytes where SDMA will be used. For messages smaller than this threshold, the send will be completed using PIO. Value must be between %d and %d. Defaults to %d.", FI_OPX_SDMA_MIN_PAYLOAD_BYTES_MIN, FI_OPX_SDMA_MIN_PAYLOAD_BYTES_MAX, FI_OPX_SDMA_MIN_PAYLOAD_BYTES_DEFAULT);
+	fi_param_define(&fi_opx_provider, "expected_receive_enable", FI_PARAM_BOOL, "Enables expected receive rendezvous using Token ID (TID). Defaults to \"No\".");
 	fi_param_define(&fi_opx_provider, "prog_affinity", FI_PARAM_STRING,
                         "When set, specify the set of CPU cores to set the progress "
                         "thread affinity to. The format is "
                         "<start>:<end>:<stride>"
                         "where each triplet <start>:<end>:<stride> defines a block "
                         "Both <start> and <end> is a core_id.");
-	fi_param_define(&fi_opx_provider, "auto_progress_interval_usec", FI_PARAM_INT, "Number of usec that the progress thread waits between polling, the value of 0 is default where the interval is 1 if progress affinity is set, or 1000 otherwise.");
+	fi_param_define(&fi_opx_provider, "auto_progress_interval_usec", FI_PARAM_INT, "Number of usec that the progress thread waits between polling. Default is 1.");
 	fi_param_define(&fi_opx_provider, "pkey", FI_PARAM_INT, "Partition key.  Should be a 2 byte positive integer.  Default is 0x%x\n", FI_OPX_HFI1_DEFAULT_P_KEY);
 	fi_param_define(&fi_opx_provider, "sl", FI_PARAM_INT, "Service Level.  This will also determine Service Class and Virtual Lane.  Default is %d\n", FI_OPX_HFI1_SL_DEFAULT);
+	fi_param_define(NULL, "opx_tracer_out_path", FI_PARAM_STRING,
+		"Specify path to output per-process performance tracing log files (default: none)");
+	fi_param_define(&fi_opx_provider, "shm_enable", FI_PARAM_BOOL, "Enables shm across all ports and hfi units on the node. Setting it to NO disables shm except peers with same lid and same hfi1 (loopback).  Defaults to: \"YES\"");
+#ifdef OPX_HMEM
+	fi_param_define(&fi_opx_provider, "dev_reg_send_threshold", FI_PARAM_INT,
+		"The individual packet threshold where lengths above do not use a device registered copy when sending data from GPU. Default is %d\n)", OPX_HMEM_DEV_REG_SEND_THRESHOLD_DEFAULT);
+	fi_param_define(&fi_opx_provider, "dev_reg_recv_threshold", FI_PARAM_INT,
+		"The individual packet threshold where lengths above do not use a device registered copy when receiving data into GPU. Default is %d\n)", OPX_HMEM_DEV_REG_RECV_THRESHOLD_DEFAULT);
+#endif
+	/* CN5000 only */
+	fi_param_define(&fi_opx_provider, "rate_control", FI_PARAM_INT,"Rate control (CN5000 only).  Values can range from 0-7. 0-3 is used for in-order and 4-7 is used for out-of-order. Default is %d\n", OPX_BTH_RC2_DEFAULT);
 	// fi_param_define(&fi_opx_provider, "varname", FI_PARAM_*, "help");
+	fi_param_define(&fi_opx_provider, "mixed_network", FI_PARAM_INT, "Indicates a mixed network of OPA100 and CN5000. Needs to be set to 1 when mixed network is used. Default is 0.\n");
 
-	/* Track TID domains so cache can be cleared on exit */
+	/* Track TID and HMEM domains so caches can be cleared on exit */
 	dlist_init(&fi_opx_global.tid_domain_list);
+#ifdef OPX_HMEM
+	dlist_init(&fi_opx_global.hmem_domain_list);
+#endif
+
+	if (fi_log_enabled(fi_opx_global.prov, FI_LOG_TRACE, FI_LOG_FABRIC)) {
+		Dl_info dl_info;
+		if (dladdr((void*)fi_opx_ini, &dl_info)) { // Use the OPX_INI function as the symbol to get runtime info
+			FI_TRACE(fi_opx_global.prov, FI_LOG_FABRIC,
+				"Using opx Provider: Library file location is %s\n", dl_info.dli_fname);
+		} else {
+			FI_TRACE(fi_opx_global.prov, FI_LOG_FABRIC,
+				"Error retrieving library file location for opx Provider.\n");
+		}
+	}
+
+	OPX_TRACER_INIT();
 
 	return (&fi_opx_provider);
 }

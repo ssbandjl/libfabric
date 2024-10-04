@@ -66,8 +66,6 @@ set functional_tests=^
 	"msg"^
 	"msg_epoll"^
 	"msg_sockets"^
-	"poll -t queue"^
-	"poll -t counter"^
 	"rdm"^
 	"rdm -U"^
 	"rdm_tagged_peek"^
@@ -147,8 +145,8 @@ set standard_tests=^
 	"rdm_tagged_bw -v -U"
 
 set multinode_tests=^
-	"multinode -C msg"^
-	"multinode -C rma"
+	"multinode -x msg"^
+	"multinode -x rma"
 
 
 goto :global_main

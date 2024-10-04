@@ -407,6 +407,42 @@ int opx_hfi_get_num_units(void)
 	return ret;
 }
 
+/* get the number of ports per hfi unit */
+/* should return OPX_MAX_PORT if number of ports is greater than OPX_MAX_PORT*/
+/* should return 0 if number of ports is less than OPX_MIN_PORT*/
+int opx_hfi_get_num_ports(int hfi_unit) {
+	char path[256];
+	snprintf(path, sizeof(path), "%s_%d/ports/", OPX_CLASS_PATH, hfi_unit);
+	DIR* dir = opendir(path);
+	if (!dir) {
+		FI_WARN(fi_opx_global.prov, FI_LOG_EP_DATA, "Failed to open directory to read the number of ports on HFI unit %d. \n", hfi_unit);
+		return 0;
+	}
+
+	struct dirent* entry;
+	int port_count = 0;
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_type == DT_DIR && isdigit(entry->d_name[0])) {
+			port_count++;
+		}
+	}
+
+	closedir(dir);
+
+	if (port_count < OPX_MIN_PORT) {
+		FI_WARN(fi_opx_global.prov, FI_LOG_EP_DATA, "Number of ports should be greater than or equal to OPX_MIN_PORT. \n");
+		return 0;	
+	}
+
+	if (port_count > OPX_MAX_PORT) {
+		FI_WARN(fi_opx_global.prov, FI_LOG_EP_DATA, "Number of ports should be less than or equal to OPX_MAX_PORT. \n");
+		return OPX_MAX_PORT;	
+	}
+
+	return port_count;
+}
+
 /* Given a unit number, returns 1 if any port on the unit is active.
    returns 0 if no port on the unit is active. */
 int opx_hfi_get_unit_active(int unit)
@@ -486,13 +522,14 @@ int opx_hfi_get_port_lid(int unit, int port)
 {
 	int ret;
 	int64_t val;
+	_HFI_DBG("%s unit %d, port %d\n", __func__, unit, port);
 
 	if (opx_hfi_get_port_active(unit,port) != 1)
 		return -2;
+
 	ret = opx_sysfs_port_read_s64(unit, port, "lid", &val, 0);
 	_HFI_VDBG("opx_hfi_get_port_lid: ret %d, unit %d port %d val=%ld\n", ret, unit,
 		  port, val);
-
 	if (ret == -1) {
 		if (errno == ENODEV)
 			/* this is "normal" for port != 1, on single port chips */
@@ -517,6 +554,7 @@ int opx_hfi_get_port_gid(int unit, int port, uint64_t *hi, uint64_t *lo)
 {
 	int ret;
 	char *gid_str = NULL;
+	_HFI_DBG("%s unit %d, port %d\n", __func__, unit, port);
 
 	ret = opx_sysfs_port_read(unit, port, "gids/0", &gid_str);
 
@@ -610,6 +648,7 @@ int opx_hfi_get_port_sl2sc(int unit, int port, int sl)
 	int ret;
 	int64_t val;
 	char sl2scpath[16];
+	_HFI_DBG("%s unit %d, port %d\n", __func__, unit, port);
 
 	snprintf(sl2scpath, sizeof(sl2scpath), "sl2sc/%d", sl);
 	ret = opx_sysfs_port_read_s64(unit, port, sl2scpath, &val, 0);
@@ -632,6 +671,7 @@ int opx_hfi_get_port_sc2vl(int unit, int port, int sc)
 	int ret;
 	int64_t val;
 	char sc2vlpath[16];
+	_HFI_DBG("%s unit %d, port %d\n", __func__, unit, port);
 
 	snprintf(sc2vlpath, sizeof(sc2vlpath), "sc2vl/%d", sc);
 	ret = opx_sysfs_port_read_s64(unit, port, sc2vlpath, &val, 0);
@@ -654,6 +694,7 @@ int opx_hfi_get_port_vl2mtu(int unit, int port, int vl)
 	int ret;
 	int64_t val;
 	char vl2mtupath[16];
+	_HFI_DBG("%s unit %d, port %d\n", __func__, unit, port);
 
 	snprintf(vl2mtupath, sizeof(vl2mtupath), "vl2mtu/%d", vl);
 	ret = opx_sysfs_port_read_s64(unit, port, vl2mtupath, &val, 0);

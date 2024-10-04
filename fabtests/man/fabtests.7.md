@@ -50,9 +50,6 @@ features of libfabric.
 *fi_dgram*
 : A basic datagram endpoint example.
 
-*fi_dgram_waitset*
-: Transfers datagrams using waitsets for completion notification.
-
 *fi_inj_complete*
 : Sends messages using the FI_INJECT_COMPLETE operation flag.
 
@@ -79,10 +76,6 @@ features of libfabric.
 : Issues RMA write operations to multiple memory regions, using
   completion counters of inbound writes as the notification
   mechanism.
-
-*fi_poll*
-: Exchanges data over RDM endpoints using poll sets to drive
-  completion notifications.
 
 *fi_rdm*
 : A basic RDM endpoint example.
@@ -364,8 +357,7 @@ The following keys and respective key values may be used in the config file.
 : FI_WAIT_NONE, FI_WAIT_UNSPEC, FI_WAIT_FD, FI_WAIT_MUTEX_COND
 
 *threading*
-: FI_THREAD_UNSPEC, FI_THREAD_SAFE, FI_THREAD_FID, FI_THREAD_DOMAIN,
-  FI_THREAD_COMPLETION, FI_THREAD_ENDPOINT
+: FI_THREAD_UNSPEC, FI_THREAD_SAFE, FI_THREAD_DOMAIN, FI_THREAD_COMPLETION
 
 *progress*
 : FI_PROGRESS_MANUAL, FI_PROGRESS_AUTO, FI_PROGRESS_UNSPEC
@@ -438,7 +430,7 @@ the list available for that test.
 
 *-D <device_name>*
 : Allocate data buffers on the specified device, rather than in host
-  memory.  Valid options are ze and cuda.
+  memory.  Valid options are ze, cuda and synapseai.
 
 *-a <address vector name>*
 : The name of a shared address vector.  This option only applies to tests

@@ -107,6 +107,61 @@ ssize_t efa_rdm_rma_post_efa_emulated_read(struct efa_rdm_ep *ep, struct efa_rdm
 	return err;
 }
 
+/**
+ * @brief Post an rma read request for a given ep and tx entry
+ *
+ * @param ep efa rdm ep
+ * @param txe tx entry
+ * @return int 0 on success, negative integer on failure.
+ */
+ssize_t efa_rdm_rma_post_read(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
+{
+	bool use_device_read = false;
+	int use_p2p;
+	ssize_t ret, err;
+
+	/*
+	 * A handshake is required to choose the correct protocol (whether to use device read).
+	 * For local read (read from self ep), such handshake is not needed because we only
+	 * need to check the local ep's capabilities.
+	 */
+	if (!(txe->peer->is_self) && !(txe->peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED))
+		return efa_rdm_ep_enforce_handshake_for_txe(ep, txe);
+
+	/* Check p2p support. Cannot use device read when p2p is not available. */
+	err = efa_rdm_ep_use_p2p(ep, txe->desc[0]);
+	if (err < 0)
+		return err;
+
+	use_p2p = err;
+
+	if (use_p2p && efa_rdm_interop_rdma_read(ep, txe->peer)) {
+		/* RDMA read interoperability check also checks domain.use_device_rdma,
+		 * so we do not check it here
+		 */
+		use_device_read = true;
+	} else if (efa_mr_is_neuron(txe->desc[0])) {
+		EFA_WARN(FI_LOG_EP_CTRL, "rdma read is required to post read for AWS trainium memory\n");
+		return -FI_EOPNOTSUPP;
+	}
+
+	if (use_device_read) {
+		ret = efa_rdm_ope_prepare_to_post_read(txe);
+		if (ret)
+			return ret;
+
+		ret = efa_rdm_ope_post_read(txe);
+		if (OFI_UNLIKELY(ret)) {
+			if (ret == -FI_ENOBUFS)
+				ret = -FI_EAGAIN;
+		}
+	} else {
+		ret = efa_rdm_rma_post_efa_emulated_read(ep, txe);
+	}
+
+	return ret;
+}
+
 ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uint64_t flags)
 {
 	ssize_t err;
@@ -115,7 +170,6 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 	struct efa_rdm_ope *txe = NULL;
 	fi_addr_t tmp_addr;
 	struct fi_msg_rma *msg_clone;
-	bool use_device_read;
 	void *shm_desc[EFA_RDM_IOV_LIMIT];
 	void **tmp_desc;
 	struct util_srx_ctx *srx_ctx;
@@ -135,7 +189,7 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 	if (err)
 		return err;
 
-	assert(msg->iov_count <= efa_rdm_ep->tx_iov_limit);
+	assert(msg->iov_count <= efa_rdm_ep->base_ep.info->tx_attr->iov_limit);
 
 	efa_perfset_start(efa_rdm_ep, perf_efa_tx);
 	ofi_genlock_lock(srx_ctx->lock);
@@ -171,48 +225,7 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 		goto out;
 	}
 
-	/*
-	 * A handshake is required to choose the correct protocol (whether to use device read).
-	 * For local read (read from self ep), such handshake is not needed because we only
-	 * need to check the local ep's capabilities.
-	 */
-	if (!(peer->is_self) && !(peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED)) {
-		err = efa_rdm_ep_trigger_handshake(efa_rdm_ep, txe->peer);
-		err = err ? err : -FI_EAGAIN;
-		goto out;
-	}
-
-	use_device_read = false;
-	if (efa_rdm_interop_rdma_read(efa_rdm_ep, peer)) {
-		/* RDMA read interoperability check also checks domain.use_device_rdma,
-		 * so we do not check it here
-		 */
-		use_device_read = true;
-	} else if (efa_mr_is_neuron(txe->desc[0])) {
-		EFA_WARN(FI_LOG_EP_CTRL, "rdma read is required to post read for AWS trainium memory\n");
-		err = -FI_EOPNOTSUPP;
-		goto out;
-	}
-
-	/*
-	 * Not going to check efa_ep->hmem_p2p_opt here, if the remote side
-	 * gave us a valid MR we should just honor the request even if p2p is
-	 * disabled.
-	 */
-	if (use_device_read) {
-		err = efa_rdm_ope_prepare_to_post_read(txe);
-		if (err)
-			goto out;
-
-		err = efa_rdm_ope_post_read(txe);
-		if (OFI_UNLIKELY(err)) {
-			if (err == -FI_ENOBUFS)
-				err = -FI_EAGAIN;
-			goto out;
-		}
-	} else {
-		err = efa_rdm_rma_post_efa_emulated_read(efa_rdm_ep, txe);
-	}
+	err = efa_rdm_rma_post_read(efa_rdm_ep, txe);
 
 out:
 	if (OFI_UNLIKELY(err && txe))
@@ -279,6 +292,7 @@ ssize_t efa_rdm_rma_read(struct fid_ep *ep, void *buf, size_t len, void *desc,
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	assert(len <= efa_rdm_ep->max_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -340,7 +354,7 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 {
 	ssize_t err;
 	bool delivery_complete_requested;
-	int ctrl_type, iface;
+	int ctrl_type, iface, use_p2p;
 	size_t max_eager_rtw_data_size;
 
 	/*
@@ -348,10 +362,8 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 	 * For local write (writing it self), this handshake is not required because we only need to
 	 * check one-side capability
 	 */
-	if (!(txe->peer->is_self) && !(txe->peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED)) {
-		err = efa_rdm_ep_trigger_handshake(ep, txe->peer);
-		return err ? err : -FI_EAGAIN;
-	}
+	if (!(txe->peer->is_self) && !(txe->peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED))
+		return efa_rdm_ep_enforce_handshake_for_txe(ep, txe);
 
 	if (efa_rdm_rma_should_write_using_rdma(ep, txe, txe->peer)) {
 		efa_rdm_ope_prepare_to_post_write(txe);
@@ -367,21 +379,11 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 		 * The sender cannot send with FI_DELIVERY_COMPLETE
 		 * if the peer is not able to handle it.
 		 *
-		 * If the sender does not know whether the peer
-		 * can handle it, it needs to trigger
-		 * a handshake packet from the peer.
-		 *
-		 * The handshake packet contains
-		 * the information whether the peer
-		 * support it or not.
+		 * handshake is already made now since we enforce
+		 * handshake for write earlier.
 		 */
-		err = efa_rdm_ep_trigger_handshake(ep, txe->peer);
-		if (OFI_UNLIKELY(err))
-			return err;
 
-		if (!(txe->peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED))
-			return -FI_EAGAIN;
-		else if (!efa_rdm_peer_support_delivery_complete(txe->peer))
+		if (!(txe->peer->is_self) && !efa_rdm_peer_support_delivery_complete(txe->peer))
 			return -FI_EOPNOTSUPP;
 
 		max_eager_rtw_data_size = efa_rdm_txe_max_req_data_capacity(ep, txe, EFA_RDM_DC_EAGER_RTW_PKT);
@@ -389,9 +391,16 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 		max_eager_rtw_data_size = efa_rdm_txe_max_req_data_capacity(ep, txe, EFA_RDM_EAGER_RTW_PKT);
 	}
 
+	err = efa_rdm_ep_use_p2p(ep, txe->desc[0]);
+	if (err < 0)
+		return err;
+
+	use_p2p = err;
+
 	iface = txe->desc[0] ? ((struct efa_mr*) txe->desc[0])->peer.iface : FI_HMEM_SYSTEM;
 
-	if (txe->total_len >= efa_rdm_ep_domain(ep)->hmem_info[iface].min_read_write_size &&
+	if (use_p2p && 
+		txe->total_len >= efa_rdm_ep_domain(ep)->hmem_info[iface].min_read_write_size &&
 		efa_rdm_interop_rdma_read(ep, txe->peer) &&
 		(txe->desc[0] || efa_is_cache_available(efa_rdm_ep_domain(ep)))) {
 		err = efa_rdm_ope_post_send(txe, EFA_RDM_LONGREAD_RTW_PKT);
@@ -471,7 +480,7 @@ ssize_t efa_rdm_rma_writemsg(struct fid_ep *ep,
 	if (err)
 		return err;
 
-	assert(msg->iov_count <= efa_rdm_ep->tx_iov_limit);
+	assert(msg->iov_count <= efa_rdm_ep->base_ep.info->tx_attr->iov_limit);
 
 	peer = efa_rdm_ep_get_peer(efa_rdm_ep, msg->addr);
 	assert(peer);
@@ -551,6 +560,7 @@ ssize_t efa_rdm_rma_write(struct fid_ep *ep, const void *buf, size_t len, void *
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	assert(len <= efa_rdm_ep->max_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -585,6 +595,7 @@ ssize_t efa_rdm_rma_writedata(struct fid_ep *ep, const void *buf, size_t len,
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	assert(len <= efa_rdm_ep->max_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -631,6 +642,7 @@ ssize_t efa_rdm_rma_inject_write(struct fid_ep *ep, const void *buf, size_t len,
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	assert(len <= efa_rdm_ep->inject_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -667,6 +679,7 @@ ssize_t efa_rdm_rma_inject_writedata(struct fid_ep *ep, const void *buf, size_t 
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	assert(len <= efa_rdm_ep->inject_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;

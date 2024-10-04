@@ -172,6 +172,16 @@ uint32_t efa_mock_ibv_read_vendor_err_return_mock(struct ibv_cq_ex *current)
 	return mock();
 }
 
+uint32_t efa_mock_ibv_read_qp_num_return_mock(struct ibv_cq_ex *current)
+{
+	return mock();
+}
+
+uint32_t efa_mock_ibv_read_wc_flags_return_mock(struct ibv_cq_ex *current)
+{
+	return mock();
+}
+
 int g_ofi_copy_from_hmem_iov_call_counter;
 ssize_t efa_mock_ofi_copy_from_hmem_iov_inc_counter(void *dest, size_t size,
 						    enum fi_hmem_iface hmem_iface, uint64_t device,
@@ -180,6 +190,11 @@ ssize_t efa_mock_ofi_copy_from_hmem_iov_inc_counter(void *dest, size_t size,
 {
 	g_ofi_copy_from_hmem_iov_call_counter += 1;
 	return __real_ofi_copy_from_hmem_iov(dest, size, hmem_iface, device, hmem_iov, hmem_iov_count, hmem_iov_offset);
+}
+
+int efa_mock_efa_rdm_pke_read_return_mock(struct efa_rdm_ope *ope)
+{
+	return mock();
 }
 
 struct efa_unit_test_mocks g_efa_unit_test_mocks = {
@@ -193,7 +208,11 @@ struct efa_unit_test_mocks g_efa_unit_test_mocks = {
 #if HAVE_NEURON
 	.neuron_alloc = __real_neuron_alloc,
 #endif
+#if HAVE_CUDA
+	.ofi_cudaMalloc = __real_ofi_cudaMalloc,
+#endif
 	.ofi_copy_from_hmem_iov = __real_ofi_copy_from_hmem_iov,
+	.efa_rdm_pke_read = __real_efa_rdm_pke_read,
 	.ibv_is_fork_initialized = __real_ibv_is_fork_initialized,
 #if HAVE_EFADV_QUERY_MR
 	.efadv_query_mr = __real_efadv_query_mr,
@@ -294,6 +313,25 @@ void *efa_mock_neuron_alloc_return_null(void **handle, size_t size)
 {
 	return NULL;
 }
+
+void *efa_mock_neuron_alloc_return_mock(void **handle, size_t size)
+{
+	/* Not mocking return value so this function will fail when it is called */
+	return (void *) mock();
+}
+#endif
+
+#if HAVE_CUDA
+cudaError_t __wrap_ofi_cudaMalloc(void **ptr, size_t size)
+{
+	return g_efa_unit_test_mocks.ofi_cudaMalloc(ptr, size);
+}
+
+cudaError_t efa_mock_ofi_cudaMalloc_return_mock(void **ptr, size_t size)
+{
+	/* Not mocking return value so this function will fail when it is called */
+	return (cudaError_t) mock();
+}
 #endif
 
 ssize_t __wrap_ofi_copy_from_hmem_iov(void *dest, size_t size,
@@ -302,6 +340,11 @@ ssize_t __wrap_ofi_copy_from_hmem_iov(void *dest, size_t size,
 				      size_t hmem_iov_count, uint64_t hmem_iov_offset)
 {
 	return g_efa_unit_test_mocks.ofi_copy_from_hmem_iov(dest, size, hmem_iface, device, hmem_iov, hmem_iov_count, hmem_iov_offset);
+}
+
+int __wrap_efa_rdm_pke_read(struct efa_rdm_ope *ope)
+{
+	return g_efa_unit_test_mocks.efa_rdm_pke_read(ope);
 }
 
 enum ibv_fork_status __wrap_ibv_is_fork_initialized(void)

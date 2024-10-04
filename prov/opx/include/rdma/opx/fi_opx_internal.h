@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 by Argonne National Laboratory.
- * Copyright (C) 2021-2023 Cornelis Networks.
+ * Copyright (C) 2021-2024 Cornelis Networks.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -41,13 +41,15 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "rdma/opx/opx_tracer.h"
+
 #define FI_OPX_CACHE_LINE_SIZE	(64)
 
 #define FI_OPX_CQ_CONTEXT_EXT		(0x8000000000000000ull)
 #define FI_OPX_CQ_CONTEXT_MULTIRECV	(0x4000000000000000ull)
 #define FI_OPX_CQ_CONTEXT_HMEM		(0x2000000000000000ull)
 
-#define OPX_HMEM_SIZE_QWS	(2)
+#define OPX_HMEM_SIZE_QWS	(3)
 
 union fi_opx_mp_egr_id {
 	uint64_t		id;
@@ -89,61 +91,6 @@ union fi_opx_context {
 	};
 };
 
-struct fi_opx_context_slist {
-	union fi_opx_context *	head;
-	union fi_opx_context *	tail;
-};
-
-static inline void fi_opx_context_slist_init (struct fi_opx_context_slist* list)
-{
-	list->head = list->tail = NULL;
-}
-
-static inline int fi_opx_context_slist_empty (struct fi_opx_context_slist* list)
-{
-	return !list->head;
-}
-
-static inline void fi_opx_context_slist_insert_head (union fi_opx_context *item,
-		struct fi_opx_context_slist* list)
-{
-	assert(item->next == NULL);
-	if (fi_opx_context_slist_empty(list))
-		list->tail = item;
-	else
-		item->next = list->head;
-
-	list->head = item;
-}
-
-static inline void fi_opx_context_slist_insert_tail (union fi_opx_context *item,
-		struct fi_opx_context_slist* list)
-{
-	assert(item->next == NULL);
-	if (fi_opx_context_slist_empty(list))
-		list->head = item;
-	else
-		list->tail->next = item;
-
-	list->tail = item;
-}
-
-static inline void fi_opx_context_slist_remove_item (union fi_opx_context *item,
-		union fi_opx_context *prev, struct fi_opx_context_slist *list)
-{
-	if (prev) {
-		prev->next = item->next;
-	} else {
-		list->head = item->next;
-	}
-
-	if (item->next == NULL) {
-		list->tail = prev;
-	}
-
-	item->next = NULL;
-}
-
 struct fi_opx_context_ext {
 	union fi_opx_context		opx_context;
 	struct fi_cq_err_entry		err_entry;
@@ -162,6 +109,14 @@ struct fi_opx_context_ext {
 	// 184 bytes
 	uint64_t			unused;
 } __attribute__((__aligned__(32)));
+
+struct opx_sdma_queue {
+	struct slist	list;
+	uint16_t	num_reqs;
+	uint16_t	num_iovs;
+	uint16_t	max_iovs;
+	uint16_t	slots_avail;
+};
 
 #ifndef MAX
 #define MAX(a,b) ((a)^(((a)^(b))&-((a)<(b))))
@@ -182,24 +137,26 @@ struct fi_opx_context_ext {
 static inline int fi_opx_threading_unknown(const enum fi_threading threading)
 {
 	return threading != FI_THREAD_DOMAIN &&		// Most likely
-		threading != FI_THREAD_ENDPOINT &&
 		threading != FI_THREAD_SAFE &&
 		threading != FI_THREAD_COMPLETION &&
-		threading != FI_THREAD_FID &&
 		threading != FI_THREAD_UNSPEC;		// Least likely
 }
 
 static inline int fi_opx_threading_lock_required(const enum fi_threading threading, enum fi_progress progress)
 {
 	return !(threading == FI_THREAD_DOMAIN ||
-		 threading == FI_THREAD_ENDPOINT ||
 		 threading == FI_THREAD_COMPLETION) ||
 		 progress == FI_PROGRESS_AUTO;
 }
 
 static inline void fi_opx_lock_if_required (ofi_spin_t *lock, const int required)
 {
-	if (required) ofi_spin_lock(lock);
+	if (required) {
+		OPX_TRACER_TRACE_LOCK_IF_REQUIRED(OPX_TRACER_BEGIN, "LOCK");
+		ofi_spin_lock(lock);
+		OPX_TRACER_TRACE_LOCK_IF_REQUIRED(OPX_TRACER_END_SUCCESS, "LOCK");
+		OPX_TRACER_TRACE_LOCK_IF_REQUIRED(OPX_TRACER_BEGIN, "LOCK-HELD");
+	}
 }
 
 static inline void fi_opx_lock (ofi_spin_t *lock)
@@ -209,7 +166,12 @@ static inline void fi_opx_lock (ofi_spin_t *lock)
 
 static inline void fi_opx_unlock_if_required (ofi_spin_t *lock, const int required)
 {
-	if (required) ofi_spin_unlock(lock);
+	if (required) {
+		OPX_TRACER_TRACE_LOCK_IF_REQUIRED(OPX_TRACER_END_SUCCESS, "LOCK-HELD");
+		OPX_TRACER_TRACE_LOCK_IF_REQUIRED(OPX_TRACER_BEGIN, "UNLOCK");
+		ofi_spin_unlock(lock);
+		OPX_TRACER_TRACE_LOCK_IF_REQUIRED(OPX_TRACER_END_SUCCESS, "UNLOCK");
+	}
 }
 
 static inline void fi_opx_unlock (ofi_spin_t *lock)

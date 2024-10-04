@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 by Argonne National Laboratory.
- * Copyright (C) 2021-2023 by Cornelis Networks.
+ * Copyright (C) 2021-2024 by Cornelis Networks.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -58,7 +58,7 @@ void fi_opx_cq_debug(struct fid_cq *cq, char *func, const int line) {
 	len -= n;
 
 	if (opx_cq->completed.head != NULL) {
-		context = opx_cq->completed.head;
+		context = (union fi_opx_context *) opx_cq->completed.head;
 		n = snprintf(s, len, " = { %p", context); s += n; len -= n;
 
 		context = context->next;
@@ -73,7 +73,7 @@ void fi_opx_cq_debug(struct fid_cq *cq, char *func, const int line) {
 	n = 0; len = 2047; s = str; *s = 0;
 	n = snprintf(s, len, "%s():%d [%p] pending(%p,%p)", func, line, opx_cq, opx_cq->pending.head, opx_cq->pending.tail); s += n; len -= n;
 	if (opx_cq->pending.head != NULL) {
-		context = opx_cq->pending.head;
+		context = (union fi_opx_context *) opx_cq->pending.head;
 		n = snprintf(s, len, " = { %p(%lu,0x%016lx)", context, context->byte_counter, context->byte_counter); s += n; len -= n;
 
 		context = context->next;
@@ -89,7 +89,7 @@ void fi_opx_cq_debug(struct fid_cq *cq, char *func, const int line) {
 	n = 0; len = 2047; s = str; *s = 0;
 	n = snprintf(s, len, "%s():%d [%p] err(%p,%p)", func, line, opx_cq, opx_cq->err.head, opx_cq->err.tail); s += n; len -= n;
 	if (opx_cq->err.head != NULL) {
-		context = opx_cq->err.head;
+		context = (union fi_opx_context *) opx_cq->err.head;
 		n = snprintf(s, len, " = { %p(%lu)", context, context->byte_counter); s += n; len -= n;
 
 		context = context->next;
@@ -142,7 +142,7 @@ static int fi_opx_close_cq(fid_t fid)
 
 	free(opx_cq);
 	opx_cq = NULL;
-	//opx_cq (the object passed in as fid) is now unusable 
+	//opx_cq (the object passed in as fid) is now unusable
 
 	FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_CQ, "cq closed\n");
 	return 0;
@@ -193,7 +193,7 @@ int fi_opx_cq_enqueue_err (struct fi_opx_cq * opx_cq,
 	assert(!lock_required);
 	ext->opx_context.next = NULL;
 
-	fi_opx_context_slist_insert_tail((union fi_opx_context *)ext, &opx_cq->err);
+	slist_insert_tail((struct slist_entry *) ext, &opx_cq->err);
 
 	return 0;
 }
@@ -203,7 +203,8 @@ struct fi_ops_cq * fi_opx_cq_select_ops(const enum fi_cq_format format,
 		const enum ofi_reliability_kind reliability,
 		const uint64_t rcvhdrcnt,
 		const uint64_t caps,
-		const enum fi_progress progress)
+		const enum fi_progress progress,
+		const enum opx_hfi1_type hfi1_type)
 {
 
 	FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_CQ, "(called)\n");
@@ -222,19 +223,51 @@ struct fi_ops_cq * fi_opx_cq_select_ops(const enum fi_cq_format format,
 		abort();
 	}
 
-	const int lock_required = fi_opx_threading_lock_required(threading, fi_opx_global.progress);	
+	const int lock_required = fi_opx_threading_lock_required(threading, fi_opx_global.progress);
 
-	switch(rcvhdrcnt) {	
-		case 2048:
-			return lock_required ? fi_opx_cq_select_locking_2048_ops(format, reliability, comm_caps) :
-			                       fi_opx_cq_select_non_locking_2048_ops(format, reliability, comm_caps);
-		case 8192:
-			return lock_required ? fi_opx_cq_select_locking_8192_ops(format, reliability, comm_caps) :
-			                       fi_opx_cq_select_non_locking_8192_ops(format, reliability, comm_caps);
-		default:
-			FI_INFO(fi_opx_global.prov, FI_LOG_CQ, "WARNING: non-optimal setting specified for hfi1 rcvhdrcnt.  Optimal values are 2048 and 8192\n");			
-			return lock_required ? fi_opx_cq_select_locking_runtime_ops(format, reliability, comm_caps) :
-			                       fi_opx_cq_select_non_locking_runtime_ops(format, reliability, comm_caps);
+	if (hfi1_type & OPX_HFI1_WFR)	{
+
+		switch(rcvhdrcnt) {
+			case 2048:
+				return lock_required ? fi_opx_cq_select_locking_2048_ops(format, reliability, comm_caps, 0) :
+			                       	fi_opx_cq_select_non_locking_2048_ops(format, reliability, comm_caps, 0);
+			case 8192:
+				return lock_required ? fi_opx_cq_select_locking_8192_ops(format, reliability, comm_caps, 0) :
+			                       	fi_opx_cq_select_non_locking_8192_ops(format, reliability, comm_caps, 0);
+			default:
+				FI_INFO(fi_opx_global.prov, FI_LOG_CQ, "WARNING: non-optimal setting specified for hfi1 rcvhdrcnt.  Optimal values are 2048 and 8192\n");
+				return lock_required ? fi_opx_cq_select_locking_runtime_ops(format, reliability, comm_caps, 0) :
+			                       	fi_opx_cq_select_non_locking_runtime_ops(format, reliability, comm_caps, 0);
+		}
+	} else if (hfi1_type & OPX_HFI1_JKR_9B) {
+		switch(rcvhdrcnt) {
+			case 2048:
+				return lock_required ? fi_opx_cq_select_locking_2048_ops(format, reliability, comm_caps, 1) :
+			                       	fi_opx_cq_select_non_locking_2048_ops(format, reliability, comm_caps, 1);
+			case 8192:
+				return lock_required ? fi_opx_cq_select_locking_8192_ops(format, reliability, comm_caps, 1) :
+			                       	fi_opx_cq_select_non_locking_8192_ops(format, reliability, comm_caps, 1);
+			default:
+				FI_INFO(fi_opx_global.prov, FI_LOG_CQ, "WARNING: non-optimal setting specified for hfi1 rcvhdrcnt.  Optimal values are 2048 and 8192\n");
+				return lock_required ? fi_opx_cq_select_locking_runtime_ops(format, reliability, comm_caps, 1) :
+			                       	fi_opx_cq_select_non_locking_runtime_ops(format, reliability, comm_caps, 1);
+		}
+	} else if (hfi1_type & OPX_HFI1_JKR) {
+		switch(rcvhdrcnt) {
+			case 2048:
+				return lock_required ? fi_opx_cq_select_locking_2048_ops(format, reliability, comm_caps, 2) :
+			                       	fi_opx_cq_select_non_locking_2048_ops(format, reliability, comm_caps, 2);
+			case 8192:
+				return lock_required ? fi_opx_cq_select_locking_8192_ops(format, reliability, comm_caps, 2) :
+			                       	fi_opx_cq_select_non_locking_8192_ops(format, reliability, comm_caps, 2);
+			default:
+				FI_INFO(fi_opx_global.prov, FI_LOG_CQ, "WARNING: non-optimal setting specified for hfi1 rcvhdrcnt.  Optimal values are 2048 and 8192\n");
+				return lock_required ? fi_opx_cq_select_locking_runtime_ops(format, reliability, comm_caps, 2) :
+			                       	fi_opx_cq_select_non_locking_runtime_ops(format, reliability, comm_caps, 2);
+		}
+	} else {
+		FI_WARN(fi_opx_global.prov, FI_LOG_CQ, "Invalid HFI type %d\n", hfi1_type);
+		return NULL;
 	}
 
 }
@@ -274,9 +307,9 @@ int fi_opx_cq_open(struct fid_domain *dom,
 
 	opx_cq->format = attr->format ? attr->format : FI_CQ_FORMAT_CONTEXT;
 
-	fi_opx_context_slist_init(&opx_cq->pending);
-	fi_opx_context_slist_init(&opx_cq->completed);
-	fi_opx_context_slist_init(&opx_cq->err);
+	slist_init(&opx_cq->pending);
+	slist_init(&opx_cq->completed);
+	slist_init(&opx_cq->err);
 
 	opx_cq->ep_bind_count = 0;
 	opx_cq->progress.ep_count = 0;
@@ -370,7 +403,8 @@ void fi_opx_cq_finalize_ops(struct fid_ep *ep)
 			fi_opx_select_reliability(opx_ep),
 			opx_ep->hfi->info.rxe.hdrq.elemcnt,
 			opx_cq->ep_comm_caps,
-			opx_cq->domain->data_progress);
+			opx_cq->domain->data_progress,
+			OPX_HFI1_TYPE);
 	}
 
 	if (opx_ep->tx->cq && (opx_ep->tx->cq != opx_ep->rx->cq)) {
@@ -381,7 +415,8 @@ void fi_opx_cq_finalize_ops(struct fid_ep *ep)
 			fi_opx_select_reliability(opx_ep),
 			opx_ep->hfi->info.rxe.hdrq.elemcnt,
 			opx_cq->ep_comm_caps,
-			opx_cq->domain->data_progress);
+			opx_cq->domain->data_progress,
+			OPX_HFI1_TYPE);
 	}
 
 	FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_CQ, "(end)\n");

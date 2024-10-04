@@ -1,0 +1,33 @@
+name: 'Cornelis'
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+    branches:
+      - main
+    paths-ignore:
+      - 'man/**'
+      - 'docs/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  opx-ci:
+    name: OPX CI
+    if: |
+        github.repository == 'cornelisnetworks/libfabric-internal' && 
+        github.event.pull_request.merged != true
+    uses: cornelisnetworks/libfabric-devel/.github/workflows/cn.yml@master
+  on-merge:
+    name: On-Merge
+    if: |
+        github.repository == 'cornelisnetworks/libfabric-internal' && 
+        github.event.pull_request.merged == true
+    uses: cornelisnetworks/libfabric-devel/.github/workflows/merge.yml@master

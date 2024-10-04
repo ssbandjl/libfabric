@@ -26,7 +26,7 @@
 #define EFA_RX_RDM_OP_FLAGS (0)
 #define EFA_RX_DGRM_OP_FLAGS (0)
 
-#define EFA_MSG_ORDER (FI_ORDER_NONE)
+#define EFA_MSG_ORDER (0)
 
 #define EFA_NO_DEFAULT -1
 
@@ -73,7 +73,7 @@ const struct fi_domain_attr efa_domain_attr = {
 	.control_progress	= FI_PROGRESS_AUTO,
 	.data_progress		= FI_PROGRESS_AUTO,
 	.resource_mgmt		= FI_RM_DISABLED,
-	.mr_mode		= OFI_MR_BASIC_MAP | FI_MR_LOCAL | FI_MR_BASIC,
+	.mr_mode		= OFI_MR_BASIC_MAP | FI_MR_LOCAL | OFI_MR_BASIC,
 	.mr_key_size		= sizeof_field(struct ibv_sge, lkey),
 	.cq_data_size		= 0,
 	.tx_ctx_cnt		= 1024,
@@ -199,7 +199,6 @@ const struct fi_tx_attr efa_dgrm_tx_attr = {
 	.mode			= FI_MSG_PREFIX,
 	.op_flags		= EFA_TX_OP_FLAGS,
 	.msg_order		= EFA_MSG_ORDER,
-	.comp_order		= FI_ORDER_NONE,
 	.inject_size		= 0,
 	.rma_iov_limit		= 0,
 };
@@ -212,8 +211,6 @@ const struct fi_rx_attr efa_dgrm_rx_attr = {
 	.mode			= FI_MSG_PREFIX | EFA_RX_MODE,
 	.op_flags		= EFA_RX_DGRM_OP_FLAGS,
 	.msg_order		= EFA_MSG_ORDER,
-	.comp_order		= FI_ORDER_NONE,
-	.total_buffered_recv	= 0,
 	.iov_limit		= 1
 };
 
@@ -225,7 +222,6 @@ const struct fi_tx_attr efa_rdm_tx_attr = {
 	.mode			= 0,
 	.op_flags		= EFA_TX_OP_FLAGS,
 	.msg_order		= EFA_MSG_ORDER,
-	.comp_order		= FI_ORDER_NONE,
 	.inject_size		= 0,
 	.rma_iov_limit		= 1,
 };
@@ -238,8 +234,6 @@ const struct fi_rx_attr efa_rdm_rx_attr = {
 	.mode			= EFA_RX_MODE,
 	.op_flags		= EFA_RX_RDM_OP_FLAGS,
 	.msg_order		= EFA_MSG_ORDER,
-	.comp_order		= FI_ORDER_NONE,
-	.total_buffered_recv	= 0,
 	.iov_limit		= 1
 };
 

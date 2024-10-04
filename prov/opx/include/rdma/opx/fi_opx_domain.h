@@ -45,6 +45,8 @@
 
 #include "rdma/opx/fi_opx_tid_domain.h"
 
+#include "rdma/opx/opx_hmem_domain.h"
+
 //#define OFI_RELIABILITY_CONFIG_STATIC_NONE
 //#define OFI_RELIABILITY_CONFIG_STATIC_OFFLOAD
 //#define OFI_RELIABILITY_CONFIG_STATIC_ONLOAD
@@ -77,11 +79,16 @@ struct fi_opx_ep;	/* forward declaration */
 
 
 struct opx_tid_fabric;
+struct opx_hmem_fabric;
+
 struct fi_opx_fabric {
 	struct fid_fabric	fabric_fid;
 
-	int64_t		ref_cnt;
-	struct opx_tid_fabric* tid_fabric;
+	int64_t			ref_cnt;
+	struct opx_tid_fabric*	tid_fabric;
+#ifdef OPX_HMEM
+	struct opx_hmem_fabric*	hmem_fabric;
+#endif
 };
 
 
@@ -92,10 +99,9 @@ struct fi_opx_node {
 #define OPX_JOB_KEY_STR_SIZE 33
 #define OPX_DEFAULT_JOB_KEY_STR "00112233445566778899aabbccddeeff"
 
-#define OPX_DEFAULT_PROG_AFFINITY_STR "0:3:1"
-#define OPX_SDMA_BOUNCE_BUF_MIN FI_OPX_SDMA_MIN_LENGTH
-#define OPX_SDMA_BOUNCE_BUF_THRESHOLD FI_OPX_SDMA_DC_MIN
-#define OPX_SDMA_BOUNCE_BUF_MAX (INT_MAX - 1)
+#define OPX_SDMA_BOUNCE_BUF_MIN FI_OPX_SDMA_MIN_PAYLOAD_BYTES_MIN
+#define OPX_SDMA_BOUNCE_BUF_THRESHOLD FI_OPX_SDMA_MIN_PAYLOAD_BYTES_DEFAULT
+#define OPX_SDMA_BOUNCE_BUF_MAX FI_OPX_SDMA_MIN_PAYLOAD_BYTES_MAX
 
 struct fi_opx_domain {
 	struct fid_domain	domain_fid;
@@ -103,13 +109,13 @@ struct fi_opx_domain {
 
 	enum fi_threading	threading;
 	enum fi_resource_mgmt	resource_mgmt;
-	enum fi_mr_mode		mr_mode;
+	int			mr_mode;
 	enum fi_progress	data_progress;
 
 	uuid_t			unique_job_key;
 	char			unique_job_key_str[OPX_JOB_KEY_STR_SIZE];
 
-	char			progress_affinity_str[OPX_JOB_KEY_STR_SIZE];
+	char*			progress_affinity_str;
 
 	int			auto_progress_interval;
 
@@ -118,15 +124,17 @@ struct fi_opx_domain {
 	uint8_t			ep_count;
 
 	uint64_t		num_mr_keys;
-	struct fi_opx_mr        *mr_hashmap;
+	struct fi_opx_mr	*mr_hashmap;
 
 	struct fi_opx_reliability_service	reliability_service_offload;	/* OFFLOAD only */
 	uint8_t					reliability_rx_offload;		/* OFFLOAD only */
 	enum ofi_reliability_kind		reliability_kind;
 
-	struct opx_tid_domain *tid_domain;
-
-	int64_t		ref_cnt;
+	struct opx_tid_domain	*tid_domain;
+#ifdef OPX_HMEM
+	struct opx_hmem_domain	*hmem_domain;
+#endif
+	int64_t			ref_cnt;
 };
 
 struct fi_opx_av {
@@ -161,6 +169,7 @@ struct fi_opx_mr {
 	uint64_t		cntr_bflags;
 	struct fi_opx_cntr	*cntr;
 	struct fi_opx_ep	*ep;
+	uint64_t		hmem_dev_reg_handle;
 	UT_hash_handle		hh;
 };
 

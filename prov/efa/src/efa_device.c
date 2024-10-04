@@ -242,8 +242,7 @@ void efa_device_list_finalize(void)
  */
 bool efa_device_support_rdma_read(void)
 {
-	if (g_device_cnt <=0)
-		return false;
+	assert(g_device_cnt > 0);
 
 	return g_device_list[0].device_caps & EFADV_DEVICE_ATTR_CAPS_RDMA_READ;
 }
@@ -256,13 +255,31 @@ bool efa_device_support_rdma_read(void)
 #if HAVE_CAPS_RDMA_WRITE
 bool efa_device_support_rdma_write(void)
 {
-	if (g_device_cnt <=0)
-		return false;
+	assert(g_device_cnt > 0);
 
 	return g_device_list[0].device_caps & EFADV_DEVICE_ATTR_CAPS_RDMA_WRITE;
 }
 #else
 bool efa_device_support_rdma_write(void)
+{
+	return false;
+}
+#endif
+
+/**
+ * @brief check whether efa device support unsolicited write recv
+ *
+ * @return a boolean indicating unsolicited write recv
+ */
+#if HAVE_CAPS_UNSOLICITED_WRITE_RECV
+bool efa_device_support_unsolicited_write_recv(void)
+{
+	assert(g_device_cnt > 0);
+
+	return g_device_list[0].device_caps & EFADV_DEVICE_ATTR_CAPS_UNSOLICITED_WRITE_RECV;
+}
+#else
+bool efa_device_support_unsolicited_write_recv(void)
 {
 	return false;
 }

@@ -71,6 +71,30 @@ static struct fi_ops efa_rdm_cq_fi_ops = {
 	.ops_open = fi_no_ops_open,
 };
 
+
+#if HAVE_CAPS_UNSOLICITED_WRITE_RECV
+/**
+ * @brief Check whether a completion consumes recv buffer
+ *
+ * @param ibv_cq_ex extended ibv cq
+ * @return true the wc consumes a recv buffer
+ * @return false the wc doesn't consume a recv buffer
+ */
+static inline
+bool efa_rdm_cq_wc_is_unsolicited(struct ibv_cq_ex *ibv_cq_ex)
+{
+	return efa_rdm_use_unsolicited_write_recv() && efadv_wc_is_unsolicited(efadv_cq_from_ibv_cq_ex(ibv_cq_ex));
+}
+
+#else
+
+static inline
+bool efa_rdm_cq_wc_is_unsolicited(struct ibv_cq_ex *ibv_cq_ex)
+{
+	return false;
+}
+
+#endif
 /**
  * @brief handle rdma-core CQ completion resulted from IBV_WRITE_WITH_IMM
  *
@@ -78,25 +102,25 @@ static struct fi_ops efa_rdm_cq_fi_ops = {
  * remote endpoint.  These do not have a packet context, nor do they have a
  * connid available.
  *
- * @param[in]		flags		flags (such as FI_REMOTE_CQ_DATA)
- * @param[in]		pkt_entry	packet entry
  * @param[in]		ibv_cq_ex	extended ibv cq
+ * @param[in]		flags		flags (such as FI_REMOTE_CQ_DATA)
+ * @param[in]		ep	        efa_rdm_ep
+ * @param[in]		pkt_entry	packet entry
  */
 static
 void efa_rdm_cq_proc_ibv_recv_rdma_with_imm_completion(
+						       struct ibv_cq_ex *ibv_cq_ex,
 						       uint64_t flags,
-						       struct efa_rdm_pke *pkt_entry,
-						       struct ibv_cq_ex *ibv_cq_ex)
+						       struct efa_rdm_ep *ep,
+						       struct efa_rdm_pke *pkt_entry
+						       )
 {
 	struct util_cq *target_cq;
 	int ret;
 	fi_addr_t src_addr;
 	struct efa_av *efa_av;
-	struct efa_rdm_ep *ep = pkt_entry->ep;
 	uint32_t imm_data = ibv_wc_read_imm_data(ibv_cq_ex);
 	uint32_t len = ibv_wc_read_byte_len(ibv_cq_ex);
-
-	assert(ep);
 
 	target_cq = ep->base_ep.util_ep.rx_cq;
 	efa_av = ep->base_ep.av;
@@ -120,11 +144,20 @@ void efa_rdm_cq_proc_ibv_recv_rdma_with_imm_completion(
 
 	efa_cntr_report_rx_completion(&ep->base_ep.util_ep, flags);
 
-	/* Recv with immediate will consume a pkt_entry, but the pkt is not
-	   filled, so free the pkt_entry and record we have one less posted
-	   packet now. */
-	ep->efa_rx_pkts_posted--;
-	efa_rdm_pke_release_rx(pkt_entry);
+	/**
+	 * For unsolicited wc, pkt_entry can be NULL, so we can only
+	 * access it for solicited wc.
+	 */
+	if (!efa_rdm_cq_wc_is_unsolicited(ibv_cq_ex)) {
+		/**
+		 * Recv with immediate will consume a pkt_entry, but the pkt is not
+		 * filled, so free the pkt_entry and record we have one less posted
+		 * packet now.
+		 */
+		assert(pkt_entry);
+		ep->efa_rx_pkts_posted--;
+		efa_rdm_pke_release_rx(pkt_entry);
+	}
 }
 
 #if HAVE_EFADV_CQ_EX
@@ -234,6 +267,126 @@ fi_addr_t efa_rdm_cq_determine_addr_from_ibv_cq(struct ibv_cq_ex *ibv_cqx, enum 
 #endif
 
 /**
+ * @brief handle a received packet
+ *
+ * @param	ep[in,out]		endpoint
+ * @param	pkt_entry[in,out]	received packet, will be released by this function
+ */
+static void efa_rdm_cq_handle_recv_completion(struct efa_ibv_cq *ibv_cq, struct efa_rdm_pke *pkt_entry, struct efa_rdm_ep *ep)
+{
+	int pkt_type;
+	struct efa_rdm_peer *peer;
+	struct efa_rdm_base_hdr *base_hdr;
+	struct efa_av *efa_av = ep->base_ep.av;
+	uint32_t imm_data = 0;
+	bool has_imm_data = false;
+	struct ibv_cq_ex *ibv_cq_ex = ibv_cq->ibv_cq_ex;
+
+	if (pkt_entry->alloc_type == EFA_RDM_PKE_FROM_USER_RX_POOL) {
+		assert(ep->user_rx_pkts_posted > 0);
+		ep->user_rx_pkts_posted--;
+	} else {
+		assert(ep->efa_rx_pkts_posted > 0);
+		ep->efa_rx_pkts_posted--;
+	}
+
+	pkt_entry->addr = efa_av_reverse_lookup_rdm(efa_av, ibv_wc_read_slid(ibv_cq_ex),
+					ibv_wc_read_src_qp(ibv_cq_ex), pkt_entry);
+
+	if (pkt_entry->addr == FI_ADDR_NOTAVAIL) {
+		pkt_entry->addr = efa_rdm_cq_determine_addr_from_ibv_cq(ibv_cq_ex, ibv_cq->ibv_cq_ex_type);
+	}
+
+	pkt_entry->pkt_size = ibv_wc_read_byte_len(ibv_cq_ex);
+	if (ibv_wc_read_wc_flags(ibv_cq_ex) & IBV_WC_WITH_IMM) {
+		has_imm_data = true;
+		imm_data = ibv_wc_read_imm_data(ibv_cq_ex);
+	}
+
+	/*
+	 * Ignore packet if peer address cannot be determined. This ususally happens if
+	 * we had prior communication with the peer, but
+	 * application called fi_av_remove() to remove the address
+	 * from address vector.
+	 */
+	if (pkt_entry->addr == FI_ADDR_NOTAVAIL) {
+		EFA_WARN(FI_LOG_CQ,
+			"Warning: ignoring a received packet from a removed address. packet type: %" PRIu8
+			", packet flags: %x\n",
+			efa_rdm_pke_get_base_hdr(pkt_entry)->type,
+			efa_rdm_pke_get_base_hdr(pkt_entry)->flags);
+		efa_rdm_pke_release_rx(pkt_entry);
+		return;
+	}
+
+#if ENABLE_DEBUG
+	dlist_remove(&pkt_entry->dbg_entry);
+	dlist_insert_tail(&pkt_entry->dbg_entry, &ep->rx_pkt_list);
+#ifdef ENABLE_EFA_RDM_PKE_DUMP
+	efa_rdm_pke_print(pkt_entry, "Received");
+#endif
+#endif
+	peer = efa_rdm_ep_get_peer(ep, pkt_entry->addr);
+	assert(peer);
+	if (peer->is_local) {
+		/*
+		 * This happens when the peer is on same instance, but chose to
+		 * use EFA device to communicate with me. In this case, we respect
+		 * that and will not use shm with the peer.
+		 * TODO: decide whether to use shm through handshake packet.
+		 */
+		peer->is_local = 0;
+	}
+
+	efa_rdm_ep_post_handshake_or_queue(ep, peer);
+
+	/**
+	 * Data is already delivered to user posted pkt without pkt hdrs.
+	 */
+	if (pkt_entry->alloc_type == EFA_RDM_PKE_FROM_USER_RX_POOL) {
+		assert(ep->base_ep.user_recv_qp);
+		/* User recv pkts are only posted to the user recv qp */
+		assert(ibv_wc_read_qp_num(ibv_cq->ibv_cq_ex) == ep->base_ep.user_recv_qp->qp_num);
+		return efa_rdm_pke_proc_received_no_hdr(pkt_entry, has_imm_data, imm_data);
+	}
+
+	/* Proc receives with pkt hdrs (posted to ctrl QPs)*/
+	base_hdr = efa_rdm_pke_get_base_hdr(pkt_entry);
+	pkt_type = base_hdr->type;
+	if (OFI_UNLIKELY(pkt_type >= EFA_RDM_EXTRA_REQ_PKT_END)) {
+		EFA_WARN(FI_LOG_CQ,
+			"Peer %d is requesting feature %d, which this EP does not support.\n",
+			(int)pkt_entry->addr, base_hdr->type);
+
+		assert(0 && "invalid REQ packet type");
+		efa_base_ep_write_eq_error(&ep->base_ep, FI_EIO, FI_EFA_ERR_INVALID_PKT_TYPE);
+		efa_rdm_pke_release_rx(pkt_entry);
+		return;
+	}
+
+	/**
+	 * When zero copy recv is turned on, the ep cannot
+	 * handle rtm pkts delivered to the internal bounce buffer,
+	 * because the user recv buffer has been posted to the other
+	 * QP and we cannot cancel that.
+	 */
+	if (OFI_UNLIKELY(ep->use_zcpy_rx && efa_rdm_pkt_type_is_rtm(pkt_type))) {
+		void *errbuf;
+		size_t errbuf_len;
+
+		/* local & peer host-id & ep address will be logged by efa_rdm_write_error_msg */
+		if (!efa_rdm_write_error_msg(ep, pkt_entry->addr, FI_EFA_ERR_INVALID_PKT_TYPE_ZCPY_RX, &errbuf, &errbuf_len))
+			EFA_WARN(FI_LOG_CQ, "Error: %s\n", (const char *) errbuf);
+		efa_base_ep_write_eq_error(&ep->base_ep, FI_EINVAL, FI_EFA_ERR_INVALID_PKT_TYPE_ZCPY_RX);
+		efa_rdm_pke_release_rx(pkt_entry);
+		return;
+	}
+
+	efa_rdm_pke_proc_received(pkt_entry);
+}
+
+
+/**
  * @brief Get the vendor error code for an endpoint's CQ
  *
  * This function is essentially a wrapper for `ibv_wc_read_vendor_err()`; making
@@ -246,7 +399,9 @@ fi_addr_t efa_rdm_cq_determine_addr_from_ibv_cq(struct ibv_cq_ex *ibv_cqx, enum 
  *
  * @todo Currently, this only checks for unresponsive receiver
  * (#EFA_IO_COMP_STATUS_LOCAL_ERROR_UNRESP_REMOTE) and attempts to promote it to
- * #FI_EFA_ERR_ESTABLISHED_RECV_UNRESP. This should be expanded to handle other
+ * #FI_EFA_ERR_ESTABLISHED_RECV_UNRESP if a handshake was made, or
+ * #FI_EFA_ERR_UNESTABLISHED_RECV_UNRESP if the handshake failed. 
+ * This should be expanded to handle other
  * RDMA Core error codes (#EFA_IO_COMP_STATUSES) for the sake of more accurate
  * error reporting
  */
@@ -265,8 +420,9 @@ static int efa_rdm_cq_get_prov_errno(struct ibv_cq_ex *ibv_cq_ex) {
 
 	switch (vendor_err) {
 	case EFA_IO_COMP_STATUS_LOCAL_ERROR_UNRESP_REMOTE: {
-		if (peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED)
-			vendor_err = FI_EFA_ERR_ESTABLISHED_RECV_UNRESP;
+		vendor_err = (peer->flags & EFA_RDM_PEER_HANDSHAKE_RECEIVED) ?
+			     FI_EFA_ERR_ESTABLISHED_RECV_UNRESP :
+			     FI_EFA_ERR_UNESTABLISHED_RECV_UNRESP;
 		break;
 	}
 	default:
@@ -276,6 +432,10 @@ static int efa_rdm_cq_get_prov_errno(struct ibv_cq_ex *ibv_cq_ex) {
 	return vendor_err;
 }
 
+static int efa_rdm_cq_match_ep(struct dlist_entry *item, const void *ep)
+{
+	return (container_of(item, struct efa_rdm_ep, entry) == ep) ;
+}
 
 /**
  * @brief poll rdma-core cq and process the cq entry
@@ -291,7 +451,6 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 	 * EFA expects .comp_mask = 0, or otherwise returns EINVAL.
 	 */
 	struct ibv_poll_cq_attr poll_cq_attr = {.comp_mask = 0};
-	struct efa_av *efa_av;
 	struct efa_rdm_pke *pkt_entry;
 	ssize_t err;
 	int opcode;
@@ -300,6 +459,13 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 	struct efa_rdm_ep *ep = NULL;
 	struct fi_cq_err_entry err_entry;
 	struct efa_rdm_cq *efa_rdm_cq;
+	struct efa_domain *efa_domain;
+	struct efa_qp *qp;
+	struct dlist_entry rx_progressed_ep_list, *tmp;
+
+	efa_rdm_cq = container_of(ibv_cq, struct efa_rdm_cq, ibv_cq);
+	efa_domain = container_of(efa_rdm_cq->util_cq.domain, struct efa_domain, util_domain);
+	dlist_init(&rx_progressed_ep_list);
 
 	/* Call ibv_start_poll only once */
 	err = ibv_start_poll(ibv_cq->ibv_cq_ex, &poll_cq_attr);
@@ -307,9 +473,8 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 
 	while (!err) {
 		pkt_entry = (void *)(uintptr_t)ibv_cq->ibv_cq_ex->wr_id;
-		ep = pkt_entry->ep;
-		assert(ep);
-		efa_av = ep->base_ep.av;
+		qp = efa_domain->qp_table[ibv_wc_read_qp_num(ibv_cq->ibv_cq_ex) & efa_domain->qp_table_sz_m1];
+		ep = container_of(qp->base_ep, struct efa_rdm_ep, base_ep);
 		efa_rdm_tracepoint(poll_cq, (size_t) ibv_cq->ibv_cq_ex->wr_id);
 		opcode = ibv_wc_read_opcode(ibv_cq->ibv_cq_ex);
 		if (ibv_cq->ibv_cq_ex->status) {
@@ -338,16 +503,7 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 			efa_rdm_pke_handle_send_completion(pkt_entry);
 			break;
 		case IBV_WC_RECV:
-			pkt_entry->addr = efa_av_reverse_lookup_rdm(efa_av, ibv_wc_read_slid(ibv_cq->ibv_cq_ex),
-								ibv_wc_read_src_qp(ibv_cq->ibv_cq_ex), pkt_entry);
-
-			if (pkt_entry->addr == FI_ADDR_NOTAVAIL) {
-				pkt_entry->addr = efa_rdm_cq_determine_addr_from_ibv_cq(ibv_cq->ibv_cq_ex, ibv_cq->ibv_cq_ex_type);
-			}
-
-			pkt_entry->pkt_size = ibv_wc_read_byte_len(ibv_cq->ibv_cq_ex);
-			assert(pkt_entry->pkt_size > 0);
-			efa_rdm_pke_handle_recv_completion(pkt_entry);
+			efa_rdm_cq_handle_recv_completion(ibv_cq, pkt_entry, ep);
 #if ENABLE_DEBUG
 			ep->recv_comps++;
 #endif
@@ -358,8 +514,9 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 			break;
 		case IBV_WC_RECV_RDMA_WITH_IMM:
 			efa_rdm_cq_proc_ibv_recv_rdma_with_imm_completion(
+				ibv_cq->ibv_cq_ex,
 				FI_REMOTE_CQ_DATA | FI_RMA | FI_REMOTE_WRITE,
-				pkt_entry, ibv_cq->ibv_cq_ex);
+				ep, pkt_entry);
 			break;
 		default:
 			EFA_WARN(FI_LOG_EP_CTRL,
@@ -367,6 +524,8 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 			assert(0 && "Unhandled cq type");
 		}
 
+		if (ep->efa_rx_pkts_to_post > 0 && !dlist_find_first_match(&rx_progressed_ep_list, &efa_rdm_cq_match_ep, ep))
+			dlist_insert_tail(&ep->entry, &rx_progressed_ep_list);
 		i++;
 		if (i == cqe_to_process) {
 			break;
@@ -389,12 +548,19 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 			.prov_errno = prov_errno,
 			.op_context = NULL
 		};
-		efa_rdm_cq = container_of(ibv_cq, struct efa_rdm_cq, ibv_cq);
 		ofi_cq_write_error(&efa_rdm_cq->util_cq, &err_entry);
 	}
 
 	if (should_end_poll)
 		ibv_end_poll(ibv_cq->ibv_cq_ex);
+
+	dlist_foreach_container_safe(
+		&rx_progressed_ep_list, struct efa_rdm_ep, ep, entry, tmp) {
+		efa_rdm_ep_post_internal_rx_pkts(ep);
+		dlist_remove(&ep->entry);
+	}
+	assert(dlist_empty(&rx_progressed_ep_list));
+
 }
 
 static ssize_t efa_rdm_cq_readfrom(struct fid_cq *cq_fid, void *buf, size_t count, fi_addr_t *src_addr)
@@ -444,25 +610,38 @@ static struct fi_ops_cq efa_rdm_cq_ops = {
 
 static void efa_rdm_cq_progress(struct util_cq *cq)
 {
-	struct util_ep *ep;
-	struct fid_list_entry *fid_entry;
 	struct dlist_entry *item;
 	struct efa_rdm_cq *efa_rdm_cq;
 	struct efa_ibv_cq_poll_list_entry *poll_list_entry;
+	struct efa_domain *efa_domain;
+	struct efa_rdm_ep *efa_rdm_ep;
+	struct fid_list_entry *fid_entry;
 
 	ofi_genlock_lock(&cq->ep_list_lock);
 	efa_rdm_cq = container_of(cq, struct efa_rdm_cq, util_cq);
+	efa_domain = container_of(efa_rdm_cq->util_cq.domain, struct efa_domain, util_domain);
+
+	/**
+	 * TODO: It's better to just post the initial batch of internal rx pkts during ep enable
+	 * so we don't have to iterate cq->ep_list here.
+	 * However, it is observed that doing that will hurt performance if application opens
+	 * some idle endpoints and never poll completions for them. Move these initial posts to
+	 * the first cq read call before having a long term fix.
+	 */
+	if (!efa_rdm_cq->initial_rx_to_all_eps_posted) {
+		dlist_foreach(&cq->ep_list, item) {
+			fid_entry = container_of(item, struct fid_list_entry, entry);
+			efa_rdm_ep = container_of(fid_entry->fid, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+			efa_rdm_ep_post_internal_rx_pkts(efa_rdm_ep);
+		}
+		efa_rdm_cq->initial_rx_to_all_eps_posted = true;
+	}
 
 	dlist_foreach(&efa_rdm_cq->ibv_cq_poll_list, item) {
 		poll_list_entry = container_of(item, struct efa_ibv_cq_poll_list_entry, entry);
 		efa_rdm_cq_poll_ibv_cq(efa_env.efa_cq_read_size, poll_list_entry->cq);
 	}
-
-	dlist_foreach(&cq->ep_list, item) {
-		fid_entry = container_of(item, struct fid_list_entry, entry);
-		ep = container_of(fid_entry->fid, struct util_ep, ep_fid.fid);
-		ep->progress(ep);
-	}
+	efa_domain_progress_rdm_peers_and_queues(efa_domain);
 	ofi_genlock_unlock(&cq->ep_list_lock);
 }
 
@@ -501,6 +680,7 @@ int efa_rdm_cq_open(struct fid_domain *domain, struct fi_cq_attr *attr,
 	attr->size = MAX(efa_domain->rdm_cq_size, attr->size);
 
 	dlist_init(&cq->ibv_cq_poll_list);
+	cq->initial_rx_to_all_eps_posted = false;
 	ret = ofi_cq_init(&efa_prov, domain, attr, &cq->util_cq,
 			  &efa_rdm_cq_progress, context);
 

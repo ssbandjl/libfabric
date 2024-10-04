@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 by Argonne National Laboratory.
- * Copyright (C) 2022 Cornelis Networks.
+ * Copyright (C) 2022-2024 Cornelis Networks.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -46,53 +46,53 @@
  * C requires another indirection for expanding macros since
  * operands of the token pasting operator are not expanded */
 
-#define FI_OPX_CQ_SPECIALIZED_FUNC_NON_LOCKING(FORMAT, RELIABILITY, MASK, CAPS)	\
-	FI_OPX_CQ_SPECIALIZED_FUNC_NON_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS)
+#define FI_OPX_CQ_SPECIALIZED_FUNC_NON_LOCKING(FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE)	\
+	FI_OPX_CQ_SPECIALIZED_FUNC_NON_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE)
 
-#define FI_OPX_CQ_SPECIALIZED_FUNC_NON_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS)\
+#define FI_OPX_CQ_SPECIALIZED_FUNC_NON_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE)\
     __OPX_FORCE_INLINE__ ssize_t                      \
-	fi_opx_cq_read_ ## FORMAT ## _0_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS		\
+	fi_opx_cq_read_ ## FORMAT ## _0_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS ## _ ## HFI1_TYPE		\
 		(struct fid_cq *cq, void *buf, size_t count)			\
 	{									\
 		return fi_opx_cq_read_generic_non_locking(cq, buf, count,	\
-				FORMAT, RELIABILITY, MASK, CAPS);	\
+				FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE);	\
 	}									\
 	__OPX_FORCE_INLINE__ ssize_t                          \
-	fi_opx_cq_readfrom_ ## FORMAT ## _0_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS		\
+	fi_opx_cq_readfrom_ ## FORMAT ## _0_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS ## _ ## HFI1_TYPE		\
 		(struct fid_cq *cq, void *buf, size_t count,			\
 			fi_addr_t *src_addr)					\
 	{									\
 		return fi_opx_cq_readfrom_generic_non_locking(cq, buf, count,	\
 				src_addr, FORMAT, RELIABILITY, MASK,		\
-				CAPS);				\
+				CAPS, HFI1_TYPE);				\
 	}									\
 
-#define FI_OPX_CQ_SPECIALIZED_FUNC_LOCKING(FORMAT, RELIABILITY, MASK, CAPS)	\
-	FI_OPX_CQ_SPECIALIZED_FUNC_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS)
+#define FI_OPX_CQ_SPECIALIZED_FUNC_LOCKING(FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE)	\
+	FI_OPX_CQ_SPECIALIZED_FUNC_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE)
 
-#define FI_OPX_CQ_SPECIALIZED_FUNC_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS)\
+#define FI_OPX_CQ_SPECIALIZED_FUNC_LOCKING_(FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE)\
     __OPX_FORCE_INLINE__ ssize_t                      \
-	fi_opx_cq_read_ ## FORMAT ## _1_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS		\
+	fi_opx_cq_read_ ## FORMAT ## _1_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS ## _ ## HFI1_TYPE		\
 		(struct fid_cq *cq, void *buf, size_t count)			\
 	{									\
 		return fi_opx_cq_read_generic_locking(cq, buf, count,		\
-				FORMAT, RELIABILITY, MASK, CAPS);	\
+				FORMAT, RELIABILITY, MASK, CAPS, HFI1_TYPE);	\
 	}									\
 	__OPX_FORCE_INLINE__ ssize_t                          \
-	fi_opx_cq_readfrom_ ## FORMAT ## _1_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS	\
+	fi_opx_cq_readfrom_ ## FORMAT ## _1_ ## RELIABILITY ## _ ## MASK ## _ ## CAPS ## _ ## HFI1_TYPE	\
 		(struct fid_cq *cq, void *buf, size_t count,			\
 			fi_addr_t *src_addr)					\
 	{									\
 		return fi_opx_cq_readfrom_generic_locking(cq, buf, count,	\
 				src_addr, FORMAT, RELIABILITY, MASK,		\
-				CAPS);				\
+				CAPS, HFI1_TYPE);				\
 	}									\
 
-#define FI_OPX_CQ_SPECIALIZED_FUNC_NAME(TYPE, FORMAT, LOCK, RELIABILITY, MASK, CAPS)			\
-	FI_OPX_CQ_SPECIALIZED_FUNC_NAME_(TYPE, FORMAT, LOCK, RELIABILITY, MASK, CAPS)
+#define FI_OPX_CQ_SPECIALIZED_FUNC_NAME(TYPE, FORMAT, LOCK, RELIABILITY, MASK, CAPS, HFI1_TYPE)			\
+	FI_OPX_CQ_SPECIALIZED_FUNC_NAME_(TYPE, FORMAT, LOCK, RELIABILITY, MASK, CAPS, HFI1_TYPE)
 
-#define FI_OPX_CQ_SPECIALIZED_FUNC_NAME_(TYPE, FORMAT, LOCK, RELIABILITY, MASK, CAPS)			\
-		fi_opx_ ## TYPE ## _ ## FORMAT ## _ ## LOCK ## _ ## RELIABILITY ## _ ## MASK ## _ ## CAPS
+#define FI_OPX_CQ_SPECIALIZED_FUNC_NAME_(TYPE, FORMAT, LOCK, RELIABILITY, MASK, CAPS, HFI1_TYPE)			\
+		fi_opx_ ## TYPE ## _ ## FORMAT ## _ ## LOCK ## _ ## RELIABILITY ## _ ## MASK ## _ ## CAPS ## _ ## HFI1_TYPE
 
 
 #ifdef __cplusplus
@@ -128,9 +128,9 @@ struct fi_opx_cq {
 
 	/* == CACHE LINE == */
 
-	struct fi_opx_context_slist	pending;
-	struct fi_opx_context_slist	completed;
-	struct fi_opx_context_slist	err;		/* 'struct fi_opx_context_ext' element linked list */
+	struct slist			pending;
+	struct slist			completed;
+	struct slist			err;		/* 'struct fi_opx_context_ext' element linked list */
 
 	struct {
 		uint64_t		ep_count;
@@ -180,27 +180,33 @@ int fi_opx_cq_enqueue_err (struct fi_opx_cq * opx_cq,
 
 struct fi_ops_cq * fi_opx_cq_select_non_locking_2048_ops(const enum fi_cq_format format,
 							const enum ofi_reliability_kind reliability,
-							const uint64_t comm_caps);
+							const uint64_t comm_caps,
+							const uint32_t hfi1_type);
 
 struct fi_ops_cq * fi_opx_cq_select_non_locking_8192_ops(const enum fi_cq_format format,
 							const enum ofi_reliability_kind reliability,
-							const uint64_t comm_caps);
+							const uint64_t comm_caps,
+							const uint32_t hfi1_type);
 
 struct fi_ops_cq * fi_opx_cq_select_non_locking_runtime_ops(const enum fi_cq_format format,
 							const enum ofi_reliability_kind reliability,
-							const uint64_t comm_caps);
+							const uint64_t comm_caps,
+							const uint32_t hfi1_type);
 
 struct fi_ops_cq * fi_opx_cq_select_locking_2048_ops(const enum fi_cq_format format,
 							const enum ofi_reliability_kind reliability,
-							const uint64_t comm_caps);
+							const uint64_t comm_caps,
+							const uint32_t hfi1_type);
 
 struct fi_ops_cq * fi_opx_cq_select_locking_8192_ops(const enum fi_cq_format format,
-                                                        const enum ofi_reliability_kind reliability,
-                                                        const uint64_t comm_caps);
+						     const enum ofi_reliability_kind reliability,
+						     const uint64_t comm_caps,
+						     const uint32_t hfi1_type);
 
 struct fi_ops_cq * fi_opx_cq_select_locking_runtime_ops(const enum fi_cq_format format,
-                                                        const enum ofi_reliability_kind reliability,
-                                                        const uint64_t comm_caps);
+							const enum ofi_reliability_kind reliability,
+							const uint64_t comm_caps,
+							const uint32_t hfi1_type);
 
 void fi_opx_cq_debug(struct fid_cq *cq, char *func, const int line);
 
@@ -212,14 +218,7 @@ int fi_opx_cq_enqueue_pending (struct fi_opx_cq * opx_cq,
 
 	if (lock_required) { FI_WARN(fi_opx_global.prov, FI_LOG_CQ, "unimplemented\n"); abort(); }
 
-	union fi_opx_context * tail = opx_cq->pending.tail;
-	context->next = NULL;
-	if (tail) {
-		tail->next = context;
-	} else {
-		opx_cq->pending.head = context;
-	}
-	opx_cq->pending.tail = context;
+	slist_insert_tail((struct slist_entry *) context, &opx_cq->pending);
 
 	return 0;
 }
@@ -237,19 +236,7 @@ int fi_opx_cq_enqueue_completed (struct fi_opx_cq * opx_cq,
 
 	FI_DBG_TRACE(fi_opx_global.prov, FI_LOG_EP_DATA, "=================== MANUAL PROGRESS COMPLETION CQ ENQUEUED\n");
 
-	union fi_opx_context * tail = opx_cq->completed.tail;
-	context->next = NULL;
-	if (tail) {
-
-		assert(NULL != opx_cq->completed.head);
-		tail->next = context;
-		opx_cq->completed.tail = context;
-
-	} else {
-		assert(NULL == opx_cq->completed.head);
-		opx_cq->completed.head = context;
-		opx_cq->completed.tail = context;
-	}
+	slist_insert_tail((struct slist_entry *) context, &opx_cq->completed);
 
 	return 0;
 }
@@ -314,8 +301,8 @@ static ssize_t fi_opx_cq_poll_noinline (struct fi_opx_cq *opx_cq,
 	/* examine each context in the pending completion queue and, if the
 	 * operation is complete, initialize the cq entry in the application
 	 * buffer and remove the context from the queue. */
-	union fi_opx_context * pending_head = opx_cq->pending.head;
-	union fi_opx_context * pending_tail = opx_cq->pending.tail;
+	union fi_opx_context * pending_head = (union fi_opx_context *) opx_cq->pending.head;
+	union fi_opx_context * pending_tail = (union fi_opx_context *) opx_cq->pending.tail;
 
 	if (NULL != pending_head) {
 		union fi_opx_context * context = pending_head;
@@ -340,7 +327,8 @@ static ssize_t fi_opx_cq_poll_noinline (struct fi_opx_cq *opx_cq,
 					   multi_recv_context->byte_counter == 0) {
 						/* Signal the user to repost their buffers */
 						assert(multi_recv_context->next == NULL);
-						fi_opx_context_slist_insert_tail(multi_recv_context, opx_ep->rx->cq_completed_ptr);
+						slist_insert_tail((struct slist_entry *) multi_recv_context,
+								  opx_ep->rx->cq_completed_ptr);
 					}
 				} else if (context->flags & FI_OPX_CQ_CONTEXT_EXT) {
 					struct fi_opx_context_ext *ext = (struct fi_opx_context_ext *) context;
@@ -368,12 +356,12 @@ static ssize_t fi_opx_cq_poll_noinline (struct fi_opx_cq *opx_cq,
 		}
 
 		/* save the updated pending head and pending tail pointers */
-		opx_cq->pending.head = pending_head;
-		opx_cq->pending.tail = pending_tail;
+		opx_cq->pending.head = (struct slist_entry *) pending_head;
+		opx_cq->pending.tail = (struct slist_entry *) pending_tail;
 	}
 
 
-	union fi_opx_context * head = opx_cq->completed.head;
+	union fi_opx_context * head = (union fi_opx_context *) opx_cq->completed.head;
 	if (head) {
 		union fi_opx_context * context = head;
 		while ((count - num_entries) > 0 && context != NULL) {
@@ -381,7 +369,7 @@ static ssize_t fi_opx_cq_poll_noinline (struct fi_opx_cq *opx_cq,
 			++ num_entries;
 			context = context->next;
 		}
-		opx_cq->completed.head = context;
+		opx_cq->completed.head = (struct slist_entry *) context;
 		if (!context) opx_cq->completed.tail = NULL;
 
 	}
@@ -396,7 +384,8 @@ ssize_t fi_opx_cq_poll_inline(struct fid_cq *cq, void *buf, size_t count,
 		const int lock_required,
 		const enum ofi_reliability_kind reliability,
 		const uint64_t hdrq_mask,
-		const uint64_t caps)
+		const uint64_t caps,
+		const enum opx_hfi1_type hfi1_type)
 {
 	ssize_t num_entries = 0;
 
@@ -423,35 +412,35 @@ ssize_t fi_opx_cq_poll_inline(struct fid_cq *cq, void *buf, size_t count,
 		if (hdrq_mask == FI_OPX_HDRQ_MASK_2048) {  /* constant compile-time expression */
 			for (i=0; i<ep_count; ++i) {
 				fi_opx_lock(&opx_cq->progress.ep[i]->lock);
-				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_2048);
+				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_2048, hfi1_type);
 				fi_opx_unlock(&opx_cq->progress.ep[i]->lock);
 			}
 		} else if (hdrq_mask == FI_OPX_HDRQ_MASK_8192) {
 			for (i=0; i<ep_count; ++i) {
 				fi_opx_lock(&opx_cq->progress.ep[i]->lock);
-				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_8192);
+				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_8192, hfi1_type);
 				fi_opx_unlock(&opx_cq->progress.ep[i]->lock);
-			}				
-			
+			}
+
 		} else {
 			for (i=0; i<ep_count; ++i) {
 				fi_opx_lock(&opx_cq->progress.ep[i]->lock);
-				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_RUNTIME);
+				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_RUNTIME, hfi1_type);
 				fi_opx_unlock(&opx_cq->progress.ep[i]->lock);
 			}
 		}
 	} else {
 		if (hdrq_mask == FI_OPX_HDRQ_MASK_2048) {  /* constant compile-time expression */
 			for (i=0; i<ep_count; ++i) {
-				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_2048);
+				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_2048, hfi1_type);
 			}
 		} else if (hdrq_mask == FI_OPX_HDRQ_MASK_8192) {
 			for (i=0; i<ep_count; ++i) {
-				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_8192);
+				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_8192, hfi1_type);
 			}
 		} else {
 			for (i=0; i<ep_count; ++i) {
-				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_RUNTIME);
+				fi_opx_ep_rx_poll(&opx_cq->progress.ep[i]->ep_fid, caps, reliability, FI_OPX_HDRQ_MASK_RUNTIME, hfi1_type);
 			}
 		}
 	}
@@ -481,7 +470,7 @@ ssize_t fi_opx_cq_poll_inline(struct fid_cq *cq, void *buf, size_t count,
 			++ num_entries;
 			context = context->next;
 		}
-		opx_cq->completed.head = context;
+		opx_cq->completed.head = (struct slist_entry *) context;
 		if (!context) opx_cq->completed.tail = NULL;
 
 		return num_entries;
@@ -504,9 +493,10 @@ ssize_t fi_opx_cq_read_generic_non_locking (struct fid_cq *cq, void *buf, size_t
 		const enum fi_cq_format format,
 		const enum ofi_reliability_kind reliability,
 		const uint64_t hdrq_mask,
-		const uint64_t caps)
+		const uint64_t caps,
+		const enum opx_hfi1_type hfi1_type)
 {
-	return fi_opx_cq_poll_inline(cq, buf, count, NULL, format, FI_OPX_LOCK_NOT_REQUIRED, reliability, hdrq_mask, caps);	
+	return fi_opx_cq_poll_inline(cq, buf, count, NULL, format, FI_OPX_LOCK_NOT_REQUIRED, reliability, hdrq_mask, caps, hfi1_type);
 }
 
 __OPX_FORCE_INLINE__
@@ -514,11 +504,12 @@ ssize_t fi_opx_cq_read_generic_locking (struct fid_cq *cq, void *buf, size_t cou
 		const enum fi_cq_format format,
 		const enum ofi_reliability_kind reliability,
 		const uint64_t hdrq_mask,
-		const uint64_t caps)
+		const uint64_t caps,
+		const enum opx_hfi1_type hfi1_type)
 {
 	int ret;
 	fi_opx_lock(&((struct fi_opx_cq *) cq)->lock);
-	ret = fi_opx_cq_poll_inline(cq, buf, count, NULL, format, FI_OPX_LOCK_REQUIRED, reliability, hdrq_mask, caps);
+	ret = fi_opx_cq_poll_inline(cq, buf, count, NULL, format, FI_OPX_LOCK_REQUIRED, reliability, hdrq_mask, caps, hfi1_type);
 	fi_opx_unlock(&((struct fi_opx_cq *) cq)->lock);
 
 	return ret;
@@ -529,10 +520,11 @@ ssize_t fi_opx_cq_readfrom_generic_non_locking (struct fid_cq *cq, void *buf, si
 		const enum fi_cq_format format,
 		const enum ofi_reliability_kind reliability,
 		const uint64_t hdrq_mask,
-		const uint64_t caps)
+		const uint64_t caps,
+		const enum opx_hfi1_type hfi1_type)
 {
 	int ret;
-	ret = fi_opx_cq_poll_inline(cq, buf, count, src_addr, format, FI_OPX_LOCK_NOT_REQUIRED, reliability, hdrq_mask, caps);
+	ret = fi_opx_cq_poll_inline(cq, buf, count, src_addr, format, FI_OPX_LOCK_NOT_REQUIRED, reliability, hdrq_mask, caps, hfi1_type);
 	if (ret > 0) {
 		unsigned n;
 		for (n=0; n<ret; ++n) src_addr[n] = FI_ADDR_NOTAVAIL;
@@ -546,11 +538,12 @@ ssize_t fi_opx_cq_readfrom_generic_locking (struct fid_cq *cq, void *buf, size_t
 		const enum fi_cq_format format,
 		const enum ofi_reliability_kind reliability,
 		const uint64_t hdrq_mask,
-		const uint64_t caps)
+		const uint64_t caps,
+		const enum opx_hfi1_type hfi1_type)
 {
 	int ret;
 	fi_opx_lock(&((struct fi_opx_cq *) cq)->lock);
-	ret = fi_opx_cq_poll_inline(cq, buf, count, src_addr, format, FI_OPX_LOCK_REQUIRED, reliability, hdrq_mask, caps);
+	ret = fi_opx_cq_poll_inline(cq, buf, count, src_addr, format, FI_OPX_LOCK_REQUIRED, reliability, hdrq_mask, caps, hfi1_type);
 	fi_opx_unlock(&((struct fi_opx_cq *) cq)->lock);
 	if (ret > 0) {
 		unsigned n;

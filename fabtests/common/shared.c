@@ -276,16 +276,10 @@ static inline int ft_rma_write_target_allowed(uint64_t caps)
 	return 0;
 }
 
-static inline int ft_check_mr_local_flag(struct fi_info *info)
-{
-	return ((info->mode & FI_LOCAL_MR) ||
-		(info->domain_attr->mr_mode & FI_MR_LOCAL));
-}
-
 uint64_t ft_info_to_mr_access(struct fi_info *info)
 {
 	uint64_t mr_access = 0;
-	if (ft_check_mr_local_flag(info)) {
+	if (info->domain_attr->mr_mode & FI_MR_LOCAL) {
 		if (info->caps & (FI_MSG | FI_TAGGED)) {
 			if (info->caps & FT_MSG_MR_ACCESS) {
 				mr_access |= info->caps & FT_MSG_MR_ACCESS;
@@ -987,7 +981,11 @@ int ft_accept_next_client() {
 		ret = ft_reset_oob();
 		if (ret)
 			return ret;
-	}
+
+		ret = ft_sock_sync(oob_sock, 0);
+		if (ret)
+			return ret;
+}
 	return ft_init_av();
 }
 
@@ -1041,6 +1039,8 @@ int ft_getinfo(struct fi_info *hints, struct fi_info **info)
 		hints->caps |= FI_HMEM;
 		hints->domain_attr->mr_mode |= FI_MR_HMEM;
 	}
+
+	hints->domain_attr->threading = opts.threading;
 
 	ret = fi_getinfo(FT_FIVERSION, node, service, flags, hints, info);
 	if (ret) {
@@ -1305,6 +1305,12 @@ int ft_init_fabric(void)
 	if (ret)
 		return ret;
 
+	if (oob_sock >= 0 && opts.dst_addr) {
+		ret = ft_sock_sync(oob_sock, 0);
+		if (ret)
+			return ret;
+	}
+
 	ret = ft_getinfo(hints, &fi);
 	if (ret)
 		return ret;
@@ -1321,12 +1327,26 @@ int ft_init_fabric(void)
 	if (ret)
 		return ret;
 
+	if (oob_sock >= 0 && !opts.dst_addr) {
+		ret = ft_sock_sync(oob_sock, 0);
+		if (ret)
+			return ret;
+	}
+
 	ret = ft_init_av();
 	if (ret)
 		return ret;
 
 	if (ft_check_opts(FT_OPT_FORK_CHILD))
 		ft_fork_child();
+
+	if (ft_check_opts(FT_OPT_NO_PRE_POSTED_RX) &&
+	    !ft_check_opts(FT_OPT_SKIP_MSG_ALLOC) &&
+	    (fi->caps & (FI_MSG | FI_TAGGED))) {
+		ret = ft_sync_inband(false);
+		if (ret)
+			return ret;
+	}
 
 	return 0;
 }
@@ -1409,6 +1429,29 @@ int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *
 	if (hints->caps & (FI_RMA | FI_ATOMICS) && hints->caps & FI_RMA_EVENT) {
 		flags = fi->caps & (FI_REMOTE_WRITE | FI_REMOTE_READ);
 		FT_EP_BIND(bind_ep, bind_rma_cntr, flags);
+	}
+
+	if (opts.max_msg_size) {
+		ret = fi_setopt(&bind_ep->fid, FI_OPT_ENDPOINT, FI_OPT_MAX_MSG_SIZE, &opts.max_msg_size, sizeof opts.max_msg_size);
+		if (ret && ret != -FI_EOPNOTSUPP) {
+			FT_PRINTERR("fi_setopt(FI_OPT_MAX_MSG_SIZE)", ret);
+			return ret;
+		}
+	}
+
+	if (opts.inject_size) {
+		ret = fi_setopt(&bind_ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_MSG_SIZE,
+				&opts.inject_size, sizeof opts.inject_size);
+		if (ret && ret != -FI_EOPNOTSUPP) {
+			FT_PRINTERR("fi_setopt(FI_OPT_INJECT_MSG_SIZE)", ret);
+			return ret;
+		}
+		ret = fi_setopt(&bind_ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_RMA_SIZE,
+				&opts.inject_size, sizeof opts.inject_size);
+		if (ret && ret != -FI_EOPNOTSUPP) {
+			FT_PRINTERR("fi_setopt(FI_OPT_INJECT_RMA_SIZE)", ret);
+			return ret;
+		}
 	}
 
 	ret = fi_enable(bind_ep);
@@ -1673,43 +1716,66 @@ int ft_init_av_addr(struct fid_av *av_ptr, struct fid_ep *ep_ptr,
 	return 0;
 }
 
-int ft_exchange_keys(struct fi_rma_iov *peer_iov)
+int ft_fill_rma_info(struct fid_mr *mr, void *mr_buf,
+		     struct fi_rma_iov *rma_iov, size_t *key_size,
+		     size_t *rma_iov_len)
 {
-	char temp[FT_MAX_CTRL_MSG];
-	struct fi_rma_iov *rma_iov = (struct fi_rma_iov *) temp;
-	size_t key_size = 0, len;
 	uint64_t addr;
+	size_t buf_len = *rma_iov_len;
 	int ret;
 
 	if (fi->domain_attr->mr_mode & FI_MR_RAW) {
-		ret = fi_mr_raw_attr(mr, &addr, NULL, &key_size, 0);
+		*key_size = 0;
+		ret = fi_mr_raw_attr(mr, &addr, NULL, key_size, 0);
 		if (ret != -FI_ETOOSMALL)
 			return ret;
-		len = sizeof(*rma_iov) + key_size - sizeof(rma_iov->key);
-		if (len > FT_MAX_CTRL_MSG) {
+		*rma_iov_len = sizeof(*rma_iov) + *key_size - sizeof(rma_iov->key);
+		if (*rma_iov_len > buf_len) {
 			FT_PRINTERR("Raw key too large for ctrl message",
 				    -FI_ETOOSMALL);
 			return -FI_ETOOSMALL;
 		}
-	} else {
-		len = sizeof(*rma_iov);
-	}
 
-	if ((fi->domain_attr->mr_mode == FI_MR_BASIC) ||
-	    (fi->domain_attr->mr_mode & FI_MR_VIRT_ADDR)) {
-		rma_iov->addr = (uintptr_t) rx_buf + ft_rx_prefix_size();
-	} else {
-		rma_iov->addr = 0;
-	}
-
-	if (fi->domain_attr->mr_mode & FI_MR_RAW) {
 		ret = fi_mr_raw_attr(mr, &addr, (uint8_t *) &rma_iov->key,
-				     &key_size, 0);
+				     key_size, 0);
 		if (ret)
 			return ret;
 	} else {
 		rma_iov->key = fi_mr_key(mr);
+		*key_size = sizeof(rma_iov->key);
+		*rma_iov_len = sizeof(*rma_iov);
 	}
+
+	rma_iov->addr = fi->domain_attr->mr_mode & FI_MR_VIRT_ADDR ?
+		(uintptr_t) mr_buf : 0;
+
+	return FI_SUCCESS;
+}
+
+int ft_get_rma_info(struct fi_rma_iov *rma_iov,
+		    struct fi_rma_iov *peer_iov, size_t key_size)
+{
+	if (fi->domain_attr->mr_mode & FI_MR_RAW) {
+		peer_iov->addr = rma_iov->addr;
+		peer_iov->len = rma_iov->len;
+		return fi_mr_map_raw(domain, rma_iov->addr,
+				     (uint8_t *) &rma_iov->key, key_size,
+				     &peer_iov->key, 0);
+	}
+	*peer_iov = *rma_iov;
+	return FI_SUCCESS;
+}
+
+int ft_exchange_keys(struct fi_rma_iov *peer_iov)
+{
+	char temp[FT_MAX_CTRL_MSG];
+	struct fi_rma_iov *rma_iov = (struct fi_rma_iov *) temp;
+	size_t key_size, len = FT_MAX_CTRL_MSG;
+	int ret;
+
+	ret = ft_fill_rma_info(mr, rx_buf, rma_iov, &key_size, &len);
+	if (ret)
+		return ret;
 
 	ret = ft_hmem_copy_to(opts.iface, opts.device,
 			      tx_buf + ft_tx_prefix_size(), temp, len);
@@ -1729,17 +1795,9 @@ int ft_exchange_keys(struct fi_rma_iov *peer_iov)
 	if (ret)
 		return ret;
 
-	if (fi->domain_attr->mr_mode & FI_MR_RAW) {
-		peer_iov->addr = rma_iov->addr;
-		peer_iov->len = rma_iov->len;
-		ret = fi_mr_map_raw(domain, rma_iov->addr,
-				    (uint8_t *) &rma_iov->key, key_size,
-				    &peer_iov->key, 0);
-		if (ret)
-			return ret;
-	} else {
-		*peer_iov = *rma_iov;
-	}
+	ret = ft_get_rma_info(rma_iov, peer_iov, key_size);
+	if (ret)
+		return ret;
 
 	ret = ft_post_rx(ep, rx_size, &rx_ctx);
 	if (ret)
@@ -1935,6 +1993,7 @@ int ft_read_addr_opts(char **node, char **service, struct fi_info *hints,
 	if (opts->options & FT_OPT_ADDR_IS_OOB) {
 		*service = NULL;
 		*node = NULL;
+		*flags = 0;
 	} else if (opts->address_format == FI_ADDR_STR) {
 		/* We are likely dealing with a provider specific address format.
 		 * I.e. NOT an IP address or host name
@@ -2195,16 +2254,28 @@ ssize_t ft_tx_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote,
 }
 
 ssize_t ft_post_inject_buf(struct fid_ep *ep, fi_addr_t fi_addr, size_t size,
-			   void *op_buf, uint64_t op_tag)
+			   uint64_t data, void *op_buf, uint64_t op_tag)
 {
 	if (hints->caps & FI_TAGGED) {
-		FT_POST(fi_tinject, ft_progress, txcq, tx_seq, &tx_cq_cntr,
-			"inject", ep, op_buf, size + ft_tx_prefix_size(),
-			fi_addr, op_tag);
+		if (data != NO_CQ_DATA) {
+			FT_POST(fi_tinjectdata, ft_progress, txcq, tx_seq, &tx_cq_cntr,
+				"inject", ep, op_buf, size + ft_tx_prefix_size(),
+				data, fi_addr, op_tag);
+		} else {
+			FT_POST(fi_tinject, ft_progress, txcq, tx_seq, &tx_cq_cntr,
+				"inject", ep, op_buf, size + ft_tx_prefix_size(),
+				fi_addr, op_tag);
+		}
 	} else {
-		FT_POST(fi_inject, ft_progress, txcq, tx_seq, &tx_cq_cntr,
-			"inject", ep, op_buf, size + ft_tx_prefix_size(),
-			fi_addr);
+		if (data != NO_CQ_DATA) {
+			FT_POST(fi_injectdata, ft_progress, txcq, tx_seq, &tx_cq_cntr,
+				"inject", ep, op_buf, size + ft_tx_prefix_size(),
+				data, fi_addr);
+		} else {
+			FT_POST(fi_inject, ft_progress, txcq, tx_seq, &tx_cq_cntr,
+				"inject", ep, op_buf, size + ft_tx_prefix_size(),
+				fi_addr);
+		}
 	}
 
 	tx_cq_cntr++;
@@ -2213,7 +2284,7 @@ ssize_t ft_post_inject_buf(struct fid_ep *ep, fi_addr_t fi_addr, size_t size,
 
 ssize_t ft_post_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size)
 {
-	return ft_post_inject_buf(ep, fi_addr, size, tx_buf, tx_seq);
+	return ft_post_inject_buf(ep, fi_addr, size, NO_CQ_DATA, tx_buf, tx_seq);
 }
 
 ssize_t ft_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size)
@@ -2321,6 +2392,34 @@ ssize_t ft_post_rma_inject(enum ft_rma_opcodes op, char *buf, size_t size,
 	}
 
 	tx_cq_cntr++;
+	return 0;
+}
+
+ssize_t ft_post_rma_writemsg(char *buf, size_t size, struct fi_rma_iov *remote,
+			     void *context, uint64_t flags)
+{
+	struct fi_msg_rma msg;
+	struct iovec msg_iov;
+	struct fi_rma_iov rma_iov;
+
+	msg_iov.iov_base = buf;
+	msg_iov.iov_len = size;
+	msg.msg_iov = &msg_iov;
+	msg.desc = &mr_desc;
+	msg.iov_count = 1;
+	rma_iov.addr = remote->addr + ft_remote_write_offset(buf);
+	rma_iov.len = size;
+	rma_iov.key = remote->key;
+	msg.rma_iov = &rma_iov;
+	msg.rma_iov_count = 1;
+	msg.addr = remote_fi_addr;
+	msg.data = flags & FI_REMOTE_CQ_DATA ? remote_cq_data : NO_CQ_DATA;
+	msg.context = context;
+
+	FT_POST(fi_writemsg, ft_progress, txcq, tx_seq,
+		&tx_cq_cntr, "fi_writemsg", ep, &msg,
+		flags);
+
 	return 0;
 }
 
@@ -2765,17 +2864,17 @@ int ft_get_tx_comp(uint64_t total)
 	return ret;
 }
 
-int ft_tx_msg(struct fid_ep *ep, fi_addr_t fi_addr, size_t size, void *ctx, uint64_t flags)
+int ft_tx_msg(struct fid_ep *ep, fi_addr_t fi_addr, void *buf, size_t size, void *ctx, uint64_t flags)
 {
 	int ret;
 
 	if (ft_check_opts(FT_OPT_VERIFY_DATA | FT_OPT_ACTIVE)) {
-		ret = ft_fill_buf((char *) tx_buf + ft_tx_prefix_size(), size);
+		ret = ft_fill_buf((char *) buf + ft_tx_prefix_size(), size);
 		if (ret)
 			return ret;
 	}
 
-	ret = ft_sendmsg(ep, fi_addr, size, ctx, flags);
+	ret = ft_sendmsg(ep, fi_addr, buf, size, ctx, flags);
 	if (ret)
 		return ret;
 
@@ -2784,13 +2883,13 @@ int ft_tx_msg(struct fid_ep *ep, fi_addr_t fi_addr, size_t size, void *ctx, uint
 }
 
 int ft_sendmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-		size_t size, void *ctx, int flags)
+		void *buf, size_t size, void *ctx, int flags)
 {
 	struct fi_msg msg;
 	struct fi_msg_tagged tagged_msg;
 	struct iovec msg_iov;
 
-	msg_iov.iov_base = tx_buf;
+	msg_iov.iov_base = buf;
 	msg_iov.iov_len = size + ft_tx_prefix_size();
 
 	if (hints->caps & FI_TAGGED) {
@@ -2921,46 +3020,73 @@ void eq_readerr(struct fid_eq *eq, const char *eq_str)
 	}
 }
 
-int ft_sync()
+int ft_sync_oob(void)
 {
 	char buf = 'a';
 	int ret;
 
 	if (opts.dst_addr) {
-		if (!(opts.options & FT_OPT_OOB_SYNC)) {
-			ret = ft_tx_msg(ep, remote_fi_addr, 1, &tx_ctx, FI_DELIVERY_COMPLETE);
-			if (ret)
-				return ret;
+		ret = ft_sock_send(oob_sock, &buf, 1);
+		if (ret)
+			return ret;
 
-			ret = ft_rx(ep, 1);
-		} else {
-			ret = ft_sock_send(oob_sock, &buf, 1);
-			if (ret)
-				return ret;
-
-			ret = ft_sock_recv(oob_sock, &buf, 1);
-			if (ret)
-				return ret;
-		}
+		ret = ft_sock_recv(oob_sock, &buf, 1);
+		if (ret)
+			return ret;
 	} else {
-		if (!(opts.options & FT_OPT_OOB_SYNC)) {
-			ret = ft_rx(ep, 1);
-			if (ret)
-				return ret;
+		ret = ft_sock_recv(oob_sock, &buf, 1);
+		if (ret)
+			return ret;
 
-			ret = ft_tx_msg(ep, remote_fi_addr, 1, &tx_ctx, FI_DELIVERY_COMPLETE);
-			if (ret)
-				return ret;
-		} else {
-			ret = ft_sock_recv(oob_sock, &buf, 1);
-			if (ret)
-				return ret;
-
-			ret = ft_sock_send(oob_sock, &buf, 1);
-			if (ret)
-				return ret;
-		}
+		ret = ft_sock_send(oob_sock, &buf, 1);
+		if (ret)
+			return ret;
 	}
+
+	return FI_SUCCESS;
+}
+
+int ft_sync_inband(bool repost_rx)
+{
+	int ret;
+
+	if (opts.dst_addr) {
+		ret = ft_tx_msg(ep, remote_fi_addr, tx_buf, 1, &tx_ctx,
+				FI_DELIVERY_COMPLETE);
+		if (ret)
+			return ret;
+
+		ret = ft_get_rx_comp(rx_seq);
+		if (ret)
+			return ret;
+	} else {
+		ret = ft_get_rx_comp(rx_seq);
+		if (ret)
+			return ret;
+
+		ret = ft_tx_msg(ep, remote_fi_addr, tx_buf, 1, &tx_ctx,
+				FI_DELIVERY_COMPLETE);
+		if (ret)
+			return ret;
+	}
+
+	if (repost_rx) {
+		ret = ft_post_rx(ep, rx_size, &rx_ctx);
+		if (ret)
+			return ret;
+	}
+
+	return FI_SUCCESS;
+}
+
+int ft_sync()
+{
+	int ret;
+
+	if (ft_check_opts(FT_OPT_OOB_SYNC))
+		ret = ft_sync_oob();
+	else
+		ret = ft_sync_inband(true);
 
 	return ret;
 }
@@ -3067,7 +3193,7 @@ int ft_finalize_ep(struct fid_ep *ep)
 	int ret;
 	struct fi_context ctx;
 
-	ret = ft_sendmsg(ep, remote_fi_addr, 4, &ctx, FI_TRANSMIT_COMPLETE);
+	ret = ft_sendmsg(ep, remote_fi_addr, tx_buf, 4, &ctx, FI_TRANSMIT_COMPLETE);
 	if (ret)
 		return ret;
 
@@ -3237,7 +3363,7 @@ void ft_usage(char *name, char *desc)
 void ft_hmem_usage()
 {
 	FT_PRINT_OPTS_USAGE("-D <device_iface>", "Specify device interface: "
-			    "e.g. cuda, ze, neuron (default: None). "
+			    "e.g. cuda, ze, neuron, synapseai (default: None). "
 			    "Automatically enables FI_HMEM (-H)");
 	FT_PRINT_OPTS_USAGE("-i <device_id>", "Specify which device to use (default: 0)");
 	FT_PRINT_OPTS_USAGE("-H", "Enable provider FI_HMEM support");
@@ -3399,6 +3525,10 @@ void ft_parse_hmem_opts(int op, char *optarg, struct ft_opts *opts)
 			opts->iface = FI_HMEM_CUDA;
 		else if (!strncasecmp("neuron", optarg, 6))
 			opts->iface = FI_HMEM_NEURON;
+		else if (!strncasecmp("synapseai", optarg, 9)) {
+			opts->iface = FI_HMEM_SYNAPSEAI;
+			opts->options |= FT_OPT_REG_DMABUF_MR;
+		}
 		else
 			printf("Unsupported interface\n");
 		opts->options |= FT_OPT_ENABLE_HMEM | FT_OPT_USE_DEVICE;
@@ -3904,31 +4034,31 @@ int ft_sock_recv(int fd, void *msg, size_t len)
 	return err ? err: 0;
 }
 
-int ft_sock_sync(int value)
+int ft_sock_sync(int fd, int value)
 {
 	int result = -FI_EOTHER;
 	int ret;
 
 	if (listen_sock < 0) {
-		ret = ft_sock_send(sock, &value,  sizeof value);
+		ret = ft_sock_send(fd, &value,  sizeof value);
 		if (ret) {
 			FT_PRINTERR("ft_sock_send", ret);
 			return ret;
 		}
 
-		ret = ft_sock_recv(sock, &result, sizeof result);
+		ret = ft_sock_recv(fd, &result, sizeof result);
 		if (ret) {
 			FT_PRINTERR("ft_sock_recv", ret);
 			return ret;
 		}
 	} else {
-		ret = ft_sock_recv(sock, &result, sizeof result);
+		ret = ft_sock_recv(fd, &result, sizeof result);
 		if (ret) {
 			FT_PRINTERR("ft_sock_recv", ret);
 			return ret;
 		}
 
-		ret = ft_sock_send(sock, &value,  sizeof value);
+		ret = ft_sock_send(fd, &value,  sizeof value);
 		if (ret) {
 			FT_PRINTERR("ft_sock_send", ret);
 			return ret;
@@ -4141,6 +4271,12 @@ void ft_longopts_usage()
 		"manual, or auto");
 	FT_PRINT_OPTS_USAGE("--control-progress <progress_model>",
 		"manual, auto, or unified");
+	FT_PRINT_OPTS_USAGE("--max-msg-size <size>",
+		"maximum untagged message size");
+	FT_PRINT_OPTS_USAGE("--use-fi-more",
+		"Run tests with FI_MORE");
+	FT_PRINT_OPTS_USAGE("--threading",
+		"threading model: safe|completion|domain (default:domain)");
 }
 
 int debug_assert;
@@ -4152,6 +4288,9 @@ struct option long_opts[] = {
 	{"debug-assert", no_argument, &debug_assert, LONG_OPT_DEBUG_ASSERT},
 	{"data-progress", required_argument, NULL, LONG_OPT_DATA_PROGRESS},
 	{"control-progress", required_argument, NULL, LONG_OPT_CONTROL_PROGRESS},
+	{"max-msg-size", required_argument, NULL, LONG_OPT_MAX_MSG_SIZE},
+	{"use-fi-more", no_argument, NULL, LONG_OPT_USE_FI_MORE},
+	{"threading", required_argument, NULL, LONG_OPT_THREADING},
 	{NULL, 0, NULL, 0},
 };
 
@@ -4165,6 +4304,20 @@ int ft_parse_progress_model_string(char* progress_str)
 		ret = FI_PROGRESS_AUTO;
 	else if (!strcasecmp("unified", progress_str))
 		ret = FI_PROGRESS_CONTROL_UNIFIED;
+
+	return ret;
+}
+
+static int ft_parse_threading_string(char* threading_str)
+{
+	int ret = -1;
+
+	if (!strcasecmp("safe", threading_str))
+		ret = FI_THREAD_SAFE;
+	else if (!strcasecmp("completion", threading_str))
+		ret = FI_THREAD_COMPLETION;
+	else if (!strcasecmp("domain", threading_str))
+		ret = FI_THREAD_DOMAIN;
 
 	return ret;
 }
@@ -4188,6 +4341,15 @@ int ft_parse_long_opts(int op, char *optarg)
 		hints->domain_attr->control_progress = ft_parse_progress_model_string(optarg);
 		if (hints->domain_attr->control_progress == -1)
 			return EXIT_FAILURE;
+		return 0;
+	case LONG_OPT_MAX_MSG_SIZE:
+		opts.max_msg_size = atoi(optarg);
+		return 0;
+	case LONG_OPT_USE_FI_MORE:
+		opts.use_fi_more = 1;
+		return 0;
+	case LONG_OPT_THREADING:
+		opts.threading = ft_parse_threading_string(optarg);
 		return 0;
 	default:
 		return EXIT_FAILURE;

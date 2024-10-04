@@ -45,86 +45,6 @@ void test_info_open_ep_with_wrong_info()
 }
 
 /**
- * @brief test that we support older version of libfabric API version 1.1
- */
-void test_info_open_ep_with_api_1_1_info()
-{
-	struct fi_info *hints, *info;
-	struct fid_fabric *fabric = NULL;
-	struct fid_domain *domain = NULL;
-	struct fid_ep *ep = NULL;
-	int err;
-
-	hints = calloc(sizeof(struct fi_info), 1);
-	assert_non_null(hints);
-
-	hints->domain_attr = calloc(sizeof(struct fi_domain_attr), 1);
-	assert_non_null(hints->domain_attr);
-
-	hints->fabric_attr = calloc(sizeof(struct fi_fabric_attr), 1);
-	assert_non_null(hints->fabric_attr);
-
-	hints->ep_attr = calloc(sizeof(struct fi_ep_attr), 1);
-	assert_non_null(hints->ep_attr);
-
-	hints->fabric_attr->prov_name = "efa";
-	hints->ep_attr->type = FI_EP_RDM;
-
-	/* in libfabric API < 1.5, domain_attr->mr_mode is an enum with
-	 * two options: FI_MR_BASIC or FI_MR_SCALABLE, (EFA does not support FI_MR_SCALABLE).
-	 *
-	 * Additional information about memory registration is specified as bits in
-	 * "mode". For example, the requirement of local memory registration
-	 * is specified as FI_LOCAL_MR.
-	 */
-	hints->mode = FI_LOCAL_MR;
-	hints->domain_attr->mr_mode = FI_MR_BASIC;
-
-	err = fi_getinfo(FI_VERSION(1, 1), NULL, NULL, 0ULL, hints, &info);
-	assert_int_equal(err, 0);
-
-	err = fi_fabric(info->fabric_attr, &fabric, NULL);
-	assert_int_equal(err, 0);
-
-	err = fi_domain(fabric, info, &domain, NULL);
-	assert_int_equal(err, 0);
-
-	err = fi_endpoint(domain, info, &ep, NULL);
-	assert_int_equal(err, 0);
-
-	err = fi_close(&ep->fid);
-	assert_int_equal(err, 0);
-
-	err = fi_close(&domain->fid);
-	assert_int_equal(err, 0);
-
-	err = fi_close(&fabric->fid);
-	assert_int_equal(err, 0);
-}
-
-/**
- * @brief Verify info->ep_attr is set according to hints.
- *
- */
-void test_info_ep_attr()
-{
-	struct fi_info *hints, *info;
-	int err;
-
-	hints = efa_unit_test_alloc_hints(FI_EP_RDM);
-	assert_non_null(hints);
-
-	hints->ep_attr->max_msg_size = 1024;
-
-	err = fi_getinfo(FI_VERSION(FI_MAJOR_VERSION, FI_MINOR_VERSION), NULL, NULL, 0ULL, hints, &info);
-
-	assert_int_equal(err, 0);
-	assert_int_equal(hints->ep_attr->max_msg_size, info->ep_attr->max_msg_size);
-
-	fi_freeinfo(info);
-}
-
-/**
  * @brief Verify info->tx/rx_attr->msg_order is set according to hints.
  *
  */
@@ -196,8 +116,6 @@ void test_info_tx_rx_msg_order_rdm_order_none(struct efa_resource **state)
 	resource->hints = efa_unit_test_alloc_hints(FI_EP_RDM);
 	assert_non_null(resource->hints);
 
-	resource->hints->tx_attr->msg_order = FI_ORDER_NONE;
-	resource->hints->rx_attr->msg_order = FI_ORDER_NONE;
 	test_info_tx_rx_msg_order_from_hints(resource->hints, 0);
 }
 
@@ -220,8 +138,6 @@ void test_info_tx_rx_msg_order_dgram_order_none(struct efa_resource **state)
 	resource->hints = efa_unit_test_alloc_hints(FI_EP_DGRAM);
 	assert_non_null(resource->hints);
 
-	resource->hints->tx_attr->msg_order = FI_ORDER_NONE;
-	resource->hints->rx_attr->msg_order = FI_ORDER_NONE;
 	test_info_tx_rx_msg_order_from_hints(resource->hints, 0);
 }
 
@@ -518,6 +434,145 @@ void test_use_device_rdma( const int env_val,
 	fi_freeinfo(info);
 
 	return;
+}
+
+/**
+ * Get the name of the "first"(random order) NIC
+ *
+ * @param[out]	name	The returned name string.
+ * 			It should be free'd after use.
+ * @returns	FI_SUCCESS on success or a non-zero error code
+ */
+static int get_first_nic_name(char **name) {
+	int ret;
+	char *nic_name = NULL;
+	struct fi_info *hints, *info;
+
+	hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	ret = fi_getinfo(FI_VERSION(1, 14), NULL, NULL, 0ULL, hints, &info);
+	fi_freeinfo(hints);
+	if (ret)
+		return ret;
+
+	nic_name = info->nic->device_attr->name;
+	assert_non_null(nic_name);
+	assert_int_not_equal(strlen(nic_name), 0);
+
+	*name = malloc(strlen(nic_name) + 1);
+	if (!name)
+		return FI_ENOMEM;
+
+	strcpy(*name, nic_name);
+
+	fi_freeinfo(info);
+
+	return FI_SUCCESS;
+}
+
+/**
+ * Verify the returned NIC from fi_getinfo.
+ * Ideally we want to test multi-NIC selection logic, but this test is most likely
+ * run on single-NIC platforms. Therefore we make a compromise and only verify the
+ * "first" NIC.
+ *
+ * @param[in]	filter			The value that would be set for FI_EFA_IFACE
+ * @param[in]	expect_first_name	The expected name of the "first" NIC	
+ */
+static void test_efa_nic_selection(const char *filter, const char *expect_first_name) {
+	int ret;
+	struct fi_info *hints, *info;
+
+	efa_env.iface = (char *) filter;
+	hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	ret = fi_getinfo(FI_VERSION(1, 14), NULL, NULL, 0ULL, hints, &info);
+	fi_freeinfo(hints);
+	if (expect_first_name) {
+		assert_int_equal(FI_SUCCESS, ret);
+		assert_string_equal(expect_first_name, info->nic->device_attr->name);
+		fi_freeinfo(info);
+	} else {
+		assert_int_not_equal(FI_SUCCESS, ret);
+	}
+}
+
+/**
+ * Verify NICs are returned if FI_EFA_IFACE=all
+ */
+void test_efa_nic_select_all_devices_matches() {
+	int ret;
+	char *nic_name;
+
+	ret = get_first_nic_name(&nic_name);
+	assert_int_equal(ret, FI_SUCCESS);
+
+	test_efa_nic_selection("all", nic_name);
+
+	free(nic_name);
+}
+
+/**
+ * Verify the "first" NIC can be selected by name
+ */
+void test_efa_nic_select_first_device_matches() {
+	int ret;
+	char *nic_name;
+
+	ret = get_first_nic_name(&nic_name);
+	assert_int_equal(ret, FI_SUCCESS);
+
+	test_efa_nic_selection(nic_name, nic_name);
+
+	free(nic_name);
+}
+
+/**
+ * Verify that surrounding commas are handled correctly,
+ * i.e. ignored, to match the NIC name.
+ */
+void test_efa_nic_select_first_device_with_surrounding_comma_matches() {
+	int ret;
+	char *nic_name, *filter;
+
+	ret = get_first_nic_name(&nic_name);
+	assert_int_equal(ret, FI_SUCCESS);
+
+	filter = malloc(strlen(nic_name) + 3);
+	assert_non_null(filter);
+
+	strcpy(filter, ",");
+	strcat(filter, nic_name);
+	strcat(filter, ",");
+
+	test_efa_nic_selection(filter, nic_name);
+
+	free(filter);
+	free(nic_name);
+}
+
+/**
+ * Verify that only full NIC names are matched, and prefixes,
+ * e.g. the first letter, will not accidentally select the wrong NIC.
+ */
+void test_efa_nic_select_first_device_first_letter_no_match() {
+	int ret;
+	char *nic_name, filter[2];
+
+	ret = get_first_nic_name(&nic_name);
+	assert_int_equal(ret, FI_SUCCESS);
+
+	filter[0] = nic_name[0];
+	filter[1] = '\0';
+
+	test_efa_nic_selection(filter, NULL);
+
+	free(nic_name);
+}
+
+/**
+ * Verify that empty NIC names will not select any NIC
+ */
+void test_efa_nic_select_empty_device_no_match() {
+	test_efa_nic_selection(",", NULL);
 }
 
 /* indicates the test shouldn't set the setopt or environment

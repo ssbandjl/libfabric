@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 by Argonne National Laboratory.
- * Copyright (C) 2021-2023 by Cornelis Networks.
+ * Copyright (C) 2021-2024 by Cornelis Networks.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -75,7 +75,7 @@
 
 #define EXIT_FAILURE 1
 
-// TODO: This is needed until we complete the locking model. 
+// TODO: This is needed until we complete the locking model.
 #define OPX_LOCK				0
 
 // These defines may change or disappear as we develop more capabilities.
@@ -101,18 +101,46 @@ struct fi_opx_daos_hfi_rank {
 	UT_hash_handle 	hh;         /* makes this structure hashable */
 };
 
+/* hfi1 type for bit logic */
 enum opx_hfi1_type {
 	OPX_HFI1_UNDEF		= 0,	// undefined
-	OPX_HFI1_WFR		= 4,	// Omni-path (all generations)
-	OPX_HFI1_JKR		= 5 	// CN5000 (initial generation)
+	OPX_HFI1_JKR_9B		= 1,    // CN5000 built for mixed network. Internal use
+	OPX_HFI1_WFR		= 2,	// Omni-path (all generations)
+	OPX_HFI1_JKR		= 4 	// CN5000 (initial generation)
 };
 
+/* Will remove after 16B SDMA support is finished */
+#define OPX_NO_9B_SUPPORT(_hfi1_type)       			             \
+do {       								     \
+	if(!(_hfi1_type & OPX_HFI1_JKR)) {                                   \
+		fprintf(stderr, "%s NO JKR 9B SUPPORT for %u %s\n", __func__,\
+		    _hfi1_type,                                              \
+		    _hfi1_type & OPX_HFI1_WFR ? "OPX_HFI1_WFR" :   	     \
+		    _hfi1_type & OPX_HFI1_JKR_9B ? "OPX_HFI1_JKR_9B" :       \
+		    "UNKNOWN" );                                             \
+		if(getenv("OPX_9B_ABORT")) abort();                          \
+	}								     \
+	assert(_hfi1_type != OPX_HFI1_UNDEF);                                \
+} while(0)
+
+
+#define OPX_NO_16B_SUPPORT(_hfi1_type)       			             \
+do {       								     \
+	if(!(_hfi1_type & (OPX_HFI1_WFR | OPX_HFI1_JKR_9B))) {               \
+		fprintf(stderr, "%s NO 16B SUPPORT for %u %s\n", __func__,   \
+		    _hfi1_type, _hfi1_type & OPX_HFI1_JKR ? "OPX_HFI1_JKR" : \
+		    "UNKNOWN" );                                             \
+		if(getenv("OPX_16B_ABORT")) abort();                         \
+	}								     \
+	assert(_hfi1_type != OPX_HFI1_UNDEF);                                \
+} while(0)
+
 struct fi_opx_hfi_local_info {
-	uint8_t  hfi_unit;
-	uint16_t lid;
-	enum opx_hfi1_type type;
 	struct fi_opx_hfi_local_lookup *hfi_local_lookup_hashmap;
+	enum opx_hfi1_type type;
 	int sim_fd;                     // simulator fd
+	uint16_t lid;
+	uint8_t  hfi_unit;
 };
 
 #ifdef OPX_SIM
@@ -120,24 +148,18 @@ struct fi_opx_hfi_local_info {
 #define  OPX_SIM_ENABLED
 #warning OPX_SIM enabled
 
-#if (!defined(OPX_WFR) && !defined(OPX_JKR))
-#warning PICK ONE OPX_WFR or OPX_JKR
-#endif
-
 #else
 /* Build only "real" HFI1 support (default) */
 #undef  OPX_SIM_ENABLED
 #endif
 
-/* Build constant for JKR/WFR path optimization */
-#if defined(OPX_WFR)
-#define OPX_HFI1_TYPE OPX_HFI1_WFR
-#elif defined(OPX_JKR)
-#define OPX_HFI1_TYPE OPX_HFI1_JKR
-#else
-/* Both JKR and WFR runtime support (not constant) */
 #define OPX_HFI1_TYPE fi_opx_global.hfi_local_info.type
-#endif
+
+
+/* Default is both JKR and WFR runtime support (no constant),
+   use a local or global variable */
+
+#define OPX_PRE_CN5000 1
 
 struct fi_opx_hfi_local_lookup_key {
 	uint16_t lid;
@@ -160,6 +182,9 @@ struct fi_opx_global_data {
 	struct fi_opx_daos_hfi_rank	*daos_hfi_rank_hashmap;
 	enum fi_progress	progress;
 	struct dlist_entry	tid_domain_list;
+#ifdef OPX_HMEM
+	struct dlist_entry	hmem_domain_list;
+#endif
 	struct fi_opx_hfi_local_info hfi_local_info;
 };
 
@@ -175,9 +200,9 @@ static const size_t   FI_OPX_REMOTE_CQ_DATA_SIZE	= 4;
 static const uint64_t FI_OPX_MEM_TAG_FORMAT		= (0xFFFFFFFFFFFFFFFFULL);
 static const int      FI_OPX_MAX_HFIS				= 16;
 
-/* 
+/*
 Users may wish to change the depth of the Rx context ring.
-/sys/module/hfi1/parameters/rcvhdrcnt:8192 is a tuning knob that 
+/sys/module/hfi1/parameters/rcvhdrcnt:8192 is a tuning knob that
 allows useres to specify the count of entries.
 
 Supported values are 2048 (default), 4096, and 8192
@@ -185,7 +210,7 @@ To save on library bloat, 4096 is not implimented as an optimized compile-time v
 
 Remember that fi_opx_hfi1_poll_once works in terms of 4 doublewords
 So for example, 2k ring length (0-based) mask is
-2047 * 32 = 0xFFE0  
+2047 * 32 = 0xFFE0
 */
 static const uint64_t FI_OPX_HDRQ_MASK_RUNTIME	= 0ULL;
 static const uint64_t FI_OPX_HDRQ_MASK_2048 	= 0X000000000000FFE0UL;
@@ -205,10 +230,14 @@ static const uint64_t FI_OPX_HDRQ_MASK_8192	= 0X000000000003FFE0UL;
 #define FI_OPX_BASE_CAPS							\
 	( FI_MSG | FI_TAGGED | FI_LOCAL_COMM | FI_REMOTE_COMM			\
 	| FI_SOURCE | FI_NAMED_RX_CTX | FI_RMA | FI_ATOMIC | FI_HMEM )
+#define FI_OPX_BASE_MR_MODE							\
+	( OPX_MR | FI_MR_HMEM )
 #else
 #define FI_OPX_BASE_CAPS							\
 	( FI_MSG | FI_TAGGED | FI_LOCAL_COMM | FI_REMOTE_COMM			\
 	| FI_SOURCE | FI_NAMED_RX_CTX | FI_RMA | FI_ATOMIC )
+#define FI_OPX_BASE_MR_MODE							\
+	( OPX_MR )
 #endif
 
 #define FI_OPX_DEFAULT_CAPS							\

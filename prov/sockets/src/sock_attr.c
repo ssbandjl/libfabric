@@ -89,8 +89,6 @@ struct fi_rx_attr sock_msg_rx_attr = {
 	.mode = SOCK_MODE,
 	.op_flags = SOCK_RX_OP_FLAGS,
 	.msg_order = SOCK_EP_MSG_ORDER,
-	.comp_order = SOCK_EP_COMP_ORDER,
-	.total_buffered_recv = SOCK_EP_MAX_BUFF_RECV,
 	.size = SOCK_EP_RX_SZ,
 	.iov_limit = SOCK_EP_MAX_IOV_LIMIT,
 };
@@ -139,8 +137,6 @@ struct fi_rx_attr sock_rdm_rx_attr = {
 	.mode = SOCK_MODE,
 	.op_flags = SOCK_RX_OP_FLAGS,
 	.msg_order = SOCK_EP_MSG_ORDER,
-	.comp_order = SOCK_EP_COMP_ORDER,
-	.total_buffered_recv = SOCK_EP_MAX_BUFF_RECV,
 	.size = SOCK_EP_RX_SZ,
 	.iov_limit = SOCK_EP_MAX_IOV_LIMIT,
 };
@@ -161,8 +157,6 @@ struct fi_rx_attr sock_dgram_rx_attr = {
 	.mode = SOCK_MODE,
 	.op_flags = SOCK_RX_OP_FLAGS,
 	.msg_order = SOCK_EP_MSG_ORDER,
-	.comp_order = SOCK_EP_COMP_ORDER,
-	.total_buffered_recv = SOCK_EP_MAX_BUFF_RECV,
 	.size = SOCK_EP_RX_SZ,
 	.iov_limit = SOCK_EP_MAX_IOV_LIMIT,
 };
@@ -183,8 +177,6 @@ struct fi_rx_attr sock_srx_attr = {
 	.mode = SOCK_MODE,
 	.op_flags = 0,
 	.msg_order = SOCK_EP_MSG_ORDER,
-	.comp_order = SOCK_EP_COMP_ORDER,
-	.total_buffered_recv = 0,
 	.size = SOCK_EP_MAX_MSG_SZ,
 	.iov_limit = SOCK_EP_MAX_IOV_LIMIT,
 };
@@ -196,7 +188,7 @@ struct fi_domain_attr sock_domain_attr = {
 	.data_progress = FI_PROGRESS_AUTO,
 	.resource_mgmt = FI_RM_ENABLED,
 	/* Provider supports basic memory registration mode */
-	.mr_mode = FI_MR_BASIC | FI_MR_SCALABLE,
+	.mr_mode = OFI_MR_BASIC | OFI_MR_SCALABLE,
 	.mr_key_size = sizeof(uint64_t),
 	.cq_data_size = sizeof(uint64_t),
 	.cq_cnt = SOCK_EP_MAX_CQ_CNT,

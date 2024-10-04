@@ -17,9 +17,6 @@
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
   General Public License for more details.
 
-  Contact Information:
-  Intel Corporation, www.intel.com
-
   BSD LICENSE
 
   Copyright(c) 2015 Intel Corporation.
@@ -68,7 +65,8 @@
 
 /* upper and lower bounds for HFI port numbers */
 #define OPX_MIN_PORT 1
-#define OPX_MAX_PORT 1
+/* Be aware this is the JKR max. Current WFR code handles it. */
+#define OPX_MAX_PORT 2	// JKR max is 2, WFR is 1
 #ifndef OPX_NUM_PORTS_GEN1
 #define OPX_NUM_PORTS_GEN1 (OPX_MAX_PORT - OPX_MIN_PORT + 1)
 #endif
@@ -182,6 +180,11 @@ int opx_hfi_get_port_index2pkey(int unit, int port, int index);
    that a working chip has been found for each possible unit #.
    Returns -1 with errno set, or number of units >=0 (0 means none found). */
 int opx_hfi_get_num_units();
+
+/* get the number of ports per hfi unit */
+/* should return OPX_MAX_PORT if number of ports is greater than OPX_MAX_PORT*/
+/* should return 0 if number of ports is less than OPX_MIN_PORT*/
+int opx_hfi_get_num_ports(int hfi_unit);
 
 /* Given a unit number, returns 1 if any port on the unit is active.
    returns 0 if no port on the unit is active.

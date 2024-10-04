@@ -13,6 +13,7 @@
 #include "efa_rdm_pke_utils.h"
 #include "efa_rdm_pke_nonreq.h"
 #include "efa_rdm_pke_req.h"
+#include "efa_rdm_tracepoint.h"
 
 /* Handshake wait timeout in microseconds */
 #define EFA_RDM_HANDSHAKE_WAIT_TIMEOUT 1000000
@@ -49,6 +50,13 @@ int efa_rdm_pke_fill_data(struct efa_rdm_pke *pkt_entry,
 			  int data_size)
 {
 	int ret = 0;
+
+
+	if (efa_both_support_zero_hdr_data_transfer(pkt_entry->ep, ope->peer)) {
+		/* zero hdr transfer only happens for eager msg (non-tagged) pkt */
+		assert(pkt_type == EFA_RDM_EAGER_MSGRTM_PKT);
+		pkt_entry->flags |= EFA_RDM_PKE_SEND_TO_USER_RECV_QP;
+	}
 
 	/* Only 3 categories of packets has data_size and data_offset:
 	 * data packet, medium req and runtread req.
@@ -104,14 +112,18 @@ int efa_rdm_pke_fill_data(struct efa_rdm_pke *pkt_entry,
 		/* The data_offset will be non-zero when the long CTS RTM packet
 		 * is sent to continue a runting read transfer after the
 		 * receiver has run out of memory registrations */
-		assert((data_offset == 0 || ope->internal_flags & EFA_RDM_OPE_READ_NACK) && data_size == -1);
+		assert(data_offset == 0 ||
+		       ope->internal_flags & EFA_RDM_OPE_READ_NACK);
+		assert(data_size == -1);
 		ret = efa_rdm_pke_init_longcts_msgrtm(pkt_entry, ope);
 		break;
 	case EFA_RDM_LONGCTS_TAGRTM_PKT:
 		/* The data_offset will be non-zero when the long CTS RTM packet
 		 * is sent to continue a runting read transfer after the
 		 * receiver has run out of memory registrations */
-		assert((data_offset == 0 || ope->internal_flags & EFA_RDM_OPE_READ_NACK) && data_size == -1);
+		assert(data_offset == 0 ||
+		       ope->internal_flags & EFA_RDM_OPE_READ_NACK);
+		assert(data_size == -1);
 		ret = efa_rdm_pke_init_longcts_tagrtm(pkt_entry, ope);
 		break;
 	case EFA_RDM_LONGREAD_MSGRTM_PKT:
@@ -179,11 +191,21 @@ int efa_rdm_pke_fill_data(struct efa_rdm_pke *pkt_entry,
 		ret = efa_rdm_pke_init_dc_medium_tagrtm(pkt_entry, ope, data_offset, data_size);
 		break;
 	case EFA_RDM_DC_LONGCTS_MSGRTM_PKT:
-		assert(data_offset == 0 && data_size == -1);
+		/* The data_offset will be non-zero when the DC long CTS RTM packet
+		 * is sent to continue a runting read transfer after the
+		 * receiver has run out of memory registrations */
+		assert(data_offset == 0 ||
+		       ope->internal_flags & EFA_RDM_OPE_READ_NACK);
+		assert(data_size == -1);
 		ret = efa_rdm_pke_init_dc_longcts_msgrtm(pkt_entry, ope);
 		break;
 	case EFA_RDM_DC_LONGCTS_TAGRTM_PKT:
-		assert(data_offset == 0 && data_size == -1);
+		/* The data_offset will be non-zero when the DC long CTS tagged RTM packet
+		 * is sent to continue a runting read transfer after the
+		 * receiver has run out of memory registrations */
+		assert(data_offset == 0 ||
+		       ope->internal_flags & EFA_RDM_OPE_READ_NACK);
+		assert(data_size == -1);
 		ret = efa_rdm_pke_init_dc_longcts_tagrtm(pkt_entry, ope);
 		break;
 	case EFA_RDM_DC_EAGER_RTW_PKT:
@@ -226,10 +248,8 @@ int efa_rdm_pke_fill_data(struct efa_rdm_pke *pkt_entry,
  *
  * @param[in,out]	pkt_entry	packet entry
  */
-void efa_rdm_pke_handle_sent(struct efa_rdm_pke *pkt_entry)
+void efa_rdm_pke_handle_sent(struct efa_rdm_pke *pkt_entry, int pkt_type)
 {
-	int pkt_type = efa_rdm_pke_get_base_hdr(pkt_entry)->type;
-
 	switch (pkt_type) {
 	case EFA_RDM_READRSP_PKT:
 		efa_rdm_pke_handle_readrsp_sent(pkt_entry);
@@ -328,6 +348,7 @@ void efa_rdm_pke_handle_data_copied(struct efa_rdm_pke *pkt_entry)
 	assert(ep);
 
 	ope->bytes_copied += pkt_entry->payload_size;
+	efa_rdm_tracepoint(rx_pke_proc_matched_msg_end, (size_t) pkt_entry, pkt_entry->payload_size, ope->msg_id, (size_t) ope->cq_entry.op_context, ope->total_len);
 	efa_rdm_pke_release_rx(pkt_entry);
 
 	if (ope->total_len == ope->bytes_copied) {
@@ -407,7 +428,7 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int prov_errno)
 	switch (pkt_entry->ope->type) {
 	case EFA_RDM_TXE:
 		txe = pkt_entry->ope;
-		if (efa_rdm_pke_get_base_hdr(pkt_entry)->type == EFA_RDM_HANDSHAKE_PKT) {
+		if (!(pkt_entry->flags & EFA_RDM_PKE_SEND_TO_USER_RECV_QP) && efa_rdm_pke_get_base_hdr(pkt_entry)->type == EFA_RDM_HANDSHAKE_PKT) {
 			if (prov_errno == EFA_IO_COMP_STATUS_REMOTE_ERROR_RNR) {
 				/*
 				 * handshake should always be queued for RNR
@@ -415,7 +436,7 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int prov_errno)
 				assert(!(peer->flags & EFA_RDM_PEER_HANDSHAKE_QUEUED));
 				peer->flags |= EFA_RDM_PEER_HANDSHAKE_QUEUED;
 				dlist_insert_tail(&peer->handshake_queued_entry,
-						  &ep->handshake_queued_peer_list);
+						  &efa_rdm_ep_domain(ep)->handshake_queued_peer_list);
 			} else if (prov_errno != EFA_IO_COMP_STATUS_REMOTE_ERROR_BAD_DEST_QPN) {
 				/*
 				 * If prov_errno is EFA_IO_COMP_STATUS_REMOTE_ERROR_BAD_DEST_QPN
@@ -475,8 +496,8 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int prov_errno)
 				efa_rdm_ep_queue_rnr_pkt(ep, &txe->queued_pkts, pkt_entry);
 				if (!(txe->internal_flags & EFA_RDM_OPE_QUEUED_RNR)) {
 					txe->internal_flags |= EFA_RDM_OPE_QUEUED_RNR;
-					dlist_insert_tail(&txe->queued_rnr_entry,
-							  &ep->ope_queued_rnr_list);
+					dlist_insert_tail(&txe->queued_entry,
+							  &efa_rdm_ep_domain(ep)->ope_queued_list);
 				}
 			}
 		} else {
@@ -496,8 +517,8 @@ void efa_rdm_pke_handle_tx_error(struct efa_rdm_pke *pkt_entry, int prov_errno)
 			efa_rdm_ep_queue_rnr_pkt(ep, &rxe->queued_pkts, pkt_entry);
 			if (!(rxe->internal_flags & EFA_RDM_OPE_QUEUED_RNR)) {
 				rxe->internal_flags |= EFA_RDM_OPE_QUEUED_RNR;
-				dlist_insert_tail(&rxe->queued_rnr_entry,
-						  &ep->ope_queued_rnr_list);
+				dlist_insert_tail(&rxe->queued_entry,
+						  &efa_rdm_ep_domain(ep)->ope_queued_list);
 			}
 		} else {
 			efa_rdm_rxe_handle_error(pkt_entry->ope, err, prov_errno);
@@ -544,6 +565,15 @@ void efa_rdm_pke_handle_send_completion(struct efa_rdm_pke *pkt_entry)
 		return;
 	}
 
+	/* These pkts are eager pkts withour hdrs */
+	if (pkt_entry->flags & EFA_RDM_PKE_SEND_TO_USER_RECV_QP) {
+		efa_rdm_pke_handle_eager_rtm_send_completion(pkt_entry);
+		efa_rdm_ep_record_tx_op_completed(ep, pkt_entry);
+		efa_rdm_pke_release_tx(pkt_entry);
+		return;
+	}
+
+	/* Start handling pkts with hdrs */
 	switch (efa_rdm_pke_get_base_hdr(pkt_entry)->type) {
 	case EFA_RDM_HANDSHAKE_PKT:
 		efa_rdm_txe_release(pkt_entry->ope);
@@ -752,6 +782,27 @@ fi_addr_t efa_rdm_pke_insert_addr(struct efa_rdm_pke *pkt_entry, void *raw_addr)
 	return rdm_addr;
 }
 
+void efa_rdm_pke_proc_received_no_hdr(struct efa_rdm_pke *pkt_entry, bool has_imm_data, uint32_t imm_data)
+{
+	struct efa_rdm_ope *rxe = pkt_entry->ope;
+
+	assert(pkt_entry->alloc_type == EFA_RDM_PKE_FROM_USER_RX_POOL);
+	assert(rxe);
+
+	if (has_imm_data) {
+		rxe->cq_entry.flags |= FI_REMOTE_CQ_DATA;
+		rxe->cq_entry.data = imm_data;
+	}
+
+	rxe->addr = pkt_entry->addr;
+	rxe->total_len = pkt_entry->pkt_size;
+	rxe->cq_entry.len = pkt_entry->pkt_size;
+
+	efa_rdm_rxe_report_completion(rxe);
+	efa_rdm_rxe_release(rxe);
+	efa_rdm_pke_release_rx(pkt_entry);
+}
+
 /**
  * @brief process a received packet
  *
@@ -881,93 +932,6 @@ fi_addr_t efa_rdm_pke_determine_addr(struct efa_rdm_pke *pkt_entry)
 	}
 
 	return FI_ADDR_NOTAVAIL;
-}
-
-/**
- * @brief handle a received packet
- *
- * @param	ep[in,out]		endpoint
- * @param	pkt_entry[in,out]	received packet, will be released by this function
- */
-void efa_rdm_pke_handle_recv_completion(struct efa_rdm_pke *pkt_entry)
-{
-	int pkt_type;
-	struct efa_rdm_ep *ep;
-	struct efa_rdm_peer *peer;
-	struct efa_rdm_base_hdr *base_hdr;
-	struct efa_rdm_ope *zcpy_rxe = NULL;
-
-	ep = pkt_entry->ep;
-	assert(ep);
-
-	assert(ep->efa_rx_pkts_posted > 0);
-	ep->efa_rx_pkts_posted--;
-
-	base_hdr = efa_rdm_pke_get_base_hdr(pkt_entry);
-	pkt_type = base_hdr->type;
-	if (pkt_type >= EFA_RDM_EXTRA_REQ_PKT_END) {
-		EFA_WARN(FI_LOG_CQ,
-			"Peer %d is requesting feature %d, which this EP does not support.\n",
-			(int)pkt_entry->addr, base_hdr->type);
-
-		assert(0 && "invalid REQ packet type");
-		efa_base_ep_write_eq_error(&ep->base_ep, FI_EIO, FI_EFA_ERR_INVALID_PKT_TYPE);
-		efa_rdm_pke_release_rx(pkt_entry);
-		return;
-	}
-
-	/*
-	 * Ignore packet if peer address cannot be determined. This ususally happens if
-	 * we had prior communication with the peer, but
-	 * application called fi_av_remove() to remove the address
-	 * from address vector.
-	 */
-	if (pkt_entry->addr == FI_ADDR_NOTAVAIL) {
-		EFA_WARN(FI_LOG_CQ,
-			"Warning: ignoring a received packet from a removed address. packet type: %" PRIu8
-			", packet flags: %x\n",
-			efa_rdm_pke_get_base_hdr(pkt_entry)->type,
-			efa_rdm_pke_get_base_hdr(pkt_entry)->flags);
-		efa_rdm_pke_release_rx(pkt_entry);
-		return;
-	}
-
-#if ENABLE_DEBUG
-	if (!ep->use_zcpy_rx) {
-		dlist_remove(&pkt_entry->dbg_entry);
-		dlist_insert_tail(&pkt_entry->dbg_entry, &ep->rx_pkt_list);
-	}
-#ifdef ENABLE_EFA_RDM_PKE_DUMP
-	efa_rdm_pke_print(pkt_entry, "Received");
-#endif
-#endif
-	peer = efa_rdm_ep_get_peer(ep, pkt_entry->addr);
-	assert(peer);
-	if (peer->is_local) {
-		/*
-		 * This happens when the peer is on same instance, but chose to
-		 * use EFA device to communicate with me. In this case, we respect
-		 * that and will not use shm with the peer.
-		 * TODO: decide whether to use shm through handshake packet.
-		 */
-		peer->is_local = 0;
-	}
-
-	efa_rdm_ep_post_handshake_or_queue(ep, peer);
-
-
-	if (pkt_entry->alloc_type == EFA_RDM_PKE_FROM_USER_BUFFER) {
-		assert(pkt_entry->ope);
-		zcpy_rxe = pkt_entry->ope;
-	}
-
-	efa_rdm_pke_proc_received(pkt_entry);
-
-	if (zcpy_rxe && pkt_type != EFA_RDM_EAGER_MSGRTM_PKT) {
-		/* user buffer was not matched with a message,
-		 * therefore reposting the buffer */
-		efa_rdm_ep_post_user_recv_buf(ep, zcpy_rxe, 0);
-	}
 }
 
 #if ENABLE_DEBUG

@@ -181,8 +181,7 @@ static int validate_tx_ordering_bits(char *node, char *service, uint64_t flags,
 		struct fi_info *hints, struct fi_info **info)
 {
 	return validate_bit_combos(node, service, flags, hints, info,
-				   FI_ORDER_STRICT | FI_ORDER_DATA,
-				   init_tx_order, check_tx_order);
+				   ~0ULL, init_tx_order, check_tx_order);
 }
 
 static int init_rx_order(struct fi_info *hints, uint64_t order)
@@ -200,8 +199,7 @@ static int validate_rx_ordering_bits(char *node, char *service, uint64_t flags,
 		struct fi_info *hints, struct fi_info **info)
 {
 	return validate_bit_combos(node, service, flags, hints, info,
-				   FI_ORDER_STRICT | FI_ORDER_DATA,
-				   init_rx_order, check_rx_order);
+				   ~0ULL, init_rx_order, check_rx_order);
 }
 
 static int init_caps(struct fi_info *hints, uint64_t bits)
@@ -540,53 +538,6 @@ static int init_invalid_rma_WAW_ordering_size(struct fi_info *hints)
 /*
  * MR mode checks
  */
-static int init_mr_basic(struct fi_info *hints)
-{
-	hints->caps |= FI_RMA;
-	hints->domain_attr->mr_mode = FI_MR_BASIC;
-	return 0;
-}
-
-static int check_mr_basic(struct fi_info *info)
-{
-	return (info->domain_attr->mr_mode != FI_MR_BASIC) ?
-		EXIT_FAILURE : 0;
-}
-
-static int init_mr_scalable(struct fi_info *hints)
-{
-	hints->caps |= FI_RMA;
-	hints->domain_attr->mr_mode = FI_MR_SCALABLE;
-	return 0;
-}
-
-static int check_mr_scalable(struct fi_info *info)
-{
-	return (info->domain_attr->mr_mode != FI_MR_SCALABLE) ?
-		EXIT_FAILURE : 0;
-}
-
-static int init_mr_unspec(struct fi_info *hints)
-{
-	hints->caps |= FI_RMA;
-	hints->domain_attr->mr_mode = FI_MR_UNSPEC;
-	return 0;
-}
-
-static int test_mr_v1_0(char *node, char *service, uint64_t flags,
-			struct fi_info *test_hints, struct fi_info **info)
-{
-	return fi_getinfo(FI_VERSION(1, 0), node, service, flags,
-			  test_hints, info);
-}
-
-static int check_mr_unspec(struct fi_info *info)
-{
-	return (info->domain_attr->mr_mode != FI_MR_BASIC &&
-		info->domain_attr->mr_mode != FI_MR_SCALABLE) ?
-		EXIT_FAILURE : 0;
-}
-
 static int init_mr_mode(struct fi_info *hints, uint64_t mode)
 {
 	hints->domain_attr->mr_mode = (uint32_t) mode;
@@ -624,18 +575,6 @@ static int init_data_auto(struct fi_info *hints)
 	return 0;
 }
 
-static int init_ctrl_manual(struct fi_info *hints)
-{
-	hints->domain_attr->control_progress = FI_PROGRESS_MANUAL;
-	return 0;
-}
-
-static int init_ctrl_auto(struct fi_info *hints)
-{
-	hints->domain_attr->control_progress = FI_PROGRESS_AUTO;
-	return 0;
-}
-
 static int check_data_manual(struct fi_info *info)
 {
 	return (info->domain_attr->data_progress != FI_PROGRESS_MANUAL) ?
@@ -645,18 +584,6 @@ static int check_data_manual(struct fi_info *info)
 static int check_data_auto(struct fi_info *info)
 {
 	return (info->domain_attr->data_progress != FI_PROGRESS_AUTO) ?
-		EXIT_FAILURE : 0;
-}
-
-static int check_ctrl_manual(struct fi_info *info)
-{
-	return (info->domain_attr->control_progress != FI_PROGRESS_MANUAL) ?
-		EXIT_FAILURE : 0;
-}
-
-static int check_ctrl_auto(struct fi_info *info)
-{
-	return (info->domain_attr->control_progress != FI_PROGRESS_AUTO) ?
 		EXIT_FAILURE : 0;
 }
 
@@ -932,18 +859,7 @@ getinfo_test(bad_waw_ordering, 1, "Test invalid rma WAW ordering size",
 	     NULL, NULL, -FI_ENODATA)
 
 /* MR mode tests */
-getinfo_test(mr_mode, 1, "Test FI_MR_BASIC", NULL, NULL, 0,
-	     hints, init_mr_basic, NULL, check_mr_basic, -FI_ENODATA)
-getinfo_test(mr_mode, 2, "Test FI_MR_SCALABLE", NULL, NULL, 0,
-	     hints, init_mr_scalable, NULL, check_mr_scalable, -FI_ENODATA)
-getinfo_test(mr_mode, 3, "Test FI_MR_UNSPEC (v1.0)", NULL, NULL, 0,
-	     hints, init_mr_unspec, test_mr_v1_0, check_mr_unspec, -FI_ENODATA)
-getinfo_test(mr_mode, 4, "Test FI_MR_BASIC (v1.0)", NULL, NULL, 0,
-	     hints, init_mr_basic, test_mr_v1_0, check_mr_basic, -FI_ENODATA)
-getinfo_test(mr_mode, 5, "Test FI_MR_SCALABLE (v1.0)", NULL, NULL, 0,
-     	     hints, init_mr_scalable, test_mr_v1_0, check_mr_scalable,
-	     -FI_ENODATA)
-getinfo_test(mr_mode, 6, "Test mr_mode bits", NULL, NULL, 0,
+getinfo_test(mr_mode, 1, "Test mr_mode bits", NULL, NULL, 0,
 	     hints, NULL, validate_mr_modes, NULL, 0)
 
 /* Progress tests */
@@ -951,10 +867,6 @@ getinfo_test(progress, 1, "Test data manual progress", NULL, NULL, 0,
 	     hints, init_data_manual, NULL, check_data_manual, 0)
 getinfo_test(progress, 2, "Test data auto progress", NULL, NULL, 0,
 	     hints, init_data_auto, NULL, check_data_auto, 0)
-getinfo_test(progress, 3, "Test ctrl manual progress", NULL, NULL, 0,
-	     hints, init_ctrl_manual, NULL, check_ctrl_manual, 0)
-getinfo_test(progress, 4, "Test ctrl auto progress", NULL, NULL, 0,
-	     hints, init_ctrl_auto, NULL, check_ctrl_auto, 0)
 
 /* Capability test */
 getinfo_test(caps, 1, "Test capability bits supported are set",
@@ -1038,15 +950,8 @@ int main(int argc, char **argv)
 		TEST_ENTRY_GETINFO(bad_waw_ordering1),
 		TEST_ENTRY_GETINFO(neg1),
 		TEST_ENTRY_GETINFO(mr_mode1),
-		TEST_ENTRY_GETINFO(mr_mode2),
-		TEST_ENTRY_GETINFO(mr_mode3),
-		TEST_ENTRY_GETINFO(mr_mode4),
-		TEST_ENTRY_GETINFO(mr_mode5),
-		TEST_ENTRY_GETINFO(mr_mode6),
 		TEST_ENTRY_GETINFO(progress1),
 		TEST_ENTRY_GETINFO(progress2),
-		TEST_ENTRY_GETINFO(progress3),
-		TEST_ENTRY_GETINFO(progress4),
 		TEST_ENTRY_GETINFO(caps1),
 		TEST_ENTRY_GETINFO(caps2),
 		TEST_ENTRY_GETINFO(caps3),

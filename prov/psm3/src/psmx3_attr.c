@@ -50,7 +50,6 @@ static struct fi_tx_attr psmx3_tx_attr = {
 	.mode			= FI_CONTEXT, /* 0 */
 	.op_flags		= PSMX3_OP_FLAGS,
 	.msg_order		= PSMX3_MSG_ORDER,
-	.comp_order		= PSMX3_COMP_ORDER,
 	.inject_size		= 64, /* psmx3_env.inject_size */
 	.size			= UINT64_MAX,
 	.iov_limit		= PSMX3_IOV_MAX_COUNT,
@@ -62,8 +61,6 @@ static struct fi_rx_attr psmx3_rx_attr = {
 	.mode			= FI_CONTEXT, /* 0 */
 	.op_flags		= PSMX3_OP_FLAGS,
 	.msg_order		= PSMX3_MSG_ORDER,
-	.comp_order		= PSMX3_COMP_ORDER,
-	.total_buffered_recv	= UINT64_MAX,
 	.size			= UINT64_MAX,
 	.iov_limit		= 1,
 };
@@ -92,13 +89,13 @@ static struct fi_domain_attr psmx3_domain_attr = {
 	.data_progress		= FI_PROGRESS_AUTO,
 	.resource_mgmt		= FI_RM_ENABLED,
 	.av_type		= FI_AV_UNSPEC,
-	.mr_mode		= FI_MR_SCALABLE | FI_MR_BASIC,
+	.mr_mode		= OFI_MR_SCALABLE | OFI_MR_BASIC,
 	.mr_key_size		= sizeof(uint64_t),
 	.cq_data_size		= 0, /* 4, 8 */
 	.cq_cnt			= 65535,
 	.ep_cnt			= 65535,
-	.tx_ctx_cnt		= 1, /* psmx3_domain_info.free_trx_ctxt */
-	.rx_ctx_cnt		= 1, /* psmx3_domain_info.free_trx_ctxt */
+	.tx_ctx_cnt		= 1, /* psmx3_domain_info.max_trx_ctxt */
+	.rx_ctx_cnt		= 1, /* psmx3_domain_info.max_trx_ctxt */
 	.max_ep_tx_ctx		= 1, /* psmx3_domain_info.max_trx_ctxt */
 	.max_ep_rx_ctx		= 1, /* psmx3_domain_info.max_trx_ctxt */
 	.max_ep_stx_ctx		= 1, /* psmx3_domain_info.max_trx_ctxt */
@@ -307,7 +304,7 @@ static uint64_t get_max_inject_size(void) {
 	thresh_rv = 65536;	// default in odd case of PSM3_DEVICES=self
 
 	if (have_nic) {
-		temp = PSM_MQ_NIC_RNDV_THRESH;
+		temp = PSM3_MQ_RNDV_NIC_THRESH;
 		psm3_parse_str_uint(psm3_env_get("PSM3_MQ_RNDV_NIC_THRESH"), &temp,
 							0, UINT_MAX);
 		if (thresh_rv > temp)
@@ -315,7 +312,7 @@ static uint64_t get_max_inject_size(void) {
 	}
 
 	if (have_shm) {
-		temp = MQ_SHM_THRESH_RNDV;
+		temp = PSM3_MQ_RNDV_SHM_THRESH;
 		psm3_parse_str_uint(psm3_env_get("PSM3_MQ_RNDV_SHM_THRESH"), &temp,
 							0, UINT_MAX);
 		if (thresh_rv > temp)
@@ -327,7 +324,7 @@ static uint64_t get_max_inject_size(void) {
 		if (have_nic) {
 			// GPU ips rendezvous threshold
 			// sockets HAL avoids rendezvous, so this may be overly restrictive
-			temp = GPU_THRESH_RNDV;
+			temp = PSM3_GPU_THRESH_RNDV;
 			// PSM3_CUDA_THRESH_RNDV depricated, use PSM3_GPU_THRESH_RNDV if set
 			psm3_parse_str_uint(psm3_env_get("PSM3_CUDA_THRESH_RNDV"), &temp,
 								0, UINT_MAX);
@@ -339,7 +336,7 @@ static uint64_t get_max_inject_size(void) {
 
 		if (have_shm) {
 			// GPU shm rendezvous threshold
-			temp = MQ_SHM_GPU_THRESH_RNDV;
+			temp = PSM3_MQ_RNDV_SHM_GPU_THRESH;
 			psm3_parse_str_uint(psm3_env_get("PSM3_MQ_RNDV_SHM_GPU_THRESH"), &temp,
 								0, UINT_MAX);
 			if (thresh_rv > temp)
@@ -596,19 +593,11 @@ void psmx3_update_prov_info(struct fi_info *info,
 		    ! psmx3_domain_info.default_domain_name[0])
 			unit = 0;
 
-		if (unit == PSMX3_DEFAULT_UNIT || !psmx3_env.multi_ep) {
-			p->domain_attr->tx_ctx_cnt = psmx3_domain_info.free_trx_ctxt;
-			p->domain_attr->rx_ctx_cnt = psmx3_domain_info.free_trx_ctxt;
-			p->domain_attr->max_ep_tx_ctx = psmx3_domain_info.max_trx_ctxt;
-			p->domain_attr->max_ep_rx_ctx = psmx3_domain_info.max_trx_ctxt;
-			p->domain_attr->max_ep_stx_ctx = psmx3_domain_info.max_trx_ctxt;
-		} else {
-			p->domain_attr->tx_ctx_cnt = psmx3_domain_info.unit_nfreectxts[unit];
-			p->domain_attr->rx_ctx_cnt = psmx3_domain_info.unit_nfreectxts[unit];
-			p->domain_attr->max_ep_tx_ctx = psmx3_domain_info.unit_nctxts[unit];
-			p->domain_attr->max_ep_rx_ctx = psmx3_domain_info.unit_nctxts[unit];
-			p->domain_attr->max_ep_stx_ctx = psmx3_domain_info.unit_nctxts[unit];
-		}
+		p->domain_attr->tx_ctx_cnt = psmx3_domain_info.max_trx_ctxt;
+		p->domain_attr->rx_ctx_cnt = psmx3_domain_info.max_trx_ctxt;
+		p->domain_attr->max_ep_tx_ctx = psmx3_domain_info.max_trx_ctxt;
+		p->domain_attr->max_ep_rx_ctx = psmx3_domain_info.max_trx_ctxt;
+		p->domain_attr->max_ep_stx_ctx = psmx3_domain_info.max_trx_ctxt;
 
 		free(p->domain_attr->name);
 		if (unit == PSMX3_DEFAULT_UNIT)
@@ -754,8 +743,8 @@ void psmx3_alter_prov_info(uint32_t api_version,
 			info->domain_attr->data_progress =
 				FI_PROGRESS_MANUAL;
 
-		if (info->domain_attr->mr_mode == (FI_MR_BASIC | FI_MR_SCALABLE))
-			info->domain_attr->mr_mode = FI_MR_SCALABLE;
+		if (info->domain_attr->mr_mode == (OFI_MR_BASIC | OFI_MR_SCALABLE))
+			info->domain_attr->mr_mode = OFI_MR_SCALABLE;
 
 		/*
 		 * Avoid automatically adding secondary caps that may negatively

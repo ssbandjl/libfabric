@@ -69,6 +69,9 @@
     <ClCompile Include="common\hmem_neuron.c">
       <Filter>Source Files\common</Filter>
     </ClCompile>
+    <ClCompile Include="common\hmem_synapseai.c">
+      <Filter>Source Files\common</Filter>
+    </ClCompile>
     <ClCompile Include="common\shared.c">
       <Filter>Source Files\common</Filter>
     </ClCompile>
@@ -78,9 +81,6 @@
     <ClCompile Include="functional\dgram.c">
       <Filter>Source Files\functional</Filter>
     </ClCompile>
-    <ClCompile Include="functional\dgram_waitset.c">
-      <Filter>Source Files\functional</Filter>
-    </ClCompile>
     <ClCompile Include="functional\msg.c">
       <Filter>Source Files\functional</Filter>
     </ClCompile>
@@ -88,9 +88,6 @@
       <Filter>Source Files\functional</Filter>
     </ClCompile>
     <ClCompile Include="functional\msg_sockets.c">
-      <Filter>Source Files\functional</Filter>
-    </ClCompile>
-    <ClCompile Include="functional\poll.c">
       <Filter>Source Files\functional</Filter>
     </ClCompile>
     <ClCompile Include="functional\rdm.c">
@@ -172,6 +169,9 @@
       <Filter>Source Files\benchmarks</Filter>
     </ClCompile>
     <ClCompile Include="benchmarks\rdm_pingpong.c">
+      <Filter>Source Files\benchmarks</Filter>
+    </ClCompile>
+    <ClCompile Include="benchmarks\rdm_bw.c">
       <Filter>Source Files\benchmarks</Filter>
     </ClCompile>
     <ClCompile Include="benchmarks\rma_pingpong.c">

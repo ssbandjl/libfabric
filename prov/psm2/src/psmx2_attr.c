@@ -50,7 +50,6 @@ static struct fi_tx_attr psmx2_tx_attr = {
 	.mode			= FI_CONTEXT, /* 0 */
 	.op_flags		= PSMX2_OP_FLAGS,
 	.msg_order		= PSMX2_MSG_ORDER,
-	.comp_order		= PSMX2_COMP_ORDER,
 	.inject_size		= 64, /* psmx2_env.inject_size */
 	.size			= UINT64_MAX,
 	.iov_limit		= PSMX2_IOV_MAX_COUNT,
@@ -62,8 +61,6 @@ static struct fi_rx_attr psmx2_rx_attr = {
 	.mode			= FI_CONTEXT, /* 0 */
 	.op_flags		= PSMX2_OP_FLAGS,
 	.msg_order		= PSMX2_MSG_ORDER,
-	.comp_order		= PSMX2_COMP_ORDER,
-	.total_buffered_recv	= UINT64_MAX,
 	.size			= UINT64_MAX,
 	.iov_limit		= 1,
 };
@@ -92,7 +89,7 @@ static struct fi_domain_attr psmx2_domain_attr = {
 	.data_progress		= FI_PROGRESS_AUTO,
 	.resource_mgmt		= FI_RM_ENABLED,
 	.av_type		= FI_AV_UNSPEC,
-	.mr_mode		= FI_MR_SCALABLE | FI_MR_BASIC,
+	.mr_mode		= OFI_MR_SCALABLE | OFI_MR_BASIC,
 	.mr_key_size		= sizeof(uint64_t),
 	.cq_data_size		= 0, /* 4, 8 */
 	.cq_cnt			= 65535,
@@ -419,17 +416,12 @@ void psmx2_alter_prov_info(uint32_t api_version,
 	 */
 	for (; info; info = info->next) {
 		if (!hints || !hints->domain_attr ||
-		    !hints->domain_attr->control_progress)
-			info->domain_attr->control_progress =
-				FI_PROGRESS_MANUAL;
-
-		if (!hints || !hints->domain_attr ||
 		    !hints->domain_attr->data_progress)
 			info->domain_attr->data_progress =
 				FI_PROGRESS_MANUAL;
 
-		if (info->domain_attr->mr_mode == (FI_MR_BASIC | FI_MR_SCALABLE))
-			info->domain_attr->mr_mode = FI_MR_SCALABLE;
+		if (info->domain_attr->mr_mode == (OFI_MR_BASIC | OFI_MR_SCALABLE))
+			info->domain_attr->mr_mode = OFI_MR_SCALABLE;
 
 		/*
 		 * Avoid automatically adding secondary caps that may negatively

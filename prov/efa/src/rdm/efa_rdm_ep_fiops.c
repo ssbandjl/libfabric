@@ -27,7 +27,7 @@ void efa_rdm_ep_construct_ibv_qp_init_attr_ex(struct efa_rdm_ep *ep,
 	attr_ex->cap.max_inline_data = ep->base_ep.domain->device->efa_attr.inline_buf_size;
 	attr_ex->qp_type = IBV_QPT_DRIVER;
 	attr_ex->comp_mask = IBV_QP_INIT_ATTR_PD | IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
-	attr_ex->send_ops_flags = IBV_QP_EX_WITH_SEND;
+	attr_ex->send_ops_flags = IBV_QP_EX_WITH_SEND | IBV_QP_EX_WITH_SEND_WITH_IMM;
 	if (efa_device_support_rdma_read())
 		attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_READ;
 	if (efa_device_support_rdma_write()) {
@@ -68,6 +68,7 @@ int efa_rdm_ep_create_base_ep_ibv_qp(struct efa_rdm_ep *ep)
 	struct ibv_qp_init_attr_ex attr_ex = { 0 };
 	struct efa_rdm_cq *tx_rdm_cq, *rx_rdm_cq;
 	struct ibv_cq_ex *tx_ibv_cq, *rx_ibv_cq;
+	int ret;
 
 	tx_rdm_cq = efa_rdm_ep_get_tx_rdm_cq(ep);
 	rx_rdm_cq = efa_rdm_ep_get_rx_rdm_cq(ep);
@@ -86,7 +87,7 @@ int efa_rdm_ep_create_base_ep_ibv_qp(struct efa_rdm_ep *ep)
 
 	if (!rx_rdm_cq && ofi_needs_rx(ep->base_ep.info->caps)) {
 		EFA_WARN(FI_LOG_EP_CTRL,
-			"Endpoint is not bound to a receive completion queue when it has receive capabilities enabled. (FI_RECV)\n");
+			"Endpoint is not bound to a receive completion queue when it has receive capabilities enabled (FI_RECV).\n");
 		return -FI_ENOCQ;
 	}
 
@@ -95,7 +96,24 @@ int efa_rdm_ep_create_base_ep_ibv_qp(struct efa_rdm_ep *ep)
 
 	efa_rdm_ep_construct_ibv_qp_init_attr_ex(ep, &attr_ex, tx_ibv_cq, rx_ibv_cq);
 
-	return efa_base_ep_create_qp(&ep->base_ep, &attr_ex);
+	ret = efa_base_ep_create_qp(&ep->base_ep, &attr_ex);
+	if (ret)
+		return ret;
+
+	/**
+	 * Create separate user_recv_qp to receive pkts that carries user data
+	 * without any headers.
+	 */
+	if (ep->use_zcpy_rx) {
+		ret = efa_qp_create(&ep->base_ep.user_recv_qp, &attr_ex, ep->base_ep.info->tx_attr->tclass);
+		if (ret) {
+			efa_base_ep_destruct_qp(&ep->base_ep);
+			return ret;
+		}
+		ep->base_ep.user_recv_qp->base_ep = &ep->base_ep;
+	}
+
+	return FI_SUCCESS;
 }
 
 static
@@ -215,6 +233,13 @@ int efa_rdm_ep_create_buffer_pools(struct efa_rdm_ep *ep)
 	if (ret)
 		goto err_free;
 
+	ret = ofi_bufpool_create(&ep->user_rx_pkt_pool,
+			sizeof(struct efa_rdm_pke),
+			EFA_RDM_BUFPOOL_ALIGNMENT,
+			0, ep->base_ep.info->rx_attr->size, 0);
+	if (ret)
+		goto err_free;
+
 	if (efa_env.rx_copy_unexp) {
 		ret = efa_rdm_ep_create_pke_pool(
 			ep,
@@ -260,7 +285,7 @@ int efa_rdm_ep_create_buffer_pools(struct efa_rdm_ep *ep)
 				 sizeof(struct efa_rdm_rxe_map_entry),
 				 EFA_RDM_BUFPOOL_ALIGNMENT,
 				 0, /* no limit for max_cnt */
-				 ep->rx_size, 0);
+				 ep->base_ep.info->rx_attr->size, 0);
 
 	if (ret)
 		goto err_free;
@@ -276,7 +301,15 @@ int efa_rdm_ep_create_buffer_pools(struct efa_rdm_ep *ep)
 				 sizeof(struct efa_rdm_ope),
 				 EFA_RDM_BUFPOOL_ALIGNMENT,
 				 0, /* no limit for max_cnt */
-				 ep->tx_size + ep->rx_size, 0);
+				 ep->base_ep.info->tx_attr->size + ep->base_ep.info->rx_attr->size, 0);
+	if (ret)
+		goto err_free;
+
+	ret = ofi_bufpool_create(&ep->overflow_pke_pool,
+				 sizeof(struct efa_rdm_peer_overflow_pke_list_entry),
+				 EFA_RDM_BUFPOOL_ALIGNMENT,
+				 0, /* no limit for max_cnt */
+				 ep->base_ep.info->rx_attr->size, 0);
 	if (ret)
 		goto err_free;
 
@@ -293,6 +326,9 @@ err_free:
 	if (ep->ope_pool)
 		ofi_bufpool_destroy(ep->ope_pool);
 
+	if (ep->overflow_pke_pool)
+		ofi_bufpool_destroy(ep->overflow_pke_pool);
+
 	if (ep->rx_readcopy_pkt_pool)
 		ofi_bufpool_destroy(ep->rx_readcopy_pkt_pool);
 
@@ -301,6 +337,9 @@ err_free:
 
 	if (efa_env.rx_copy_unexp && ep->rx_unexp_pkt_pool)
 		ofi_bufpool_destroy(ep->rx_unexp_pkt_pool);
+
+	if (ep->user_rx_pkt_pool)
+		ofi_bufpool_destroy(ep->user_rx_pkt_pool);
 
 	if (ep->efa_rx_pkt_pool)
 		ofi_bufpool_destroy(ep->efa_rx_pkt_pool);
@@ -319,13 +358,6 @@ err_free:
 void efa_rdm_ep_init_linked_lists(struct efa_rdm_ep *ep)
 {
 	dlist_init(&ep->rx_posted_buf_list);
-	dlist_init(&ep->ope_queued_rnr_list);
-	dlist_init(&ep->ope_queued_ctrl_list);
-	dlist_init(&ep->ope_queued_read_list);
-	dlist_init(&ep->ope_longcts_send_list);
-	dlist_init(&ep->read_pending_list);
-	dlist_init(&ep->peer_backoff_list);
-	dlist_init(&ep->handshake_queued_peer_list);
 #if ENABLE_DEBUG
 	dlist_init(&ep->ope_recv_list);
 	dlist_init(&ep->rx_pkt_list);
@@ -401,16 +433,86 @@ static struct fi_ops efa_rdm_ep_base_ops = {
 static inline
 void efa_rdm_ep_set_use_zcpy_rx(struct efa_rdm_ep *ep)
 {
-	ep->use_zcpy_rx = !(ep->base_ep.util_ep.caps & FI_DIRECTED_RECV) &&
-			  !(ep->base_ep.util_ep.caps & FI_TAGGED) &&
-			  !(ep->base_ep.util_ep.caps & FI_ATOMIC) &&
-			  (ep->max_msg_size <= ep->mtu_size - ep->max_proto_hdr_size) &&
-			  !efa_rdm_ep_need_sas(ep) &&
-			  ep->user_info->mode & FI_MSG_PREFIX &&
-			  efa_env.use_zcpy_rx;
+	enum fi_hmem_iface iface;
+	struct efa_hmem_info *hmem_info;
+	uint64_t unsupported_caps = FI_DIRECTED_RECV | FI_TAGGED | FI_ATOMIC;
 
+	ep->use_zcpy_rx = true;
+
+	/* User requests to turn off zcpy recv */
+	if (!efa_env.use_zcpy_rx) {
+		EFA_INFO(FI_LOG_EP_CTRL, "User disables zero-copy receive protocol via environment\n");
+		ep->use_zcpy_rx = false;
+		goto out;
+	}
+
+	/* Unsupported capabilities */
+	if (ep->base_ep.util_ep.caps & unsupported_caps) {
+		EFA_INFO(FI_LOG_EP_CTRL, "Unsupported capabilities, zero-copy receive protocol will be disabled\n");
+		ep->use_zcpy_rx = false;
+		goto out;
+	}
+
+	/* Max msg size is too large, turn off zcpy recv */
+	if (ep->max_msg_size > ep->mtu_size - ep->base_ep.info->ep_attr->msg_prefix_size) {
+		EFA_INFO(FI_LOG_EP_CTRL, "max_msg_size (%zu) is greater than the mtu size limit: %zu. Zero-copy receive protocol will be disabled.\n",
+			ep->max_msg_size, ep->mtu_size - ep->base_ep.info->ep_attr->msg_prefix_size);
+		ep->use_zcpy_rx = false;
+		goto out;
+	}
+
+	/* If app needs sas ordering, turn off zcpy recv */
+	if (efa_rdm_ep_need_sas(ep)) {
+		EFA_INFO(FI_LOG_EP_CTRL, "FI_ORDER_SAS is requested, zero-copy receive protocol will be disabled\n");
+		ep->use_zcpy_rx = false;
+		goto out;
+	}
+
+	/* FI_MR_LOCAL is not set, turn off zcpy recv */
+	if (!ep->base_ep.domain->mr_local) {
+		EFA_INFO(FI_LOG_EP_CTRL, "FI_MR_LOCAL mode bit is not set, zero-copy receive protocol will be disabled\n");
+		ep->use_zcpy_rx = false;
+		goto out;
+	}
+
+	if (ep->shm_ep) {
+		EFA_INFO(FI_LOG_EP_CTRL, "Libfabric SHM is not turned off, zero-copy receive protocol will be disabled\n");
+		ep->use_zcpy_rx = false;
+		goto out;
+	}
+
+	/* Zero-copy receive requires P2P support. Disable it if any initialized HMEM iface does not support P2P. */
+	for (iface = FI_HMEM_SYSTEM; iface < OFI_HMEM_MAX; ++iface) {
+		hmem_info = &ep->base_ep.domain->hmem_info[iface];
+		if (hmem_info->initialized &&
+		    !hmem_info->p2p_disabled_by_user &&
+		    !hmem_info->p2p_supported_by_device) {
+			EFA_INFO(FI_LOG_EP_CTRL,
+			         "%s does not support P2P, zero-copy receive "
+			         "protocol will be disabled\n",
+			         fi_tostr(&iface, FI_TYPE_HMEM_IFACE));
+			ep->use_zcpy_rx = false;
+			goto out;
+		}
+	}
+
+out:
 	EFA_INFO(FI_LOG_EP_CTRL, "efa_rdm_ep->use_zcpy_rx = %d\n",
 		 ep->use_zcpy_rx);
+	return;
+}
+
+/**
+ * @brief progress engine for the EFA RDM endpoint
+ *
+ * This function now a no-op.
+ *
+ * @param[in] util_ep The endpoint FID to progress
+ */
+static
+void efa_rdm_ep_progress_no_op(struct util_ep *util_ep)
+{
+	return;
 }
 
 /**
@@ -437,7 +539,7 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 				  util_domain.domain_fid);
 
 	ret = efa_base_ep_construct(&efa_rdm_ep->base_ep, domain, info,
-				    efa_rdm_ep_progress, context);
+				    efa_rdm_ep_progress_no_op, context);
 	if (ret)
 		goto err_free_ep;
 
@@ -450,40 +552,32 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 		efa_rdm_ep->shm_ep = NULL;
 	}
 
-	efa_rdm_ep->user_info = fi_dupinfo(info);
-	if (!efa_rdm_ep->user_info) {
-		ret = -FI_ENOMEM;
-		goto err_free_ep;
-	}
-
 	efa_rdm_ep->host_id = efa_get_host_id(efa_env.host_id_file);
 	if (efa_rdm_ep->host_id) {
 		EFA_INFO(FI_LOG_EP_CTRL, "efa_rdm_ep->host_id: i-%017lx\n", efa_rdm_ep->host_id);
 	}
 
-	efa_rdm_ep->rx_size = info->rx_attr->size;
-	efa_rdm_ep->tx_size = info->tx_attr->size;
-	efa_rdm_ep->rx_iov_limit = info->rx_attr->iov_limit;
-	efa_rdm_ep->tx_iov_limit = info->tx_attr->iov_limit;
-	efa_rdm_ep->inject_size = info->tx_attr->inject_size;
+	efa_rdm_ep->max_msg_size = info->ep_attr->max_msg_size;
+	efa_rdm_ep->max_tagged_size = info->ep_attr->max_msg_size;
+	efa_rdm_ep->max_rma_size = info->ep_attr->max_msg_size;
+	efa_rdm_ep->max_atomic_size = info->ep_attr->max_msg_size;
+	efa_rdm_ep->inject_msg_size = info->tx_attr->inject_size;
+	efa_rdm_ep->inject_tagged_size = info->tx_attr->inject_size;
+	efa_rdm_ep->inject_rma_size = info->tx_attr->inject_size;
+	efa_rdm_ep->inject_atomic_size = info->tx_attr->inject_size;
 	efa_rdm_ep->efa_max_outstanding_tx_ops = efa_domain->device->rdm_info->tx_attr->size;
 	efa_rdm_ep->efa_max_outstanding_rx_ops = efa_domain->device->rdm_info->rx_attr->size;
-	efa_rdm_ep->efa_device_iov_limit = efa_domain->device->rdm_info->tx_attr->iov_limit;
 	efa_rdm_ep->use_device_rdma = efa_rdm_get_use_device_rdma(info->fabric_attr->api_version);
 	efa_rdm_ep->shm_permitted = true;
-	efa_rdm_ep->max_msg_size = info->ep_attr->max_msg_size;
 	efa_rdm_ep->msg_prefix_size = info->ep_attr->msg_prefix_size;
-	efa_rdm_ep->max_proto_hdr_size = efa_rdm_pkt_type_get_max_hdr_size();
 	efa_rdm_ep->mtu_size = efa_domain->device->rdm_info->ep_attr->max_msg_size;
 
 	efa_rdm_ep->max_data_payload_size = efa_rdm_ep->mtu_size - sizeof(struct efa_rdm_ctsdata_hdr) - sizeof(struct efa_rdm_ctsdata_opt_connid_hdr);
-	efa_rdm_ep->min_multi_recv_size = efa_rdm_ep->mtu_size - efa_rdm_ep->max_proto_hdr_size;
+	efa_rdm_ep->min_multi_recv_size = efa_rdm_ep->mtu_size - efa_rdm_pkt_type_get_max_hdr_size();
 
 	if (efa_env.tx_queue_size > 0 &&
 	    efa_env.tx_queue_size < efa_rdm_ep->efa_max_outstanding_tx_ops)
 		efa_rdm_ep->efa_max_outstanding_tx_ops = efa_env.tx_queue_size;
-
-	efa_rdm_ep_set_use_zcpy_rx(efa_rdm_ep);
 
 	efa_rdm_ep->handle_resource_management = info->domain_attr->resource_mgmt;
 	EFA_INFO(FI_LOG_EP_CTRL,
@@ -657,35 +751,9 @@ static void efa_rdm_ep_destroy_buffer_pools(struct efa_rdm_ep *efa_rdm_ep)
 	struct dlist_entry *entry, *tmp;
 	struct efa_rdm_ope *rxe;
 	struct efa_rdm_ope *txe;
-	struct efa_rdm_ope *ope;
 #if ENABLE_DEBUG
 	struct efa_rdm_pke *pkt_entry;
-#endif
 
-	dlist_foreach_safe(&efa_rdm_ep->ope_queued_rnr_list, entry, tmp) {
-		txe = container_of(entry, struct efa_rdm_ope,
-					queued_rnr_entry);
-		EFA_WARN(FI_LOG_EP_CTRL,
-			"Closing ep with queued rnr txe: %p\n",
-			txe);
-		efa_rdm_txe_release(txe);
-	}
-
-	dlist_foreach_safe(&efa_rdm_ep->ope_queued_ctrl_list, entry, tmp) {
-		ope = container_of(entry, struct efa_rdm_ope,
-					queued_ctrl_entry);
-		EFA_WARN(FI_LOG_EP_CTRL,
-			"Closing ep with queued ctrl ope: %p\n",
-			ope);
-		if (ope->type == EFA_RDM_TXE) {
-			efa_rdm_txe_release(ope);
-		} else {
-			assert(ope->type == EFA_RDM_RXE);
-			efa_rdm_rxe_release(ope);
-		}
-	}
-
-#if ENABLE_DEBUG
 	dlist_foreach_safe(&efa_rdm_ep->rx_posted_buf_list, entry, tmp) {
 		pkt_entry = container_of(entry, struct efa_rdm_pke, dbg_entry);
 		efa_rdm_pke_release_rx(pkt_entry);
@@ -728,6 +796,9 @@ static void efa_rdm_ep_destroy_buffer_pools(struct efa_rdm_ep *efa_rdm_ep)
 	if (efa_rdm_ep->ope_pool)
 		ofi_bufpool_destroy(efa_rdm_ep->ope_pool);
 
+	if (efa_rdm_ep->overflow_pke_pool)
+		ofi_bufpool_destroy(efa_rdm_ep->overflow_pke_pool);
+
 	if (efa_rdm_ep->map_entry_pool)
 		ofi_bufpool_destroy(efa_rdm_ep->map_entry_pool);
 
@@ -746,6 +817,9 @@ static void efa_rdm_ep_destroy_buffer_pools(struct efa_rdm_ep *efa_rdm_ep)
 	if (efa_rdm_ep->rx_unexp_pkt_pool)
 		ofi_bufpool_destroy(efa_rdm_ep->rx_unexp_pkt_pool);
 
+	if (efa_rdm_ep->user_rx_pkt_pool)
+		ofi_bufpool_destroy(efa_rdm_ep->user_rx_pkt_pool);
+
 	if (efa_rdm_ep->efa_rx_pkt_pool)
 		ofi_bufpool_destroy(efa_rdm_ep->efa_rx_pkt_pool);
 
@@ -762,15 +836,29 @@ static void efa_rdm_ep_destroy_buffer_pools(struct efa_rdm_ep *efa_rdm_ep)
  * Unfinished send includes queued ctrl packets, queued
  * RNR packets and inflight TX packets.
  *
- * @param[in]	efa_rdm_ep	endpoint
- * @return	a boolean
+ * @param[in]  efa_rdm_ep      endpoint
+ * @return     a boolean
  */
 static
 bool efa_rdm_ep_has_unfinished_send(struct efa_rdm_ep *efa_rdm_ep)
 {
-	return !dlist_empty(&efa_rdm_ep->ope_queued_rnr_list) ||
-	       !dlist_empty(&efa_rdm_ep->ope_queued_ctrl_list) ||
-	       (efa_rdm_ep->efa_outstanding_tx_ops > 0);
+	struct dlist_entry *entry, *tmp;
+	struct efa_rdm_ope *ope;
+	/* Only flush the opes queued due to rnr and ctrl */
+	uint64_t queued_ope_flags = EFA_RDM_OPE_QUEUED_CTRL | EFA_RDM_OPE_QUEUED_RNR;
+
+	if (efa_rdm_ep->efa_outstanding_tx_ops > 0)
+		return true;
+
+	dlist_foreach_safe(&efa_rdm_ep_domain(efa_rdm_ep)->ope_queued_list, entry, tmp) {
+		ope = container_of(entry, struct efa_rdm_ope,
+					queued_entry);
+		if (ope->ep == efa_rdm_ep && (ope->internal_flags & queued_ope_flags)) {
+			return true;
+		}
+	}
+
+    return false;
 }
 
 /*
@@ -785,12 +873,9 @@ bool efa_rdm_ep_has_unfinished_send(struct efa_rdm_ep *efa_rdm_ep)
 static inline
 void efa_rdm_ep_wait_send(struct efa_rdm_ep *efa_rdm_ep)
 {
-	struct util_srx_ctx *srx_ctx;
 	struct efa_rdm_cq *tx_cq, *rx_cq;
-	/* peer srx should be initialized when ep is enabled */
-	assert(efa_rdm_ep->peer_srx_ep);
-	srx_ctx = efa_rdm_ep_get_peer_srx_ctx(efa_rdm_ep);
-	ofi_genlock_lock(srx_ctx->lock);
+
+	ofi_genlock_lock(&efa_rdm_ep_domain(efa_rdm_ep)->srx_lock);
 
 	tx_cq = efa_rdm_ep_get_tx_rdm_cq(efa_rdm_ep);
 	rx_cq = efa_rdm_ep_get_rx_rdm_cq(efa_rdm_ep);
@@ -801,10 +886,10 @@ void efa_rdm_ep_wait_send(struct efa_rdm_ep *efa_rdm_ep)
 			efa_rdm_cq_poll_ibv_cq(-1, &tx_cq->ibv_cq);
 		if (rx_cq)
 			efa_rdm_cq_poll_ibv_cq(-1, &rx_cq->ibv_cq);
-		efa_rdm_ep_progress_internal(efa_rdm_ep);
+		efa_domain_progress_rdm_peers_and_queues(efa_rdm_ep_domain(efa_rdm_ep));
 	}
 
-	ofi_genlock_unlock(srx_ctx->lock);
+	ofi_genlock_unlock(&efa_rdm_ep_domain(efa_rdm_ep)->srx_lock);
 }
 
 static inline
@@ -909,9 +994,6 @@ static int efa_rdm_ep_close(struct fid *fid)
 	if (efa_rdm_ep->pke_vec)
 		free(efa_rdm_ep->pke_vec);
 
-	if (efa_rdm_ep->user_info)
-		fi_freeinfo(efa_rdm_ep->user_info);
-
 	free(efa_rdm_ep);
 	return retv;
 }
@@ -942,11 +1024,10 @@ void efa_rdm_ep_set_extra_info(struct efa_rdm_ep *ep)
 
 	if (ep->use_zcpy_rx) {
 		/*
-		 * zero copy receive requires the packet header length remains
-		 * constant, so the application receive buffer is match with
-		 * incoming application data.
+		 * When zcpy rx is enabled, an extra QP is created to
+		 * post rx pkts from user recv buffer directly.
 		 */
-		ep->extra_info[0] |= EFA_RDM_EXTRA_REQUEST_CONSTANT_HEADER_LENGTH;
+		ep->extra_info[0] |= EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP;
 	}
 
 	ep->extra_info[0] |= EFA_RDM_EXTRA_REQUEST_CONNID_HEADER;
@@ -1048,7 +1129,7 @@ void efa_rdm_ep_update_shm(struct efa_rdm_ep *ep)
 
 	use_shm = true;
 
-	assert(ep->user_info);
+	assert(ep->base_ep.info);
 
 	/*
 	 * shm provider must make cuda calls to transfer cuda memory.
@@ -1058,7 +1139,7 @@ void efa_rdm_ep_update_shm(struct efa_rdm_ep *ep)
 	 * AWS Neuron and Habana Synapse, have no SHM provider
 	 * support anyways, so disabling SHM will not impact them.
 	 */
-	if (((ep->user_info->caps & FI_HMEM)
+	if (((ep->base_ep.info->caps & FI_HMEM)
 	    && hmem_ops[FI_HMEM_CUDA].initialized
 	    && !ep->cuda_api_permitted)
 		|| !ep->shm_permitted) {
@@ -1164,6 +1245,19 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 		if (ret)
 			return ret;
 
+		efa_rdm_ep_update_shm(ep);
+
+		efa_rdm_ep_set_use_zcpy_rx(ep);
+
+		/* In zero-copy mode, update inject_size to the size of the inline data
+		 * buffer of the NIC, unless the user already requested a smaller size
+		 *
+		 * TODO: Distinguish between inline data sizes for RDMA {send,write}
+		 * when supported
+		 */
+		if (ep->use_zcpy_rx)
+			ep->inject_rma_size = MIN(ep->inject_rma_size, efa_rdm_ep_domain(ep)->device->efa_attr.inline_buf_size);
+
 		ret = efa_rdm_ep_create_base_ep_ibv_qp(ep);
 		if (ret)
 			return ret;
@@ -1175,11 +1269,11 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 
 		ret = efa_rdm_ep_insert_cq_ibv_cq_poll_list(ep);
 		if (ret)
-			return ret;
+			goto err_destroy_qp;
 
 		ret = efa_rdm_ep_insert_cntr_ibv_cq_poll_list(ep);
 		if (ret)
-			return ret;
+			goto err_destroy_qp;
 
 		assert(ep->peer_srx_ep);
 		srx_ctx = efa_rdm_ep_get_peer_srx_ctx(ep);
@@ -1192,8 +1286,6 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 		EFA_INFO(FI_LOG_EP_CTRL, "libfabric %s efa endpoint created! address: %s\n",
 			fi_tostr("1", FI_TYPE_VERSION), ep_addr_str);
 
-		efa_rdm_ep_update_shm(ep);
-
 		/* Enable shm provider endpoint & post recv buff.
 		 * Once core ep enabled, 18 bytes efa_addr (16 bytes raw + 2 bytes qpn) is set.
 		 * We convert the address to 'gid_qpn' format, and set it as shm ep name, so
@@ -1202,26 +1294,26 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 		 * shared memory region.
 		 */
 		if (ep->shm_ep) {
-                        peer_srx_context.srx = util_get_peer_srx(ep->peer_srx_ep);
-                        peer_srx_attr.op_flags |= FI_PEER;
-                        ret = fi_srx_context(efa_rdm_ep_domain(ep)->shm_domain,
-					     &peer_srx_attr, &peer_srx_ep, &peer_srx_context);
-                        if (ret)
-                                goto err_unlock_and_destroy_qp;
+			peer_srx_context.srx = util_get_peer_srx(ep->peer_srx_ep);
+			peer_srx_attr.op_flags |= FI_PEER;
+			ret = fi_srx_context(efa_rdm_ep_domain(ep)->shm_domain,
+				&peer_srx_attr, &peer_srx_ep, &peer_srx_context);
+			if (ret)
+				goto err_unlock;
 			shm_ep_name_len = EFA_SHM_NAME_MAX;
 			ret = efa_shm_ep_name_construct(shm_ep_name, &shm_ep_name_len, &ep->base_ep.src_addr);
 			if (ret < 0)
-				goto err_unlock_and_destroy_qp;
+				goto err_unlock;
 			fi_setname(&ep->shm_ep->fid, shm_ep_name, shm_ep_name_len);
 
 			/* Bind srx to shm ep */
 			ret = fi_ep_bind(ep->shm_ep, &ep->peer_srx_ep->fid, 0);
 			if (ret)
-				goto err_unlock_and_destroy_qp;
+				goto err_unlock;
 
 			ret = fi_enable(ep->shm_ep);
 			if (ret)
-				goto err_unlock_and_destroy_qp;
+				goto err_unlock;
 		}
 		ofi_genlock_unlock(srx_ctx->lock);
 		break;
@@ -1232,8 +1324,9 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 
 	return ret;
 
-err_unlock_and_destroy_qp:
+err_unlock:
 	ofi_genlock_unlock(srx_ctx->lock);
+err_destroy_qp:
 	efa_base_ep_destruct_qp(&ep->base_ep);
 	return ret;
 }
@@ -1249,6 +1342,11 @@ ssize_t efa_rdm_ep_cancel(fid_t fid_ep, void *context)
 	struct efa_rdm_ep *ep;
 
 	ep = container_of(fid_ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
+	if (ep->use_zcpy_rx) {
+		EFA_WARN(FI_LOG_EP_CTRL, "fi_cancel is not supported in zero-copy receive mode.\n");
+		return -FI_EOPNOTSUPP;
+	}
+
 	return ep->peer_srx_ep->ops->cancel(&ep->peer_srx_ep->fid, context);
 }
 
@@ -1329,8 +1427,8 @@ static int efa_rdm_ep_set_cuda_api_permitted(struct efa_rdm_ep *ep, bool cuda_ap
 static int efa_rdm_ep_set_shared_memory_permitted(struct efa_rdm_ep *ep, bool shm_permitted)
 {
 	if (!shm_permitted) {
-		EFA_WARN(FI_LOG_EP_CTRL,
-			 "FI_OPT_SHARED_MEMORY_PERMITTED set to false");
+		EFA_INFO(FI_LOG_EP_CTRL,
+			 "FI_OPT_SHARED_MEMORY_PERMITTED set to false\n");
 		ep->shm_permitted = false;
 		return FI_SUCCESS;
 	}
@@ -1339,7 +1437,7 @@ static int efa_rdm_ep_set_shared_memory_permitted(struct efa_rdm_ep *ep, bool sh
 		EFA_WARN(FI_LOG_EP_CTRL,
 			 "FI_OPT_SHARED_MEMORY_PERMITTED endpoint option set "
 			 "to true but FI_EFA_ENABLE_SHM_TRANSFER environment "
-			 "variable is set to false.");
+			 "variable is set to false.\n");
 		return -FI_EINVAL;
 	}
 
@@ -1445,7 +1543,7 @@ int efa_rdm_ep_check_qp_in_order_aligned_128_bytes(struct efa_rdm_ep *ep,
 	/* Create a dummy qp for query only */
 	efa_rdm_ep_construct_ibv_qp_init_attr_ex(ep, &attr_ex, ibv_cq_ex, ibv_cq_ex);
 
-	ret = efa_qp_create(&qp, &attr_ex);
+	ret = efa_qp_create(&qp, &attr_ex, FI_TC_UNSPEC);
 	if (ret)
 		goto out;
 
@@ -1453,13 +1551,8 @@ int efa_rdm_ep_check_qp_in_order_aligned_128_bytes(struct efa_rdm_ep *ep,
 		ret = -FI_EOPNOTSUPP;
 
 out:
-	if (qp) {
-		retv = ibv_destroy_qp(qp->ibv_qp);
-		if (retv)
-			EFA_WARN(FI_LOG_EP_CTRL, "destroy ibv qp failed! err: %s\n",
-				fi_strerror(-retv));
-		free(qp);
-	}
+	if (qp)
+		efa_qp_destruct(qp);
 
 	if (ibv_cq_ex) {
 		retv = -ibv_destroy_cq(ibv_cq_ex_to_cq(ibv_cq_ex));
@@ -1468,6 +1561,23 @@ out:
 				fi_strerror(-retv));
 	}
 	return ret;
+}
+
+/**
+ * Convenience macro for setopt with an enforced threshold
+ */
+#define EFA_RDM_EP_SETOPT_THRESHOLD(opt, field, threshold) { \
+	size_t _val = *(size_t *) optval; \
+	if (optlen != sizeof field) \
+		return -FI_EINVAL; \
+	if (_val > threshold) { \
+		EFA_WARN(FI_LOG_EP_CTRL, \
+			"Requested size of %zu for FI_OPT_" #opt " " \
+			"exceeds the maximum (%zu)\n", \
+			_val, threshold); \
+		return -FI_EINVAL; \
+	} \
+	field = _val; \
 }
 
 /**
@@ -1552,6 +1662,30 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 		if (ret)
 			return ret;
 		break;
+	case FI_OPT_MAX_MSG_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_MSG_SIZE, efa_rdm_ep->max_msg_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
+		break;
+	case FI_OPT_MAX_TAGGED_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_TAGGED_SIZE, efa_rdm_ep->max_tagged_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
+		break;
+	case FI_OPT_MAX_RMA_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_RMA_SIZE, efa_rdm_ep->max_rma_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
+		break;
+	case FI_OPT_MAX_ATOMIC_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_ATOMIC_SIZE, efa_rdm_ep->max_atomic_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
+		break;
+	case FI_OPT_INJECT_MSG_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_MSG_SIZE, efa_rdm_ep->inject_msg_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
+		break;
+	case FI_OPT_INJECT_TAGGED_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_TAGGED_SIZE, efa_rdm_ep->inject_tagged_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
+		break;
+	case FI_OPT_INJECT_RMA_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_RMA_SIZE, efa_rdm_ep->inject_rma_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
+		break;
+	case FI_OPT_INJECT_ATOMIC_SIZE:
+		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_ATOMIC_SIZE, efa_rdm_ep->inject_atomic_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
+		break;
 	case FI_OPT_EFA_USE_DEVICE_RDMA:
 		if (optlen != sizeof(bool))
 			return -FI_EINVAL;
@@ -1584,7 +1718,7 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 		efa_rdm_ep->write_in_order_aligned_128_bytes = *(bool *)optval;
 		break;
 	default:
-		EFA_WARN(FI_LOG_EP_CTRL, "Unknown endpoint option\n");
+		EFA_INFO(FI_LOG_EP_CTRL, "Unknown endpoint option\n");
 		return -FI_ENOPROTOOPT;
 	}
 
@@ -1628,6 +1762,54 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 		*(int *)optval = efa_rdm_ep->hmem_p2p_opt;
 		*optlen = sizeof(int);
 		break;
+	case FI_OPT_MAX_MSG_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->max_msg_size;
+		*optlen = sizeof (size_t);
+		break;
+	case FI_OPT_MAX_TAGGED_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->max_tagged_size;
+		*optlen = sizeof (size_t);
+		break;
+	case FI_OPT_MAX_RMA_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->max_rma_size;
+		*optlen = sizeof (size_t);
+		break;
+	case FI_OPT_MAX_ATOMIC_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->max_atomic_size;
+		*optlen = sizeof (size_t);
+		break;
+	case FI_OPT_INJECT_MSG_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->inject_msg_size;
+		*optlen = sizeof (size_t);
+		break;
+	case FI_OPT_INJECT_TAGGED_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->inject_tagged_size;
+		*optlen = sizeof (size_t);
+		break;
+	case FI_OPT_INJECT_RMA_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->inject_rma_size;
+		*optlen = sizeof (size_t);
+		break;
+	case FI_OPT_INJECT_ATOMIC_SIZE:
+		if (*optlen < sizeof (size_t))
+			return -FI_ETOOSMALL;
+		*(size_t *) optval = efa_rdm_ep->inject_atomic_size;
+		*optlen = sizeof (size_t);
+		break;
 	case FI_OPT_EFA_EMULATED_READ:
 		if (*optlen < sizeof(bool))
 			return -FI_ETOOSMALL;
@@ -1665,7 +1847,7 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 		*optlen = sizeof(bool);
 		break;
 	default:
-		EFA_WARN(FI_LOG_EP_CTRL, "Unknown endpoint option\n");
+		EFA_INFO(FI_LOG_EP_CTRL, "Unknown endpoint option\n");
 		return -FI_ENOPROTOOPT;
 	}
 

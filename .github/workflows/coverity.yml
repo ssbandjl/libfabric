@@ -41,6 +41,7 @@ env:
     --enable-usnic
     --enable-verbs=rdma-core/build
     --enable-sm2
+    --enable-lpp
   RDMA_CORE_PATH: 'rdma-core/build'
   RDMA_CORE_VERSION: v34.1
 jobs:
@@ -51,7 +52,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.APT_PACKAGES }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
       - name: Download Coverity tools
         run: |
           wget https://scan.coverity.com/download/linux64 --post-data "token=${{ secrets.COVERITY_SCAN_TOKEN }}&project=ofiwg%2Flibfabric" -O coverity_tool.tgz
@@ -93,7 +94,7 @@ jobs:
             --form description="`$PWD/install/bin/fi_info -l`" \
             https://scan.coverity.com/builds?project=ofiwg%2Flibfabric
       - name: Upload build logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: coverity-build-log.txt
           path: cov-int/build-log.txt

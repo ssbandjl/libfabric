@@ -102,7 +102,8 @@ static void test_rdm_cq_read_bad_send_status(struct efa_resource *resource,
 	struct efa_rdm_peer *peer;
 	struct efa_rdm_cq *efa_rdm_cq;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	/* disable shm to force using efa device to send */
+	efa_unit_test_resource_construct_rdm_shm_disabled(resource);
 	efa_unit_test_buff_construct(&send_buff, resource, 4096 /* buff_size */);
 
 	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
@@ -111,12 +112,6 @@ static void test_rdm_cq_read_bad_send_status(struct efa_resource *resource,
 
 	efa_rdm_cq = container_of(resource->cq, struct efa_rdm_cq, util_cq.cq_fid.fid);
 	ibv_cqx = efa_rdm_cq->ibv_cq.ibv_cq_ex;
-	/* close shm_ep to force efa_rdm_ep to use efa device to send */
-	if (efa_rdm_ep->shm_ep) {
-		err = fi_close(&efa_rdm_ep->shm_ep->fid);
-		assert_int_equal(err, 0);
-		efa_rdm_ep->shm_ep = NULL;
-	}
 
 	ret = fi_getname(&resource->ep->fid, &raw_addr, &raw_addr_len);
 	assert_int_equal(ret, 0);
@@ -148,10 +143,12 @@ static void test_rdm_cq_read_bad_send_status(struct efa_resource *resource,
 	ibv_cqx->end_poll = &efa_mock_ibv_end_poll_check_mock;
 	ibv_cqx->read_opcode = &efa_mock_ibv_read_opcode_return_mock;
 	ibv_cqx->read_vendor_err = &efa_mock_ibv_read_vendor_err_return_mock;
+	ibv_cqx->read_qp_num = &efa_mock_ibv_read_qp_num_return_mock;
 	will_return(efa_mock_ibv_start_poll_use_saved_send_wr_with_mock_status, IBV_WC_GENERAL_ERR);
 	will_return(efa_mock_ibv_end_poll_check_mock, NULL);
 	will_return(efa_mock_ibv_read_opcode_return_mock, IBV_WC_SEND);
 	will_return(efa_mock_ibv_read_vendor_err_return_mock, vendor_error);
+	will_return(efa_mock_ibv_read_qp_num_return_mock, efa_rdm_ep->base_ep.qp->qp_num);
 	ret = fi_cq_read(resource->cq, &cq_entry, 1);
 	/* fi_cq_read() called efa_mock_ibv_start_poll_use_saved_send_wr(), which pulled one send_wr from g_ibv_submitted_wr_idv=_vec */
 	assert_int_equal(g_ibv_submitted_wr_id_cnt, 0);
@@ -232,6 +229,23 @@ void test_rdm_cq_read_bad_send_status_unresponsive_receiver_missing_peer_host_id
 
 /**
  * @brief test that RDM CQ's fi_cq_read()/fi_cq_readerr() works properly when rdma-core returns
+ * unreachable remote error for send.
+ *
+ * When send operation failed, fi_cq_read() should return -FI_EAVAIL, which means error available.
+ * then user should call fi_cq_readerr() to get an error CQ entry that contain error code.
+ *
+ * @param[in]	state		struct efa_resource that is managed by the framework
+ */
+void test_rdm_cq_read_bad_send_status_unreachable_receiver(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	test_rdm_cq_read_bad_send_status(resource,
+					 0x1234567812345678, 0x8765432187654321,
+					 EFA_IO_COMP_STATUS_LOCAL_ERROR_UNREACH_REMOTE);
+}
+
+/**
+ * @brief test that RDM CQ's fi_cq_read()/fi_cq_readerr() works properly when rdma-core returns
  * invalid qpn error for send.
  *
  * When send operation failed, fi_cq_read() should return -FI_EAVAIL, which means error available.
@@ -300,13 +314,13 @@ void test_ibv_cq_ex_read_bad_recv_status(struct efa_resource **state)
 	assert_non_null(pkt_entry);
 	efa_rdm_ep->efa_rx_pkts_posted = efa_rdm_ep_get_rx_pool_size(efa_rdm_ep);
 
-
 	efa_rdm_cq = container_of(resource->cq, struct efa_rdm_cq, util_cq.cq_fid.fid);
 
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->start_poll = &efa_mock_ibv_start_poll_return_mock;
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->end_poll = &efa_mock_ibv_end_poll_check_mock;
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_opcode = &efa_mock_ibv_read_opcode_return_mock;
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_vendor_err = &efa_mock_ibv_read_vendor_err_return_mock;
+	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_qp_num = &efa_mock_ibv_read_qp_num_return_mock;
 
 	will_return(efa_mock_ibv_start_poll_return_mock, 0);
 	will_return(efa_mock_ibv_end_poll_check_mock, NULL);
@@ -315,6 +329,7 @@ void test_ibv_cq_ex_read_bad_recv_status(struct efa_resource **state)
 	 * therefore use will_return_always()
 	 */
 	will_return_always(efa_mock_ibv_read_opcode_return_mock, IBV_WC_RECV);
+	will_return_always(efa_mock_ibv_read_qp_num_return_mock, efa_rdm_ep->base_ep.qp->qp_num);
 	will_return(efa_mock_ibv_read_vendor_err_return_mock, EFA_IO_COMP_STATUS_LOCAL_ERROR_UNRESP_REMOTE);
 	/* the recv error will not populate to application cq because it's an EFA internal error and
 	 * and not related to any application recv. Currently we can only read the error from eq.
@@ -418,16 +433,10 @@ void test_rdm_cq_create_error_handling(struct efa_resource **state)
 static
 int test_efa_rdm_cq_get_ibv_cq_poll_list_length(struct fid_cq *cq_fid)
 {
-	int i = 0;
-	struct dlist_entry *item;
 	struct efa_rdm_cq *cq;
 
 	cq = container_of(cq_fid, struct efa_rdm_cq, util_cq.cq_fid.fid);
-	dlist_foreach(&cq->ibv_cq_poll_list, item) {
-		i++;
-	}
-
-	return i;
+	return efa_unit_test_get_dlist_length(&cq->ibv_cq_poll_list);
 }
 
 /**
@@ -480,6 +489,31 @@ void test_efa_rdm_cq_ibv_cq_poll_list_separate_tx_rx_cq_single_ep(struct efa_res
 	fi_close(&rxcq->fid);
 }
 
+void test_efa_rdm_cq_post_initial_rx_pkts(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ep *efa_rdm_ep;
+	struct efa_rdm_cq *efa_rdm_cq;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	efa_rdm_cq = container_of(resource->cq, struct efa_rdm_cq, util_cq.cq_fid.fid);
+
+	/* At this time, rx pkts are not growed and posted */
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_to_post, 0);
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_posted, 0);
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_held, 0);
+
+	assert_false(efa_rdm_cq->initial_rx_to_all_eps_posted);
+	fi_cq_read(resource->cq, NULL, 0);
+
+	/* At this time, rx pool size number of rx pkts are posted */
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_posted, efa_rdm_ep_get_rx_pool_size(efa_rdm_ep));
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_to_post, 0);
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_held, 0);
+
+	assert_true(efa_rdm_cq->initial_rx_to_all_eps_posted);
+}
 #if HAVE_EFADV_CQ_EX
 /**
  * @brief Construct an RDM endpoint and receive an eager MSG RTM packet.
@@ -568,6 +602,8 @@ static void test_impl_ibv_cq_ex_read_unknow_peer_ah(struct efa_resource *resourc
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_slid = &efa_mock_ibv_read_slid_return_mock;
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_byte_len = &efa_mock_ibv_read_byte_len_return_mock;
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_opcode = &efa_mock_ibv_read_opcode_return_mock;
+	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_qp_num = &efa_mock_ibv_read_qp_num_return_mock;
+	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_wc_flags = &efa_mock_ibv_read_wc_flags_return_mock;
 	efa_rdm_cq->ibv_cq.ibv_cq_ex->read_src_qp = &efa_mock_ibv_read_src_qp_return_mock;
 
 	if (support_efadv_cq) {
@@ -588,6 +624,8 @@ static void test_impl_ibv_cq_ex_read_unknow_peer_ah(struct efa_resource *resourc
 	will_return(efa_mock_ibv_read_slid_return_mock, 0xffff); // slid=0xffff(-1) indicates an unknown AH
 	will_return(efa_mock_ibv_read_byte_len_return_mock, pkt_entry->pkt_size);
 	will_return_maybe(efa_mock_ibv_read_opcode_return_mock, IBV_WC_RECV);
+	will_return_maybe(efa_mock_ibv_read_qp_num_return_mock, efa_rdm_ep->base_ep.qp->qp_num);
+	will_return_maybe(efa_mock_ibv_read_wc_flags_return_mock, 0);
 	will_return_maybe(efa_mock_ibv_read_src_qp_return_mock, raw_addr.qpn);
 
 	/* Post receive buffer */

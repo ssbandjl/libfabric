@@ -182,6 +182,9 @@ int efa_user_info_get_dgram(uint32_t version, const char *node, const char *serv
 	for (i = 0; i < g_device_cnt; ++i) {
 		prov_info_dgram = g_device_list[i].dgram_info;
 
+		if (!efa_env_allows_nic(prov_info_dgram->nic->device_attr->name))
+			continue;
+
 		ret = efa_prov_info_compare_src_addr(node, flags, hints, prov_info_dgram);
 		if (ret)
 			continue;
@@ -408,12 +411,11 @@ int efa_user_info_alter_rdm(int version, struct fi_info *info, const struct fi_i
 	 */
 	if (hints) {
 		if (hints->tx_attr) {
-			/* efa device doesn't have ordering (EFA_MSG_ORDER == FI_ORDER_NONE).
+			/* efa device doesn't have ordering,
 			 * if apps request an ordering that is relaxed than
 			 * what provider supports, we should respect that.
-			 * This is specially true for FI_ORDER_NONE:
-			 * No ordering is specified. This value may be used as input in order to obtain
-			 * the default message order supported by the provider.
+			 * If no ordering is specified,
+			 * the default message order supported by the provider is returned.
 			 */
 			info->tx_attr->msg_order &= hints->tx_attr->msg_order;
 			atomic_ordering = FI_ORDER_ATOMIC_RAR | FI_ORDER_ATOMIC_RAW |
@@ -424,12 +426,11 @@ int efa_user_info_alter_rdm(int version, struct fi_info *info, const struct fi_i
 		}
 
 		if (hints->rx_attr) {
-			/* efa device doesn't have ordering (EFA_MSG_ORDER == FI_ORDER_NONE).
+			/* efa device doesn't have ordering,
 			 * if apps request an ordering that is relaxed than
 			 * what provider supports, we should respect that.
-			 * This is specially true for FI_ORDER_NONE:
-			 * No ordering is specified. This value may be used as input in order to obtain
-			 * the default message order supported by the provider.
+			 * If no ordering is specified,
+			 * the default message order supported by the provider is returned.
 			 */
 			info->rx_attr->msg_order &= hints->rx_attr->msg_order;
 		}
@@ -441,7 +442,6 @@ int efa_user_info_alter_rdm(int version, struct fi_info *info, const struct fi_i
 
 		/* We only support manual progress for RMA operations */
 		if (hints->caps & FI_RMA) {
-			info->domain_attr->control_progress = FI_PROGRESS_MANUAL;
 			info->domain_attr->data_progress = FI_PROGRESS_MANUAL;
 		}
 
@@ -472,15 +472,6 @@ int efa_user_info_alter_rdm(int version, struct fi_info *info, const struct fi_i
 			info->ep_attr->msg_prefix_size = EFA_RDM_MSG_PREFIX_SIZE;
 			EFA_INFO(FI_LOG_CORE,
 				"FI_MSG_PREFIX size = %ld\n", info->ep_attr->msg_prefix_size);
-		}
-
-		/* Handle other EP attributes */
-		if (hints->ep_attr) {
-			if (hints->ep_attr->max_msg_size) {
-				info->ep_attr->max_msg_size =
-					MIN(info->ep_attr->max_msg_size,
-					    hints->ep_attr->max_msg_size);
-			}
 		}
 	}
 
@@ -540,6 +531,9 @@ int efa_user_info_get_rdm(uint32_t version, const char *node,
 	     prov_info = prov_info->next) {
 
 		if (prov_info->ep_attr->type != FI_EP_RDM)
+			continue;
+
+		if (!efa_env_allows_nic(prov_info->nic->device_attr->name))
 			continue;
 
 		ret = efa_prov_info_compare_src_addr(node, flags, hints, prov_info);

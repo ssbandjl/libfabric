@@ -91,7 +91,7 @@ static enum fi_op get_fi_op(char *op)
 		return FI_MSWAP;
 	else {
 		fprintf(stderr, "Not a valid atomic operation\n");
-		return FI_ATOMIC_OP_LAST;
+		return OFI_ATOMIC_OP_CNT;
 	}
 }
 
@@ -342,7 +342,7 @@ static int run_ops(void)
 {
 	int ret;
 
-	for (op_type = FI_MIN; op_type < FI_ATOMIC_OP_LAST; op_type++) {
+	for (op_type = FI_MIN; op_type < OFI_ATOMIC_OP_CNT; op_type++) {
 		ret = run_op();
 		if (ret && ret != -FI_ENOSYS && ret != -FI_EOPNOTSUPP) {
 			FT_PRINTERR("run_op", ret);
@@ -376,9 +376,7 @@ static uint64_t get_mr_key()
 {
 	static uint64_t user_key = FT_MR_KEY + 1;
 
-	return ((fi->domain_attr->mr_mode == FI_MR_BASIC) ||
-		(fi->domain_attr->mr_mode & FI_MR_PROV_KEY)) ?
-		0 : user_key++;
+	return fi->domain_attr->mr_mode & FI_MR_PROV_KEY ? 0 : user_key++;
 }
 
 static int alloc_ep_res(struct fi_info *fi)
@@ -464,7 +462,7 @@ int main(int argc, char **argv)
 			} else {
 				run_all_ops = 0;
 				op_type = get_fi_op(optarg);
-				if (op_type == FI_ATOMIC_OP_LAST) {
+				if (op_type == OFI_ATOMIC_OP_CNT) {
 					print_opts_usage(argv[0]);
 					return EXIT_FAILURE;
 				}

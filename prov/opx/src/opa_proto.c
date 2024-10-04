@@ -6,7 +6,7 @@
   GPL LICENSE SUMMARY
 
   Copyright(c) 2015 Intel Corporation.
-  Copyright(C) 2021-2023 Cornelis Networks.
+  Copyright(C) 2021-2024 Cornelis Networks.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -23,7 +23,7 @@
   BSD LICENSE
 
   Copyright(c) 2015 Intel Corporation.
-  Copyright(c) 2021-2022 Cornelis Networks.
+  Copyright(c) 2021-2024 Cornelis Networks.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -71,6 +71,7 @@
 
 #include "opa_user_gen1.h"
 #include "opa_udebug.h"
+#include "rdma/opx/opx_hfi1_pre_cn5000.h"
 
 #include <sched.h>
 
@@ -147,7 +148,14 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 
 
 	/* 7. Map RXE per-context CSRs */
-	sz = HFI_MMAP_PGSIZE;
+	/* JKR sz is 8K. WFR sz is 4K. */
+	if(OPX_HFI1_WFR == opx_hfi1_check_hwversion(binfo->hw_version)) {
+		sz = HFI_MMAP_PGSIZE;
+	} else {
+		/* JKR prefers 8K page alignment for possible
+		   future work with 8K virtual memory pages */
+		sz = 2*HFI_MMAP_PGSIZE;
+	}
 	HFI_MMAP_ERRCHECK(fd, binfo, user_regbase, sz, PROT_WRITE|PROT_READ);
 	arrsz[USER_REGBASE] = sz;
 	/* Set up addresses for optimized register writeback routines.
@@ -417,8 +425,8 @@ static struct _hfi_ctrl *opx_hfi_userinit_internal(int fd, bool skip_affinity,
 	cinfo = &spctrl->ctxt_info;
 	binfo = &spctrl->base_info;
 
-	_HFI_PDBG("CONTEXT INIT uinfo: ver %x, alg %d, subc_cnt %d, subc_id %d\n",
-		  uinfo->userversion, uinfo->hfi1_alg,
+	_HFI_PDBG("CONTEXT INIT uinfo: ver %#x, pad %d, alg %d, subc_cnt %d, subc_id %d\n",
+		  uinfo->userversion, uinfo->pad, uinfo->hfi1_alg,
 		  uinfo->subctxt_cnt, uinfo->subctxt_id);
 
 	/* 1. ask driver to assign context to current process */
@@ -443,6 +451,9 @@ static struct _hfi_ctrl *opx_hfi_userinit_internal(int fd, bool skip_affinity,
 		uinfo_new.subctxt_cnt = uinfo->subctxt_cnt;
 		uinfo_new.subctxt_id  = uinfo->subctxt_id;
 		memcpy(uinfo_new.uuid,uinfo->uuid,sizeof(uinfo_new.uuid));
+		_HFI_PDBG("CONTEXT INIT uinfo_new: ver %#x, pad %d, subc_cnt %d, subc_id %d\n",
+			  uinfo_new.userversion, uinfo_new.pad,
+			  uinfo_new.subctxt_cnt, uinfo_new.subctxt_id);
 	}
 	else
 	{
@@ -480,6 +491,9 @@ static struct _hfi_ctrl *opx_hfi_userinit_internal(int fd, bool skip_affinity,
 		memcpy(uinfo->uuid,uinfo_new.uuid,sizeof(uinfo_new.uuid));
 	}
 #endif
+	_HFI_PDBG("CONTEXT INIT output uinfo: ver %#x, pad %d, alg %d, subc_cnt %d, subc_id %d\n",
+		  uinfo->userversion, uinfo->pad, uinfo->hfi1_alg,
+		  uinfo->subctxt_cnt, uinfo->subctxt_id);
 
 	/* 2. get context info from driver */
 	c.type = OPX_HFI_CMD_CTXT_INFO;
@@ -607,15 +621,39 @@ static struct _hfi_ctrl *opx_hfi_userinit_internal(int fd, bool skip_affinity,
 	spctrl->fd = fd;
 	spctrl->__hfi_pg_sz = __hfi_pg_sz;
 	spctrl->__hfi_unit = cinfo->unit;
-	/*
-	 * driver should provide the port where the context is opened for, But
-	 * OPA driver does not have port interface to psm because there is only
-	 * one port. So we hardcode the port to 1 here. When we work on the
-	 * version of PSM for the successor to OPA, we should have port returned
-	 * from driver and will be set accordingly.
-	 */
-	/* spctrl->__hfi_port = cinfo->port; */
-	spctrl->__hfi_port = 1;
+
+	/* Initial port configuration */
+	int port = opx_get_port(uinfo);
+
+	/* If not pre-selected, check envvar */
+	if ((port == OPX_PORT_NUM_ANY) && (getenv("HFI_PORT"))) {
+		port = atoi(getenv("HFI_PORT"));
+		/* No HFI1 checks here.
+		 * That will happen below where invalid
+		 * port (lids) should fail to lowest
+		 * working port (likely 1).
+		 */
+		_HFI_INFO("HFI_PORT %d/%s requested.\n", port, getenv("HFI_PORT"));
+	}
+
+	if (port == OPX_PORT_NUM_ANY) {
+		int p,rv;
+		/* Use first working port */
+		for (p = OPX_MIN_PORT; p <= OPX_MAX_PORT; p++) {
+			_HFI_DBG("units %d, port %d, MIN %d, MAX %d\n", spctrl->__hfi_unit, p, OPX_MIN_PORT, OPX_MAX_PORT);
+			if ((rv=opx_hfi_get_port_lid(spctrl->__hfi_unit, p)) > 0) {
+				port = p;
+				break;
+			}
+			_HFI_DBG("rv %d\n", rv);
+		}
+	}
+	if((port > OPX_MAX_PORT) | (port < OPX_MIN_PORT)) {
+		_HFI_ERROR("Active port not found\n");
+		abort();
+	}
+
+	spctrl->__hfi_port = port;
 	spctrl->__hfi_tidegrcnt = cinfo->egrtids;
 	spctrl->__hfi_tidexpcnt = cinfo->rcvtids - cinfo->egrtids;
 

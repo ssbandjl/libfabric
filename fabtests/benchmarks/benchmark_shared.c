@@ -63,11 +63,15 @@ void ft_parse_benchmark_opts(int op, char *optarg)
 		ft_force_prefix(hints, &opts);
 		break;
 	case 'j':
-		hints->tx_attr->inject_size = atoi(optarg);
+		opts.inject_size = atoi(optarg);
+		hints->tx_attr->inject_size = opts.inject_size;
 		inject_size_set = 1;
 		break;
 	case 'W':
 		opts.window_size = atoi(optarg);
+		break;
+	case 'r':
+		opts.options |= FT_OPT_NO_PRE_POSTED_RX;
 		break;
 	default:
 		break;
@@ -83,21 +87,16 @@ void ft_benchmark_usage(void)
 			"* The following condition is required to have at least "
 			"one window\nsize # of messsages to be sent: "
 			"# of iterations > window size");
+	FT_PRINT_OPTS_USAGE("-r", "Do not pre post RX buffers");
+	FT_PRINT_OPTS_USAGE("", "Only the following tests support this option for now:");
+	FT_PRINT_OPTS_USAGE("", "\tfi_rdm_tagged_pingpong");
+	FT_PRINT_OPTS_USAGE("", "\tfi_rdm_pingpong");
 }
 
-int pingpong(void)
+/* Pingpong latency test with pre-posted receive buffers. */
+static int pingpong_pre_posted_rx(size_t inject_size)
 {
-	int ret, i, inject_size;
-
-	inject_size = inject_size_set ?
-			hints->tx_attr->inject_size : fi->tx_attr->inject_size;
-
-	if (opts.options & FT_OPT_ENABLE_HMEM)
-		inject_size = 0;
-
-	ret = ft_sync();
-	if (ret)
-		return ret;
+	int ret, i;
 
 	if (opts.dst_addr) {
 		for (i = 0; i < opts.iterations + opts.warmup_iterations; i++) {
@@ -105,9 +104,11 @@ int pingpong(void)
 				ft_start();
 
 			if (opts.transfer_size <= inject_size)
-				ret = ft_inject(ep, remote_fi_addr, opts.transfer_size);
+				ret = ft_inject(ep, remote_fi_addr,
+						opts.transfer_size);
 			else
-				ret = ft_tx(ep, remote_fi_addr, opts.transfer_size, &tx_ctx);
+				ret = ft_tx(ep, remote_fi_addr,
+					    opts.transfer_size, &tx_ctx);
 			if (ret)
 				return ret;
 
@@ -125,14 +126,128 @@ int pingpong(void)
 				return ret;
 
 			if (opts.transfer_size <= inject_size)
-				ret = ft_inject(ep, remote_fi_addr, opts.transfer_size);
+				ret = ft_inject(ep, remote_fi_addr,
+						opts.transfer_size);
 			else
-				ret = ft_tx(ep, remote_fi_addr, opts.transfer_size, &tx_ctx);
+				ret = ft_tx(ep, remote_fi_addr,
+					    opts.transfer_size, &tx_ctx);
 			if (ret)
 				return ret;
 		}
 	}
 	ft_stop();
+
+	return FI_SUCCESS;
+}
+
+/* Pingpong latency test without pre-posted receive buffers. */
+static int pingpong_no_pre_posted_rx(size_t inject_size)
+{
+	int ret, i;
+
+	if (opts.dst_addr) {
+		for (i = 0; i < opts.iterations + opts.warmup_iterations; i++) {
+			if (i == opts.warmup_iterations)
+				ft_start();
+
+			if (opts.transfer_size <= inject_size)
+				ret = ft_inject(ep, remote_fi_addr,
+						opts.transfer_size);
+			else
+				ret = ft_tx(ep, remote_fi_addr,
+					    opts.transfer_size, &tx_ctx);
+			if (ret)
+				return ret;
+
+			ret = ft_post_rx(ep, opts.transfer_size, &rx_ctx);
+			if (ret)
+				return ret;
+
+			ret = ft_get_rx_comp(rx_seq);
+			if (ret)
+				return ret;
+		}
+	} else {
+		for (i = 0; i < opts.iterations + opts.warmup_iterations; i++) {
+			if (i == opts.warmup_iterations)
+				ft_start();
+
+			ret = ft_post_rx(ep, opts.transfer_size, &rx_ctx);
+			if (ret)
+				return ret;
+
+			ret = ft_get_rx_comp(rx_seq);
+			if (ret)
+				return ret;
+
+			if (ft_check_opts(FT_OPT_VERIFY_DATA | FT_OPT_ACTIVE)) {
+				ret = ft_check_buf((char *) rx_buf + ft_rx_prefix_size(),
+						   opts.transfer_size);
+				if (ret)
+					return ret;
+			}
+
+			if (opts.transfer_size <= inject_size)
+				ret = ft_inject(ep, remote_fi_addr,
+						opts.transfer_size);
+			else
+				ret = ft_tx(ep, remote_fi_addr,
+					    opts.transfer_size, &tx_ctx);
+			if (ret)
+				return ret;
+		}
+	}
+	ft_stop();
+
+	return FI_SUCCESS;
+}
+
+int pingpong(void)
+{
+	int ret;
+	size_t inject_size = fi->tx_attr->inject_size;
+
+	ret = fi_getopt(&ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_MSG_SIZE,
+			&inject_size, &(size_t){sizeof inject_size});
+	if (ret && ret != -FI_ENOPROTOOPT) {
+		FT_PRINTERR("fi_getopt(FI_OPT_INJECT_MSG_SIZE)", ret);
+		return ret;
+	}
+
+	if (inject_size_set)
+		inject_size = opts.inject_size;
+
+	if (opts.options & FT_OPT_ENABLE_HMEM)
+		inject_size = 0;
+
+	if (ft_check_opts(FT_OPT_NO_PRE_POSTED_RX)) {
+		if (ft_check_opts(FT_OPT_OOB_SYNC)) {
+			ret = ft_sync_oob();
+			if (ret)
+				return ret;
+		} else {
+			/* Repost RX buffers to support inband sync. */
+			ret = ft_post_rx(ep, rx_size, &rx_ctx);
+			if (ret)
+				return ret;
+
+			ret = ft_sync_inband(false);
+			if (ret)
+				return ret;
+		}
+
+		ret = pingpong_no_pre_posted_rx(inject_size);
+		if (ret)
+			return ret;
+	} else {
+		ret = ft_sync();
+		if (ret)
+			return ret;
+
+		ret = pingpong_pre_posted_rx(inject_size);
+		if (ret)
+			return ret;
+	}
 
 	if (opts.machr)
 		show_perf_mr(opts.transfer_size, opts.iterations, &start, &end, 2,
@@ -143,12 +258,48 @@ int pingpong(void)
 	return 0;
 }
 
+int run_pingpong(void)
+{
+	int i, ret = 0;
+
+	ret = ft_init_fabric();
+	if (ret)
+		return ret;
+
+	if (!(opts.options & FT_OPT_SIZE)) {
+		for (i = 0; i < TEST_CNT; i++) {
+			if (!ft_use_size(i, opts.sizes_enabled))
+				continue;
+			opts.transfer_size = test_size[i].size;
+			init_test(&opts, test_name, sizeof(test_name));
+			ret = pingpong();
+			if (ret)
+				return ret;
+		}
+	} else {
+		init_test(&opts, test_name, sizeof(test_name));
+		ret = pingpong();
+		if (ret)
+			return ret;
+	}
+
+	return ft_finalize();
+}
+
 int pingpong_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote)
 {
-	int ret, i, inject_size;
+	int ret, i;
+	size_t inject_size = fi->tx_attr->inject_size;
 
-	inject_size = inject_size_set ?
-			hints->tx_attr->inject_size : fi->tx_attr->inject_size;
+	ret = fi_getopt(&ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_RMA_SIZE,
+			&inject_size, &(size_t){sizeof inject_size});
+	if (ret && ret != -FI_ENOPROTOOPT) {
+		FT_PRINTERR("fi_getopt(FI_OPT_INJECT_RMA_SIZE)", ret);
+		return ret;
+	}
+
+	if (inject_size_set)
+		inject_size = opts.inject_size;
 
 	if (ft_check_opts(FT_OPT_ENABLE_HMEM))
 		inject_size = 0;
@@ -158,18 +309,20 @@ int pingpong_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote)
 	if (ft_check_opts(FT_OPT_VERIFY_DATA))
 		inject_size = 0;
 
-	ret = ft_sync();
-	if (ret)
-		return ret;
-
 	if (opts.transfer_size == 0) {
 		FT_ERR("Zero-sized transfers not supported");
 		return EXIT_FAILURE;
 	}
 
-	/* Init rx_buf with invalid iteration number */
+	/* Init rx_buf with invalid iteration number.
+	 * This must be done before the sender sends any data.
+	 */
 	if (rma_op == FT_RMA_WRITE)
 		*(rx_buf + opts.transfer_size - 1) = (char)-1;
+
+	ret = ft_sync();
+	if (ret)
+		return ret;
 
 	if (opts.dst_addr) {
 		for (i = 0; i < opts.iterations + opts.warmup_iterations; i++) {
@@ -272,12 +425,31 @@ static int rma_bw_rx_comp()
 	return ft_tx(ep, remote_fi_addr, FT_RMA_SYNC_MSG_BYTES, &tx_ctx);
 }
 
+static int set_fi_more_flag(int i, int j, int flags)
+{
+	if (j < opts.window_size - 1 && i >= opts.warmup_iterations &&
+	    i < opts.iterations + opts.warmup_iterations - 1) {
+		flags |= FI_MORE;
+	} else {
+		flags &= ~FI_MORE;
+	}
+	return flags;
+}
+
 int bandwidth(void)
 {
-	int ret, i, j, inject_size;
+	int ret, i, j, flags = 0;
+	size_t inject_size = fi->tx_attr->inject_size;
 
-	inject_size = inject_size_set ?
-			hints->tx_attr->inject_size : fi->tx_attr->inject_size;
+	ret = fi_getopt(&ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_MSG_SIZE,
+			&inject_size, &(size_t){sizeof inject_size});
+	if (ret && ret != -FI_ENOPROTOOPT) {
+		FT_PRINTERR("fi_getopt(FI_OPT_INJECT_MSG_SIZE)", ret);
+		return ret;
+	}
+
+	if (inject_size_set)
+		inject_size = opts.inject_size;
 
 	if (opts.options & FT_OPT_ENABLE_HMEM)
 		inject_size = 0;
@@ -306,8 +478,14 @@ int bandwidth(void)
 			}
 			if (opts.transfer_size <= inject_size) {
 				ret = ft_post_inject_buf(ep, remote_fi_addr,
-						opts.transfer_size,
+						opts.transfer_size, NO_CQ_DATA,
 						tx_ctx_arr[j].buf, tx_seq);
+			} else if (opts.use_fi_more) {
+				flags = set_fi_more_flag(i, j, flags);
+				ret = ft_sendmsg(ep, remote_fi_addr,
+						tx_ctx_arr[j].buf,
+						opts.transfer_size,
+						&tx_ctx_arr[j].context, flags);
 			} else {
 				ret = ft_post_tx_buf(ep, remote_fi_addr,
 						opts.transfer_size, NO_CQ_DATA,
@@ -391,11 +569,18 @@ static int bw_rma_comp(enum ft_rma_opcodes rma_op, int num_completions)
 
 int bandwidth_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote)
 {
-	int ret, i, j, inject_size;
-	size_t offset;
+	int ret, i, j, flags = 0;
+	size_t offset, inject_size = fi->tx_attr->inject_size;
 
-	inject_size = inject_size_set ?
-			hints->tx_attr->inject_size: fi->tx_attr->inject_size;
+	ret = fi_getopt(&ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_RMA_SIZE,
+			&inject_size, &(size_t){sizeof inject_size});
+	if (ret && ret != -FI_ENOPROTOOPT) {
+		FT_PRINTERR("fi_getopt(FI_OPT_INJECT_RMA_SIZE)", ret);
+		return ret;
+	}
+
+	if (inject_size_set)
+		inject_size = opts.inject_size;
 
 	if (ft_check_opts(FT_OPT_ENABLE_HMEM))
 		inject_size = 0;
@@ -435,6 +620,12 @@ int bandwidth_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote)
 			if (opts.transfer_size <= inject_size) {
 				ret = ft_post_rma_inject(FT_RMA_WRITE, tx_buf + offset,
 						opts.transfer_size, remote);
+			} else if (opts.use_fi_more) {
+				flags = set_fi_more_flag(i, j, flags);
+				ret = ft_post_rma_writemsg(
+						tx_buf + offset,
+						opts.transfer_size, remote,
+						&tx_ctx_arr[j].context, flags);
 			} else {
 				ret = ft_post_rma(FT_RMA_WRITE, tx_buf + offset,
 						opts.transfer_size, remote,
@@ -458,6 +649,13 @@ int bandwidth_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote)
 							tx_buf + offset,
 							opts.transfer_size,
 							remote);
+				} else if (opts.use_fi_more) {
+					flags = set_fi_more_flag(i, j, flags);
+					flags |= FI_REMOTE_CQ_DATA;
+					ret = ft_post_rma_writemsg(
+							tx_buf + offset,
+							opts.transfer_size, remote,
+							&tx_ctx_arr[j].context, flags);
 				} else {
 					ret = ft_post_rma(FT_RMA_WRITEDATA,
 							tx_buf + offset,

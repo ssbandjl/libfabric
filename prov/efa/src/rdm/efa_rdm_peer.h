@@ -24,7 +24,19 @@ OFI_DECL_RECVWIN_BUF(struct efa_rdm_pke*, efa_rdm_robuf, uint32_t);
  */
 #define EFA_RDM_PEER_HANDSHAKE_QUEUED      BIT_ULL(5)
 
+struct efa_rdm_peer_user_recv_qp
+{
+	uint32_t qpn;
+	uint32_t qkey;
+};
+
+struct efa_rdm_peer_overflow_pke_list_entry {
+	struct dlist_entry entry;
+	struct efa_rdm_pke *pkt_entry;
+};
+
 struct efa_rdm_peer {
+	struct efa_rdm_ep *ep;		/**< local ep */
 	bool is_self;			/**< flag indicating whether the peer is the endpoint itself */
 	bool is_local;			/**< flag indicating wehther the peer is local (on the same instance) */
 	uint32_t device_version;	/**< EFA device version */
@@ -46,18 +58,21 @@ struct efa_rdm_peer {
 	uint64_t rnr_backoff_begin_ts;	/**< timestamp for RNR backoff period begin */
 	uint64_t rnr_backoff_wait_time;	/**< how long the RNR backoff period last */
 	int rnr_queued_pkt_cnt;		/**< queued RNR packet count */
-	struct dlist_entry rnr_backoff_entry;	/**< linked to efa_rdm_ep peer_backoff_list */
-	struct dlist_entry handshake_queued_entry; /**< linked with efa_rdm_ep->handshake_queued_peer_list */
-	struct dlist_entry rx_unexp_list; /**< a list of unexpected untagged rxe for this peer */
-	struct dlist_entry rx_unexp_tagged_list; /**< a list of unexpected tagged rxe for this peer */
+	struct dlist_entry rnr_backoff_entry;	/**< linked to efa_domain->peer_backoff_list */
+	struct dlist_entry handshake_queued_entry; /**< linked with efa_domain->handshake_queued_peer_list */
 	struct dlist_entry txe_list; /**< a list of txe related to this peer */
 	struct dlist_entry rxe_list; /**< a list of rxe relased to this peer */
+	struct dlist_entry overflow_pke_list; /**< a list of out-of-order pke that overflow the current recvwin */
 
 	/**
 	 * @brief number of bytes that has been sent as part of runting protocols
 	 * @details this value is capped by efa_env.efa_runt_size
 	 */
 	int64_t num_runt_bytes_in_flight;
+	/**
+	 * only valid when (extra_info[0] & EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP) is non-zero
+	 */
+	struct efa_rdm_peer_user_recv_qp user_recv_qp;
 };
 
 /**
@@ -238,6 +253,22 @@ bool efa_rdm_peer_need_connid(struct efa_rdm_peer *peer)
 	       (peer->extra_info[0] & EFA_RDM_EXTRA_REQUEST_CONNID_HEADER);
 }
 
+/**
+ * @brief determine if both peers support zero hdr data transfer
+ *
+ * This function can only return true if a handshake packet has already been
+ * exchanged, and the peer set the EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP flag.
+ * @params[in]		ep		Endpoint for communication with peer
+ * @params[in]		peer		An EFA peer
+ * @return		boolean		both self and peer support RDMA read
+ */
+static inline
+bool efa_both_support_zero_hdr_data_transfer(struct efa_rdm_ep *ep, struct efa_rdm_peer *peer)
+{
+	return ((ep->extra_info[0] & EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP) &&
+		(peer->extra_info[0] & EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP));
+}
+
 struct efa_conn;
 
 void efa_rdm_peer_construct(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep, struct efa_conn *conn);
@@ -245,6 +276,10 @@ void efa_rdm_peer_construct(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep, st
 void efa_rdm_peer_destruct(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep);
 
 int efa_rdm_peer_reorder_msg(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep, struct efa_rdm_pke *pkt_entry);
+
+int efa_rdm_peer_recvwin_queue_or_append_pke(struct efa_rdm_pke *pkt_entry, uint32_t msg_id, struct efa_rdm_robuf *robuf);
+
+void efa_rdm_peer_move_overflow_pke_to_recvwin(struct efa_rdm_peer *peer);
 
 void efa_rdm_peer_proc_pending_items_in_robuf(struct efa_rdm_peer *peer, struct efa_rdm_ep *ep);
 

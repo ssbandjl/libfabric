@@ -117,9 +117,13 @@ fi_addr_t efa_av_reverse_lookup_rdm(struct efa_av *av, uint16_t ahn, uint16_t qp
 	if (OFI_UNLIKELY(!cur_entry))
 		return FI_ADDR_NOTAVAIL;
 
-	if (!pkt_entry) {
-		/* There is no packet entry to extract connid from when we get an
-		   IBV_WC_RECV_RDMA_WITH_IMM completion from rdma-core. */
+	if (!pkt_entry || (pkt_entry->alloc_type == EFA_RDM_PKE_FROM_USER_RX_POOL)) {
+		/**
+		 * There is no packet entry to extract connid from when we get an
+		 * IBV_WC_RECV_RDMA_WITH_IMM completion from rdma-core.
+		 * Or the pkt_entry is allocated from a buffer user posted that
+		 * doesn't expect any pkt hdr.
+		 */
 		return cur_entry->conn->fi_addr;
 	}
 
@@ -674,16 +678,9 @@ int efa_av_insert(struct fid_av *av_fid, const void *addr,
 
 	/* cancel remaining request and log to event queue */
 	for (; i < count ; i++) {
-		if (av->util_av.eq)
-			ofi_av_write_event(&av->util_av, i, FI_ECANCELED,
-					context);
 		if (fi_addr)
 			fi_addr[i] = FI_ADDR_NOTAVAIL;
 	}
-
-	/* update success to event queue */
-	if (av->util_av.eq)
-		ofi_av_write_event(&av->util_av, success_cnt, 0, context);
 
 	return success_cnt;
 }
@@ -764,10 +761,6 @@ static int efa_av_remove(struct fid_av *av_fid, fi_addr_t *fi_addr,
 	if (i < count) {
 		/* something went wrong, so err cannot be zero */
 		assert(err);
-		if (av->util_av.eq) {
-			for (; i < count; ++i)
-				ofi_av_write_event(&av->util_av, i, FI_ECANCELED, NULL);
-		}
 	}
 
 	ofi_mutex_unlock(&av->util_av.lock);
@@ -836,15 +829,10 @@ static int efa_av_close(struct fid *fid)
 	return err;
 }
 
-static int efa_av_bind(struct fid *fid, struct fid *bfid, uint64_t flags)
-{
-	return ofi_av_bind(fid, bfid, flags);
-}
-
 static struct fi_ops efa_av_fi_ops = {
 	.size = sizeof(struct fi_ops),
 	.close = efa_av_close,
-	.bind = efa_av_bind,
+	.bind = fi_no_bind,
 	.control = fi_no_control,
 	.ops_open = fi_no_ops_open,
 };

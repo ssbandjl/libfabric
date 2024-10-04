@@ -31,16 +31,17 @@ static size_t efa_max_eager_msg_size_with_largest_header(struct efa_domain *efa_
 static int efa_domain_hmem_info_init_protocol_thresholds(struct efa_domain *efa_domain, enum fi_hmem_iface iface)
 {
 	struct efa_hmem_info *info = &efa_domain->hmem_info[iface];
+	size_t tmp_value;
 
-	/* Fall back to FI_HMEM_SYSTEM initialization logic when p2p is unavailable */
-	if (!info->p2p_supported_by_device)
+	/* Fall back to FI_HMEM_SYSTEM initialization logic when p2p is
+	 * unavailable */
+	if (ofi_hmem_p2p_disabled() || !info->p2p_supported_by_device)
 		iface = FI_HMEM_SYSTEM;
 
 	switch (iface) {
 	case FI_HMEM_SYSTEM:
 		/* We have not yet tested runting with system memory */
 		info->runt_size = 0;
-		info->max_intra_eager_size = SHM_MAX_INJECT_SIZE;
 		info->max_medium_msg_size = EFA_DEFAULT_INTER_MAX_MEDIUM_MESSAGE_SIZE;
 		info->min_read_msg_size = EFA_DEFAULT_INTER_MIN_READ_MESSAGE_SIZE;
 		info->min_read_write_size = EFA_DEFAULT_INTER_MIN_READ_WRITE_SIZE;
@@ -51,30 +52,52 @@ static int efa_domain_hmem_info_init_protocol_thresholds(struct efa_domain *efa_
 		break;
 	case FI_HMEM_CUDA:
 		info->runt_size = EFA_DEFAULT_RUNT_SIZE;
-		info->max_intra_eager_size = cuda_is_gdrcopy_enabled() ? EFA_DEFAULT_INTRA_MAX_GDRCOPY_FROM_DEV_SIZE : 0;
 		info->max_medium_msg_size = 0;
 		info->min_read_msg_size = efa_max_eager_msg_size_with_largest_header(efa_domain) + 1;
 		info->min_read_write_size = efa_max_eager_msg_size_with_largest_header(efa_domain) + 1;
 		fi_param_get_size_t(&efa_prov, "runt_size", &info->runt_size);
 		fi_param_get_size_t(&efa_prov, "inter_min_read_message_size", &info->min_read_msg_size);
 		fi_param_get_size_t(&efa_prov, "inter_min_read_write_size", &info->min_read_write_size);
+		if (-FI_ENODATA != fi_param_get(&efa_prov, "inter_max_medium_message_size", &tmp_value)) {
+			EFA_WARN(FI_LOG_DOMAIN,
+			         "The environment variable FI_EFA_INTER_MAX_MEDIUM_MESSAGE_SIZE was set, "
+			         "but EFA HMEM via Cuda API only supports eager and runting read protocols. "
+			         "The variable will not modify CUDA memory run config.\n");
+		}
 		break;
 	case FI_HMEM_NEURON:
 		info->runt_size = EFA_NEURON_RUNT_SIZE;
-		info->max_intra_eager_size = 0;
 		info->max_medium_msg_size = 0;
 		info->min_read_msg_size = efa_max_eager_msg_size_with_largest_header(efa_domain) + 1;
 		info->min_read_write_size = efa_max_eager_msg_size_with_largest_header(efa_domain) + 1;
 		fi_param_get_size_t(&efa_prov, "runt_size", &info->runt_size);
 		fi_param_get_size_t(&efa_prov, "inter_min_read_message_size", &info->min_read_msg_size);
 		fi_param_get_size_t(&efa_prov, "inter_min_read_write_size", &info->min_read_write_size);
+		if (-FI_ENODATA != fi_param_get(&efa_prov, "inter_max_medium_message_size", &tmp_value)) {
+			EFA_WARN(FI_LOG_DOMAIN,
+			         "The environment variable FI_EFA_INTER_MAX_MEDIUM_MESSAGE_SIZE was set, "
+			         "but EFA HMEM via Neuron API only supports eager and runting read protocols. "
+			         "The variable will not modify CUDA memory run config.\n");
+		}
 		break;
 	case FI_HMEM_SYNAPSEAI:
 		info->runt_size = 0;
-		info->max_intra_eager_size = 0;
 		info->max_medium_msg_size = 0;
 		info->min_read_msg_size = 1;
 		info->min_read_write_size = 1;
+		if (-FI_ENODATA != fi_param_get_size_t(&efa_prov, "inter_max_medium_message_size", &tmp_value) ||
+		    -FI_ENODATA != fi_param_get_size_t(&efa_prov, "inter_min_read_message_size", &tmp_value) ||
+		    -FI_ENODATA != fi_param_get_size_t(&efa_prov, "inter_min_read_write_size", &tmp_value) ||
+		    -FI_ENODATA != fi_param_get_size_t(&efa_prov, "runt_size", &tmp_value)) {
+			EFA_WARN(FI_LOG_DOMAIN,
+			        "One or more of the following environment variable(s) were set: ["
+			        "FI_EFA_INTER_MAX_MEDIUM_MESSAGE_SIZE, "
+			        "FI_EFA_INTER_MIN_READ_MESSAGE_SIZE, "
+			        "FI_EFA_INTER_MIN_READ_WRITE_SIZE, "
+			        "FI_EFA_RUNT_SIZE"
+			        "], but EFA HMEM via Synapse only supports long read protocol. "
+			        "The variable(s) will not modify Synapse memory run config.\n");
+		}
 		break;
 	default:
 		break;
@@ -82,70 +105,24 @@ static int efa_domain_hmem_info_init_protocol_thresholds(struct efa_domain *efa_
 	return 0;
 }
 
-/**
- * @brief          Initialize the efa_hmem_info state for FI_HMEM_SYSTEM
- *
- * @param[in,out]  efa_domain  Pointer to struct efa_domain
- *
- * @return         0
- */
-static int efa_domain_hmem_info_init_system(struct efa_domain *efa_domain)
-{
-	struct efa_hmem_info *info = &efa_domain->hmem_info[FI_HMEM_SYSTEM];
-
-	info->initialized = true;
-	info->p2p_disabled_by_user = false;
-	info->p2p_required_by_impl = false;
-	info->p2p_supported_by_device = true;
-	efa_domain_hmem_info_init_protocol_thresholds(efa_domain, FI_HMEM_SYSTEM);
-	return 0;
-}
-
-/**
- * @brief          Initialize the efa_hmem_info state for FI_HMEM_CUDA
- *
- * @param[in,out]  efa_domain  Pointer to struct efa_domain
- *
- * @return         0 on success
- *                 negative libfabric error code on failure
- */
-static int efa_domain_hmem_info_init_cuda(struct efa_domain *efa_domain)
-{
+static inline void efa_domain_hmem_info_check_p2p_support_cuda(struct efa_hmem_info *info) {
 #if HAVE_CUDA
-	struct efa_hmem_info *info = &efa_domain->hmem_info[FI_HMEM_CUDA];
 	cudaError_t cuda_ret;
 	void *ptr = NULL;
 	struct ibv_mr *ibv_mr;
 	int ibv_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
-	size_t len = ofi_get_page_size() * 2, tmp_value;
+	size_t len = ofi_get_page_size() * 2;
 	int ret;
 	int dmabuf_fd;
 	uint64_t dmabuf_offset;
 
-	if (!ofi_hmem_is_initialized(FI_HMEM_CUDA)) {
-		EFA_INFO(FI_LOG_DOMAIN, "FI_HMEM_CUDA is not initialized\n");
-		return 0;
-	}
-
 	cuda_ret = ofi_cudaMalloc(&ptr, len);
 	if (cuda_ret != cudaSuccess) {
-		EFA_WARN(FI_LOG_DOMAIN,
-			 "Failed to allocate CUDA buffer: %s\n",
+		info->initialized = false;
+		EFA_WARN(FI_LOG_DOMAIN, "Failed to allocate CUDA buffer: %s\n",
 			 ofi_cudaGetErrorString(cuda_ret));
-		return 0;
+		return;
 	}
-
-	info->initialized = true;
-	info->p2p_disabled_by_user = false;
-
-	/* If user is using libfabric API 1.18 or later, by default EFA provider is permitted to
-	 * use CUDA library to support CUDA memory, therefore p2p is not required.
-	 */
-	if (FI_VERSION_GE(efa_domain->util_domain.fabric->fabric_fid.api_version, FI_VERSION(1,18)))
-		info->p2p_required_by_impl = !hmem_ops[FI_HMEM_CUDA].initialized;
-	else
-		info->p2p_required_by_impl = true;
-
 #if HAVE_EFA_DMABUF_MR
 	ret = cuda_get_dmabuf_fd(ptr, len, &dmabuf_fd, &dmabuf_offset);
 	if (ret == FI_SUCCESS) {
@@ -169,11 +146,10 @@ static int efa_domain_hmem_info_init_cuda(struct efa_domain *efa_domain)
 
 	if (!ibv_mr) {
 		info->p2p_supported_by_device = false;
-		efa_domain_hmem_info_init_protocol_thresholds(efa_domain, FI_HMEM_CUDA);
 		EFA_WARN(FI_LOG_DOMAIN,
 			 "Failed to register CUDA buffer with the EFA device, FI_HMEM transfers that require peer to peer support will fail.\n");
 		ofi_cudaFree(ptr);
-		return 0;
+		return;
 	}
 
 	ret = ibv_dereg_mr(ibv_mr);
@@ -182,54 +158,29 @@ static int efa_domain_hmem_info_init_cuda(struct efa_domain *efa_domain)
 		EFA_WARN(FI_LOG_DOMAIN,
 			 "Failed to deregister CUDA buffer: %s\n",
 			 fi_strerror(-ret));
-		return ret;
+		return;
 	}
 
 	info->p2p_supported_by_device = true;
-	efa_domain_hmem_info_init_protocol_thresholds(efa_domain, FI_HMEM_CUDA);
-	if (-FI_ENODATA != fi_param_get(&efa_prov, "inter_max_medium_message_size", &tmp_value)) {
-		EFA_WARN(FI_LOG_DOMAIN,
-		         "The environment variable FI_EFA_INTER_MAX_MEDIUM_MESSAGE_SIZE was set, "
-		         "but EFA HMEM via Cuda API only supports eager and runting read protocols. "
-				 "The variable will not modify Cuda memory run config.\n");
-	}
+	return;
 
 #endif
-	return 0;
+	return;
 }
 
-/**
- * @brief          Initialize the efa_hmem_info state for FI_HMEM_NEURON
- *
- * @param[in,out]  efa_domain  Pointer to struct efa_domain
- *
- * @return         0 on success
- *                 negative libfabric error code on failure
- */
-static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
-{
+static inline void efa_domain_hmem_info_check_p2p_support_neuron(struct efa_hmem_info *info) {
 #if HAVE_NEURON
-	struct efa_hmem_info *info = &efa_domain->hmem_info[FI_HMEM_NEURON];
 	struct ibv_mr *ibv_mr = NULL;
 	int ibv_access = IBV_ACCESS_LOCAL_WRITE;
 	void *handle;
 	void *ptr = NULL;
-	size_t len = ofi_get_page_size() * 2, tmp_value;
+	size_t len = ofi_get_page_size() * 2;
 	int dmabuf_fd;
 	uint64_t offset;
 	int ret;
 
-	if (!ofi_hmem_is_initialized(FI_HMEM_NEURON)) {
-		EFA_INFO(FI_LOG_DOMAIN, "FI_HMEM_NEURON is not initialized\n");
-		return 0;
-	}
-
 	if (g_device_list[0].device_caps & EFADV_DEVICE_ATTR_CAPS_RDMA_READ) {
 		ibv_access |= IBV_ACCESS_REMOTE_READ;
-	} else {
-		EFA_WARN(FI_LOG_DOMAIN,
-			 "No EFA RDMA read support, transfers using AWS Neuron will fail.\n");
-		return 0;
 	}
 
 	ptr = neuron_alloc(&handle, len);
@@ -239,14 +190,10 @@ static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
 	 * will move on and leave info->initialized as false.
 	 */
 	if (!ptr) {
+		info->initialized = false;
 		EFA_INFO(FI_LOG_DOMAIN, "Cannot allocate Neuron buffer\n");
-		return 0;
+		return;
 	}
-
-	info->initialized = true;
-	info->p2p_disabled_by_user = false;
-	/* Neuron currently requires P2P */
-	info->p2p_required_by_impl = true;
 
 #if HAVE_EFA_DMABUF_MR
 	ret = neuron_get_dmabuf_fd(ptr, (uint64_t)len, &dmabuf_fd, &offset);
@@ -254,7 +201,7 @@ static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
 		ibv_mr = ibv_reg_dmabuf_mr(
 					g_device_list[0].ibv_pd, offset,
 					len, (uint64_t)ptr, dmabuf_fd, ibv_access);
-	} else if (ret == -FI_ENOPROTOOPT) {
+	} else if (ret == -FI_EOPNOTSUPP) {
 		EFA_INFO(FI_LOG_MR,
 			"Unable to retrieve dmabuf fd of Neuron device buffer, "
 			"Fall back to ibv_reg_mr\n");
@@ -271,7 +218,7 @@ static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
 		         "Failed to register Neuron buffer with the EFA device, "
 		         "FI_HMEM transfers that require peer to peer support will fail.\n");
 		neuron_free(&handle);
-		return 0;
+		return;
 	}
 
 	ret = ibv_dereg_mr(ibv_mr);
@@ -280,70 +227,68 @@ static int efa_domain_hmem_info_init_neuron(struct efa_domain *efa_domain)
 		EFA_WARN(FI_LOG_DOMAIN,
 			 "Failed to deregister Neuron buffer: %s\n",
 			 fi_strerror(-ret));
-		return ret;
+		return;
 	}
 
 	info->p2p_supported_by_device = true;
-	efa_domain_hmem_info_init_protocol_thresholds(efa_domain, FI_HMEM_NEURON);
-	if (-FI_ENODATA != fi_param_get(&efa_prov, "inter_max_medium_message_size", &tmp_value)) {
-		EFA_WARN(FI_LOG_DOMAIN,
-		         "The environment variable FI_EFA_INTER_MAX_MEDIUM_MESSAGE_SIZE was set, "
-		         "but EFA HMEM via Neuron API only supports eager and runting read protocols. "
-				 "The variable will not modify Neuron memory run config.\n");
-	}
-
+	return;
 #endif
-	return 0;
+	return;
 }
 
 /**
- * @brief          Initialize the efa_hmem_info state for FI_HMEM_SYNAPSEAI
+ * @brief Initialize the efa_hmem_info state for iface
  *
  * @param[in,out]  efa_domain  Pointer to struct efa_domain
- *
- * @return         0
+ * @param[in]      iface       HMEM interface
  */
-static int efa_domain_hmem_info_init_synapseai(struct efa_domain *efa_domain)
+static void
+efa_domain_hmem_info_init_iface(struct efa_domain *efa_domain, enum fi_hmem_iface iface)
 {
-#if HAVE_SYNAPSEAI
-	size_t tmp_value;
-	struct efa_hmem_info *info = &efa_domain->hmem_info[FI_HMEM_SYNAPSEAI];
+	struct efa_hmem_info *info = &efa_domain->hmem_info[iface];
 
-	if (!ofi_hmem_is_initialized(FI_HMEM_SYNAPSEAI)) {
-		EFA_INFO(FI_LOG_DOMAIN, "FI_HMEM_SYNAPSEAI is not initialized\n");
-		return 0;
+	if (!ofi_hmem_is_initialized(iface)) {
+		EFA_INFO(FI_LOG_DOMAIN, "%s is not initialized\n",
+		         fi_tostr(&iface, FI_TYPE_HMEM_IFACE));
+		return;
 	}
 
-	if (!(g_device_list[0].device_caps & EFADV_DEVICE_ATTR_CAPS_RDMA_READ)) {
+	if ((iface == FI_HMEM_SYNAPSEAI || iface == FI_HMEM_NEURON) &&
+	    !efa_device_support_rdma_read()) {
 		EFA_WARN(FI_LOG_DOMAIN,
-			 "No EFA RDMA read support, transfers using Habana Gaudi will fail.\n");
-		return 0;
+			 "No EFA RDMA read support, transfers using %s will fail.\n",
+			 fi_tostr(&iface, FI_TYPE_HMEM_IFACE));
+		return;
 	}
 
 	info->initialized = true;
-	info->p2p_disabled_by_user = false;
-	/* SynapseAI currently requires P2P */
-	info->p2p_required_by_impl = true;
-	info->p2p_supported_by_device = true;
-	efa_domain_hmem_info_init_protocol_thresholds(efa_domain, FI_HMEM_SYNAPSEAI);
+	info->p2p_disabled_by_user = (iface == FI_HMEM_SYSTEM) ? false : ofi_hmem_p2p_disabled();
 
-	/*  Only the long read protocol is supported */
-	if (-FI_ENODATA != fi_param_get_size_t(&efa_prov, "inter_max_medium_message_size", &tmp_value) ||
-		-FI_ENODATA != fi_param_get_size_t(&efa_prov, "inter_min_read_message_size", &tmp_value) ||
-		-FI_ENODATA != fi_param_get_size_t(&efa_prov, "inter_min_read_write_size", &tmp_value) ||
-		-FI_ENODATA != fi_param_get_size_t(&efa_prov, "runt_size", &tmp_value)) {
-		EFA_WARN(FI_LOG_DOMAIN,
-				"One or more of the following environment variable(s) were set: ["
-				"FI_EFA_INTER_MAX_MEDIUM_MESSAGE_SIZE, "
-				"FI_EFA_INTER_MIN_READ_MESSAGE_SIZE, "
-				"FI_EFA_INTER_MIN_READ_WRITE_SIZE, "
-				"FI_EFA_RUNT_SIZE"
-				"], but EFA HMEM via Synapse only supports long read protocol. "
-				"The variable(s) will not modify Synapse memory run config.\n");
+	if (iface == FI_HMEM_SYNAPSEAI || iface == FI_HMEM_SYSTEM) {
+		info->p2p_supported_by_device = true;
+	} else if (info->p2p_disabled_by_user) {
+		info->p2p_supported_by_device = false;
+	} else {
+		if (iface == FI_HMEM_CUDA)
+			efa_domain_hmem_info_check_p2p_support_cuda(info);
+		if (iface == FI_HMEM_NEURON)
+			efa_domain_hmem_info_check_p2p_support_neuron(info);
+		if (!info->p2p_supported_by_device)
+			EFA_INFO(FI_LOG_DOMAIN, "%s P2P support is not available.\n", fi_tostr(&iface, FI_TYPE_HMEM_IFACE));
 	}
 
-#endif
-	return 0;
+	info->p2p_required_by_impl = true;
+	/* If user is using libfabric API 1.18 or later, by default EFA
+	* provider is permitted to use CUDA library to support CUDA
+	* memory, therefore p2p is not required.
+	*/
+	if (iface == FI_HMEM_CUDA &&
+	    FI_VERSION_GE(efa_domain->util_domain.fabric->fabric_fid.api_version, FI_VERSION(1, 18)))
+		info->p2p_required_by_impl = !hmem_ops[iface].initialized;
+	if (iface == FI_HMEM_SYSTEM)
+		info->p2p_required_by_impl = false;
+
+	efa_domain_hmem_info_init_protocol_thresholds(efa_domain, iface);
 }
 
 /**
@@ -369,7 +314,7 @@ int efa_domain_hmem_validate_p2p_opt(struct efa_domain *efa_domain, enum fi_hmem
 
 	switch (p2p_opt) {
 	case FI_HMEM_P2P_REQUIRED:
-		if (!info->p2p_supported_by_device)
+		if (OFI_UNLIKELY(ofi_hmem_p2p_disabled()) || !info->p2p_supported_by_device)
 			return -FI_EOPNOTSUPP;
 
 		info->p2p_disabled_by_user = false;
@@ -381,11 +326,14 @@ int efa_domain_hmem_validate_p2p_opt(struct efa_domain *efa_domain, enum fi_hmem
 	 *     PREFERED means a provider should prefer P2P if it is available.
 	 *
 	 * These options does not require that p2p is supported by device,
-	 * nor do they prohibit that p2p is reqruied by implementation. Therefore
-	 * they are always supported.
+	 * nor do they prohibit that p2p is required by implementation. 
+	 * Therefore they are always supported unless p2p is disabled.
 	 */
 	case FI_HMEM_P2P_PREFERRED:
 	case FI_HMEM_P2P_ENABLED:
+		if (OFI_UNLIKELY(ofi_hmem_p2p_disabled()))
+			return -FI_EOPNOTSUPP;
+
 		info->p2p_disabled_by_user = false;
 		return 0;
 
@@ -413,7 +361,7 @@ int efa_domain_hmem_validate_p2p_opt(struct efa_domain *efa_domain, enum fi_hmem
  */
 int efa_domain_hmem_info_init_all(struct efa_domain *efa_domain)
 {
-	int ret, err;
+	int ret = 0, i = 0;
 
 	if(g_device_cnt <= 0) {
 		return -FI_ENODEV;
@@ -421,34 +369,8 @@ int efa_domain_hmem_info_init_all(struct efa_domain *efa_domain)
 
 	memset(efa_domain->hmem_info, 0, OFI_HMEM_MAX * sizeof(struct efa_hmem_info));
 
-	ret = 0;
-
-	err = efa_domain_hmem_info_init_system(efa_domain);
-	if (err) {
-		ret = err;
-		EFA_WARN(FI_LOG_DOMAIN, "Failed to populate the System hmem_info struct! err: %d\n",
-			 err);
-	}
-
-	err = efa_domain_hmem_info_init_cuda(efa_domain);
-	if (err) {
-		ret = err;
-		EFA_WARN(FI_LOG_DOMAIN, "Failed to populate the Cuda hmem_info struct! err: %d\n",
-			 err);
-	}
-
-	err = efa_domain_hmem_info_init_neuron(efa_domain);
-	if (err) {
-		ret = err;
-		EFA_WARN(FI_LOG_DOMAIN, "Failed to populate the Neuron hmem_info struct! err: %d\n",
-			 err);
-	}
-
-	err = efa_domain_hmem_info_init_synapseai(efa_domain);
-	if (err) {
-		ret = err;
-		EFA_WARN(FI_LOG_DOMAIN, "Failed to populate the Synapseai hmem_info struct! err: %d\n",
-			 err);
+	EFA_HMEM_IFACE_FOREACH(i) {
+		efa_domain_hmem_info_init_iface(efa_domain, efa_hmem_ifaces[i]);
 	}
 
 	return ret;
@@ -464,11 +386,11 @@ int efa_domain_hmem_info_init_all(struct efa_domain *efa_domain)
  * @param[in]   iov_count     Number of IOV structures in IOV array
  * @return  number of bytes copied on success, or a negative error code
  */
-ssize_t efa_copy_from_hmem_iov(void **desc, char *buff, int buff_size,
-                               const struct iovec *hmem_iov, int iov_count)
+ssize_t efa_copy_from_hmem_iov(void **desc, char *buff, size_t buff_size,
+                               const struct iovec *hmem_iov, size_t iov_count)
 {
-	int i, ret = -1;
-	size_t data_size = 0;
+	int ret = -1;
+	size_t i, data_size = 0;
 
 	for (i = 0; i < iov_count; i++) {
 		if (data_size + hmem_iov[i].iov_len > buff_size) {
@@ -499,9 +421,10 @@ ssize_t efa_copy_from_hmem_iov(void **desc, char *buff, int buff_size,
  * @return  number of bytes copied on success, or a negative error code
  */
 ssize_t efa_copy_to_hmem_iov(void **desc, struct iovec *hmem_iov,
-                             int iov_count, char *buff, int buff_size)
+                             size_t iov_count, char *buff, size_t buff_size)
 {
-	int i, ret, bytes_remaining = buff_size, size;
+	int ret;
+	size_t i, bytes_remaining = buff_size, size;
 
 	for (i = 0; i < iov_count && bytes_remaining; i++) {
 		size = hmem_iov[i].iov_len;
@@ -518,7 +441,7 @@ ssize_t efa_copy_to_hmem_iov(void **desc, struct iovec *hmem_iov,
 	}
 
 	if (bytes_remaining) {
-		EFA_WARN(FI_LOG_CQ, "Source buffer is larger than target IOV");
+		EFA_WARN(FI_LOG_CQ, "Source buffer is larger than target IOV\n");
 		return -FI_ETRUNC;
 	}
 	return buff_size;

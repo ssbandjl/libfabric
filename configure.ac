@@ -9,7 +9,7 @@ dnl
 dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.60])
-AC_INIT([libfabric], [1.22.0a1], [ofiwg@lists.openfabrics.org])
+AC_INIT([libfabric], [2.0.0b1], [ofiwg@lists.openfabrics.org])
 AC_CONFIG_SRCDIR([src/fabric.c])
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_MACRO_DIR(config)
@@ -1018,6 +1018,7 @@ FI_PROVIDER_SETUP([rxd])
 FI_PROVIDER_SETUP([shm])
 FI_PROVIDER_SETUP([sm2])
 FI_PROVIDER_SETUP([ucx])
+FI_PROVIDER_SETUP([lpp])
 FI_PROVIDER_SETUP([perf])
 FI_PROVIDER_SETUP([trace])
 FI_PROVIDER_SETUP([profile])

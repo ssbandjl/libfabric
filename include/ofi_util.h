@@ -835,6 +835,10 @@ static inline void ofi_ep_peer_rx_cntr_incerr(struct util_ep *ep, uint8_t op)
  * AV / addressing
  */
 
+#define ofi_av_straddr_log(av, level, ...) \
+	ofi_straddr_log_internal(__func__, __LINE__, av->domain->addr_format, \
+			av->prov, level, FI_LOG_AV, __VA_ARGS__)
+
 struct util_av;
 struct util_av_set;
 struct util_peer_addr;
@@ -875,7 +879,6 @@ struct util_av_entry {
 struct util_av {
 	struct fid_av		av_fid;
 	struct util_domain	*domain;
-	struct util_eq		*eq;
 	ofi_atomic32_t		ref;
 	ofi_mutex_t		lock;
 	const struct fi_provider *prov;
@@ -976,13 +979,11 @@ int ofi_av_close(struct util_av *av);
 int ofi_av_close_lightweight(struct util_av *av);
 
 size_t ofi_av_size(struct util_av *av);
+int ofi_av_insert_addr_at(struct util_av *av, const void *addr, fi_addr_t fi_addr);
 int ofi_av_insert_addr(struct util_av *av, const void *addr, fi_addr_t *fi_addr);
 int ofi_av_remove_addr(struct util_av *av, fi_addr_t fi_addr);
 fi_addr_t ofi_av_lookup_fi_addr_unsafe(struct util_av *av, const void *addr);
 fi_addr_t ofi_av_lookup_fi_addr(struct util_av *av, const void *addr);
-int ofi_av_bind(struct fid *av_fid, struct fid *eq_fid, uint64_t flags);
-void ofi_av_write_event(struct util_av *av, uint64_t data,
-			int err, void *context);
 
 int ofi_ip_av_create(struct fid_domain *domain_fid, struct fi_av_attr *attr,
 		     struct fid_av **av, void *context);
@@ -1014,8 +1015,15 @@ int ofi_ip_av_insert(struct fid_av *av_fid, const void *addr, size_t count,
 		     fi_addr_t *fi_addr, uint64_t flags, void *context);
 int ofi_ip_av_remove(struct fid_av *av_fid, fi_addr_t *fi_addr,
 		     size_t count, uint64_t flags);
+bool ofi_ip_av_is_valid(struct fid_av *av_fid, fi_addr_t fi_addr);
 int ofi_ip_av_lookup(struct fid_av *av_fid, fi_addr_t fi_addr,
 		     void *addr, size_t *addrlen);
+int ofi_ip_av_insertsym(struct fid_av *av_fid, const char *node,
+			size_t nodecnt, const char *service, size_t svccnt,
+			fi_addr_t *fi_addr, uint64_t flags, void *context);
+int ofi_ip_av_insertsvc(struct fid_av *av, const char *node,
+			const char *service, fi_addr_t *fi_addr,
+			uint64_t flags, void *context);
 const char *
 ofi_ip_av_straddr(struct fid_av *av, const void *addr, char *buf, size_t *len);
 
@@ -1084,6 +1092,7 @@ const char *ofi_eq_strerror(struct fid_eq *eq_fid, int prov_errno,
 			    const void *err_data, char *buf, size_t len);
 
 int ofi_valid_addr_format(uint32_t prov_format, uint32_t user_format);
+int ofi_match_addr_format(uint32_t if_format, uint32_t user_format);
 int ofi_check_ep_type(const struct fi_provider *prov,
 		      const struct fi_ep_attr *prov_attr,
 		      const struct fi_ep_attr *user_attr);

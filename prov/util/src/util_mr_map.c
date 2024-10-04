@@ -199,10 +199,10 @@ int ofi_mr_map_init(const struct fi_provider *prov, int mode,
 		return -FI_ENOMEM;
 
 	switch (mode) {
-	case FI_MR_BASIC:
+	case OFI_MR_BASIC:
 		map->mode = OFI_MR_BASIC_MAP;
 		break;
-	case FI_MR_SCALABLE:
+	case OFI_MR_SCALABLE:
 		map->mode = 0;
 		break;
 	default:
@@ -280,6 +280,11 @@ void ofi_mr_update_attr(uint32_t user_version, uint64_t caps,
 		cur_abi_attr->device.reserved = 0;
 		cur_abi_attr->hmem_data = NULL;
 	}
+
+	if (FI_VERSION_GE(user_version, FI_VERSION(1, 22)))
+		cur_abi_attr->page_size = user_attr->page_size;
+	else
+		cur_abi_attr->page_size = 0;
 }
 
 int ofi_mr_regattr(struct fid *fid, const struct fi_mr_attr *attr,

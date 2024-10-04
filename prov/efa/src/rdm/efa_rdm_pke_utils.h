@@ -7,6 +7,7 @@
 #include "efa_rdm_pke.h"
 #include "efa_rdm_protocol.h"
 #include "efa_rdm_pkt_type.h"
+#include "efa_mr.h"
 
 /**
  * @brief get the base header of an pke
@@ -57,6 +58,114 @@ size_t efa_rdm_pke_get_segment_offset(struct efa_rdm_pke *pke)
 	return 0;
 }
 
+/**
+ * @brief copy data from the user's buffer to the packet's wiredata.
+ *
+ * @param[in]		iov_mr  memory descriptors of the user's data buffer.
+ * @param[in,out]	pke	    packet entry. Header must have been set when the function is called.
+ * @param[in]		ope		operation entry that has user buffer information.
+ * @param[in]		payload_offset	the data offset in reference to pkt_entry->wiredata.
+ * @param[in]		segment_offset	the data offset in reference to user's buffer
+ * @param[in]		data_size	length of the data to be set up.
+ * @return   		length of data copied.
+ */
+static inline size_t
+efa_rdm_pke_copy_from_hmem_iov(struct efa_mr *iov_mr, struct efa_rdm_pke *pke,
+			       struct efa_rdm_ope *ope, size_t payload_offset,
+			       size_t segment_offset, size_t data_size)
+{
+	size_t copied;
+
+	if (iov_mr && (iov_mr->peer.flags & OFI_HMEM_DATA_DEV_REG_HANDLE)) {
+		assert(iov_mr->peer.hmem_data);
+		copied = ofi_dev_reg_copy_from_hmem_iov(pke->wiredata + payload_offset,
+							data_size, iov_mr->peer.iface,
+							(uint64_t)iov_mr->peer.hmem_data,
+							ope->iov, ope->iov_count,
+							segment_offset);
+	} else {
+		copied = ofi_copy_from_hmem_iov(pke->wiredata + payload_offset,
+		                                data_size,
+		                                iov_mr ? iov_mr->peer.iface : FI_HMEM_SYSTEM,
+		                                iov_mr ? iov_mr->peer.device.reserved : 0,
+		                                ope->iov, ope->iov_count, segment_offset);
+	}
+
+	return copied;
+}
+
+/** 
+ * @brief This function either posts RDMA read, or sends a NACK packet when p2p
+ * is not available or memory registration limit was reached on the receiver.
+ *
+ * @param[in]    ep         endpoint
+ * @param[in]    pkt_entry  packet entry
+ * @param[in]    rxe        RX entry
+ *
+ * @return 0 on success, or a negative error code.
+ */
+static inline int
+efa_rdm_pke_post_remote_read_or_nack(struct efa_rdm_ep  *ep,
+                                     struct efa_rdm_pke *pkt_entry,
+                                     struct efa_rdm_ope *rxe)
+{
+	int err = 0;
+	int pkt_type;
+	int p2p_avail;
+
+	pkt_type = efa_rdm_pke_get_base_hdr(pkt_entry)->type;
+	err = efa_rdm_ep_use_p2p(ep, rxe->desc[0]);
+	if (err < 0)
+		return err;
+
+	p2p_avail = err;
+	if (p2p_avail) {
+		err = efa_rdm_ope_post_remote_read_or_queue(rxe);
+	} else if (efa_rdm_peer_support_read_nack(rxe->peer)) {
+		EFA_INFO(FI_LOG_EP_CTRL,
+			 "Receiver sending long read "
+			 "NACK packet because P2P is not available, "
+			 "unable to post RDMA read.\n");
+		goto send_nack;
+	} else {
+		EFA_INFO(FI_LOG_EP_CTRL, "P2P is not available, "
+					 "unable to post RDMA read.\n");
+		return -FI_EOPNOTSUPP;
+	}
+
+	if (err == -FI_ENOMR) {
+		if (efa_rdm_peer_support_read_nack(rxe->peer)) {
+			EFA_INFO(FI_LOG_EP_CTRL, "Receiver sending long read "
+						 "NACK packet because memory "
+						 "registration limit was "
+						 "reached on the receiver.\n");
+			goto send_nack;
+		} else {
+			/* Peer does not support the READ_NACK packet. So we
+			 * return EAGAIN and hope that the app runs progress
+			 * again which will free some MR registrations */
+			return -FI_EAGAIN;
+		}
+	}
+
+	return err;
+
+send_nack:
+	rxe->internal_flags |= EFA_RDM_OPE_READ_NACK;
+	/* Only set the flag for runting read. The NACK
+	 * packet is sent after all runting read
+	 * RTM packets have been received */
+	if (efa_rdm_pkt_type_is_runtread(pkt_type)) {
+		return 0;
+	}
+
+	if (efa_rdm_pkt_type_is_rtm(pkt_type)) {
+		efa_rdm_rxe_map_insert(&ep->rxe_map, pkt_entry, rxe);
+	}
+
+	return efa_rdm_ope_post_send_or_queue(rxe, EFA_RDM_READ_NACK_PKT);
+}
+
 size_t efa_rdm_pke_get_payload_offset(struct efa_rdm_pke *pkt_entry);
 
 ssize_t efa_rdm_pke_init_payload_from_ope(struct efa_rdm_pke *pke,
@@ -69,5 +178,11 @@ ssize_t efa_rdm_pke_copy_payload_to_ope(struct efa_rdm_pke *pke,
 					struct efa_rdm_ope *ope);
 
 uint32_t *efa_rdm_pke_connid_ptr(struct efa_rdm_pke *pkt_entry);
+
+int efa_rdm_pke_get_available_copy_methods(struct efa_rdm_ep *ep,
+					   struct efa_mr *efa_mr,
+					   bool *restrict local_read_available,
+					   bool *restrict cuda_memcpy_available,
+					   bool *restrict gdrcopy_available);
 
 #endif

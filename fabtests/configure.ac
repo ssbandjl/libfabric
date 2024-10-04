@@ -5,7 +5,7 @@ dnl
 dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.57)
-AC_INIT([fabtests], [1.22.0a1], [ofiwg@lists.openfabrics.org])
+AC_INIT([fabtests], [2.0.0b1], [ofiwg@lists.openfabrics.org])
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_MACRO_DIR(config)
 AC_CONFIG_HEADERS(config.h)
@@ -54,6 +54,20 @@ AS_IF([test x"$enable_debug" != x"no"],
 AC_DEFINE_UNQUOTED([ENABLE_DEBUG], [$dbg],
 	[defined to 1 if configured with --enable-debug])
 
+AC_ARG_ENABLE([efa],
+	[AS_HELP_STRING([--enable-efa],
+		[Enable efa provider specific tests - default YES])],
+	[], [enable_efa=yes])
+
+AM_CONDITIONAL([ENABLE_EFA], [test x"$enable_efa" = x"yes"])
+
+AC_ARG_ENABLE([lpp],
+	[AS_HELP_STRING([--enable-lpp],
+		[Enable lpp provider specific tests - default YES])],
+	[], [enable_lpp=yes])
+
+AM_CONDITIONAL([ENABLE_LPP], [test x"$enable_lpp" = x"yes"])
+
 AC_DEFUN([FI_ARG_ENABLE_SANITIZER],[
         AC_ARG_ENABLE([$1],
                       [AS_HELP_STRING([--enable-$1],
@@ -79,6 +93,9 @@ AS_IF([test -z "$CFLAGS"],
 # AM PROG_AR did not exist pre AM 1.11.x (where x is somewhere >0 and
 # <3), but it is necessary in AM 1.12.x.
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
+
+dnl Call the provider's CONFIGURE and CONDITIONALS macros
+m4_include([prov/efa/configure.m4])
 
 AM_PROG_LIBTOOL
 
@@ -140,6 +157,8 @@ AC_ARG_WITH([cuda],
 AC_DEFINE_UNQUOTED([HAVE_CUDA_RUNTIME_H], [$have_cuda],
             [Define to 1 if you have <cuda_runtime.h>])
 
+AM_CONDITIONAL([HAVE_CUDA], [test $have_cuda -eq 1])
+
 AS_IF([test x"$have_cuda" = x"1"],
       [
             have_cuda_dmabuf=1
@@ -162,6 +181,7 @@ AS_IF([test x"$have_cuda" = x"1"],
 AC_DEFINE_UNQUOTED([HAVE_CUDA_DMABUF], [$have_cuda_dmabuf], [CUDA dmabuf support])
 
 dnl Check for ROCR support. Require fabtests to dlopen ROCR.
+have_rocr=0
 AC_ARG_WITH([rocr],
             [AS_HELP_STRING([--with-rocr=DIR],
                             [Provide path to where the ROCR development
@@ -170,11 +190,15 @@ AC_ARG_WITH([rocr],
                    [AC_CHECK_LIB(dl, dlopen, [], [AC_MSG_ERROR([dlopen not found.])])],
                    [])
              CPPFLAGS="-I$withval/include $CPPFLAGS"
+             have_rocr=0
              AC_CHECK_HEADER([hsa/hsa.h],
                              [AC_DEFINE([HAVE_ROCR_RUNTIME_H], [1],
                                         [Define to 1 if you have <hsa/hsa.h>])],
                              [AC_MSG_ERROR([<hsa/hsa.h> not found])])],
             [])
+
+AM_CONDITIONAL([HAVE_ROCR], [test $have_rocr -eq 1])
+AM_CONDITIONAL([HAVE_HMEM], [[test $have_rocr -eq 1] || [test $have_cuda -eq 1]])
 
 dnl Check for Neuron support.
 AC_ARG_WITH([neuron],
@@ -189,6 +213,23 @@ AC_ARG_WITH([neuron],
                              [AC_DEFINE([HAVE_NEURON], [1],
                                         [Define to 1 if you have <nrt/nrt.h>])],
                              [AC_MSG_ERROR([<nrt/nrt.h> not found])])],
+            [])
+
+dnl Check for SynapseAI support. Require fabtests to dlopen SynapseAI runtime.
+AC_ARG_WITH([synapseai],
+            [AS_HELP_STRING([--with-synapseai=DIR],
+                            [Enable SynapseAI build and fail if not found.
+                             Optional=<Path to where the SynapseAI libraries
+                             and headers are installed.>])],
+            [AS_IF([test "$freebsd" == "0"],
+                   [AC_CHECK_LIB(dl, dlopen, [], [AC_MSG_ERROR([dlopen not found.])])],
+                   [])
+             CPPFLAGS="-I$withval/include -I/usr/include/drm -I/usr/include/libdrm $CPPFLAGS"
+             AC_CHECK_HEADER([habanalabs/synapse_api.h],
+                        [AC_CHECK_HEADER([habanalabs/hlthunk.h],
+                              [AC_DEFINE([HAVE_SYNAPSEAI], [1], [Define to 1 if you have <synapse_api.h> and <hlthunk.h>])],
+                              [AC_MSG_ERROR([<habanalabs/hlthunk.h> not found])])],
+                  [AC_MSG_ERROR([<habanalabs/synapse_api.h> not found])])],
             [])
 
 dnl Checks for libraries

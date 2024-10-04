@@ -175,6 +175,7 @@ struct fi_mr_attr {
 		int		synapseai;
 	} device;
 	void			*hmem_data;
+	size_t			page_size;
 };
 
 struct fi_mr_modify {
@@ -223,14 +224,12 @@ enum fi_datatype {
 	FI_DOUBLE_COMPLEX,
 	FI_LONG_DOUBLE,
 	FI_LONG_DOUBLE_COMPLEX,
-	/* End of point to point atomic datatypes */
-	FI_DATATYPE_LAST,
-	/*
-	 * enums for 128-bit integer atomics, existing ordering and
-	 * FI_DATATYPE_LAST preserved for compatabilty.
-	 */
-	FI_INT128 = FI_DATATYPE_LAST,
+	FI_INT128,
 	FI_UINT128,
+	FI_FLOAT16,
+	FI_BFLOAT16,
+	FI_FLOAT8_E4M3,
+	FI_FLOAT8_E5M2,
 
 	/* Collective datatypes */
 	FI_VOID = FI_COLLECTIVE_OFFSET,
@@ -256,8 +255,7 @@ enum fi_op {
 	FI_CSWAP_GE,
 	FI_CSWAP_GT,
 	FI_MSWAP,
-	/* End of point to point atomic ops */
-	FI_ATOMIC_OP_LAST,
+	FI_DIFF,
 
 	/* Collective datatypes */
 	FI_NOOP = FI_COLLECTIVE_OFFSET,
@@ -334,7 +332,7 @@ struct fi_ops_mr {
 };
 
 /* Domain bind flags */
-#define FI_REG_MR		(1ULL << 59)
+#define FI_REG_MR	_Pragma("GCC warning \"'FI_REG_MR' is deprecated\"")	(1ULL << 59)
 
 struct fid_domain {
 	struct fid		fid;
@@ -388,14 +386,14 @@ fi_cntr_open(struct fid_domain *domain, struct fi_cntr_attr *attr,
 	return domain->ops->cntr_open(domain, attr, cntr, context);
 }
 
-static inline int
+static inline FI_DEPRECATED_FUNC int
 fi_wait_open(struct fid_fabric *fabric, struct fi_wait_attr *attr,
 	     struct fid_wait **waitset)
 {
 	return fabric->ops->wait_open(fabric, attr, waitset);
 }
 
-static inline int
+static inline FI_DEPRECATED_FUNC int
 fi_poll_open(struct fid_domain *domain, struct fi_poll_attr *attr,
 	     struct fid_poll **pollset)
 {
@@ -498,7 +496,7 @@ fi_av_open(struct fid_domain *domain, struct fi_av_attr *attr,
 	return domain->ops->av_open(domain, attr, av, context);
 }
 
-static inline int
+static inline FI_DEPRECATED_FUNC int
 fi_av_bind(struct fid_av *av, struct fid *fid, uint64_t flags)
 {
 	return av->fid.ops->bind(&av->fid, fid, flags);
@@ -575,6 +573,12 @@ static inline fi_addr_t
 fi_rx_addr(fi_addr_t fi_addr, int rx_index, int rx_ctx_bits)
 {
 	return (fi_addr_t) (((uint64_t) rx_index << (64 - rx_ctx_bits)) | fi_addr);
+}
+
+static inline fi_addr_t
+fi_group_addr(fi_addr_t fi_addr, uint32_t group_id)
+{
+	return (fi_addr_t) (((uint64_t) group_id << 32) | fi_addr);
 }
 
 #endif

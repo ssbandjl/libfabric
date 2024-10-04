@@ -23,10 +23,8 @@ bin_PROGRAMS = \
 	functional/fi_dgram \
 	functional/fi_example_msg \
 	functional/fi_mcast \
-	functional/fi_dgram_waitset \
 	functional/fi_rdm_tagged_peek \
 	functional/fi_cq_data \
-	functional/fi_poll \
 	functional/fi_scalable_ep \
 	functional/fi_shared_ctx \
 	functional/fi_msg_epoll \
@@ -54,6 +52,7 @@ bin_PROGRAMS = \
 	benchmarks/fi_rdm_pingpong \
 	benchmarks/fi_rma_pingpong \
 	benchmarks/fi_rdm_tagged_pingpong \
+	benchmarks/fi_rdm_bw \
 	benchmarks/fi_rdm_tagged_bw \
 	unit/fi_eq_test \
 	unit/fi_cq_test \
@@ -87,6 +86,7 @@ dist_bin_SCRIPTS = \
 	scripts/runfabtests.sh \
 	scripts/runfabtests.py \
 	scripts/runmultinode.sh \
+	scripts/runmultinode.py \
 	scripts/rft_yaml_to_junit_xml
 
 dist_noinst_SCRIPTS = \
@@ -135,6 +135,11 @@ nobase_dist_config_DATA = \
 	test_configs/sm2/verify.test \
 	test_configs/efa/efa-neuron.exclude \
 	test_configs/efa/efa.exclude \
+	test_configs/lpp/all.test \
+	test_configs/lpp/complete.test \
+	test_configs/lpp/lpp.exclude \
+	test_configs/lpp/quick.test \
+	test_configs/lpp/verify.test \
 	test_configs/ucx/all.test \
 	test_configs/ucx/quick.test \
 	test_configs/ucx/ucx.exclude \
@@ -155,10 +160,10 @@ nobase_dist_config_DATA = \
 	pytest/default/test_msg.py \
 	pytest/default/test_multinode.py \
 	pytest/default/test_multi_recv.py \
-	pytest/default/test_poll.py \
 	pytest/default/test_rdm.py \
 	pytest/default/test_recv_cancel.py \
 	pytest/default/test_rma_bw.py \
+	pytest/default/test_rma_pingpong.py \
 	pytest/default/test_scalable_ep.py \
 	pytest/default/test_shared_ctx.py \
 	pytest/default/test_ubertest.py \
@@ -174,6 +179,7 @@ nobase_dist_config_DATA = \
 	pytest/efa/test_dgram.py \
 	pytest/efa/test_rdm.py \
 	pytest/efa/test_rma_bw.py \
+	pytest/efa/test_rma_pingpong.py \
 	pytest/efa/test_unexpected_msg.py \
 	pytest/efa/test_multi_recv.py \
 	pytest/efa/test_rnr.py \
@@ -198,6 +204,7 @@ nobase_dist_config_DATA = \
 	pytest/shm/test_multi_recv.py \
 	pytest/shm/test_rdm.py \
 	pytest/shm/test_rma_bw.py \
+	pytest/shm/test_rma_pingpong.py \
 	pytest/shm/test_ubertest.py \
 	pytest/shm/test_unexpected_msg.py \
 	pytest/shm/test_sighandler.py \
@@ -222,6 +229,7 @@ libfabtests_la_SOURCES = \
 	common/hmem_rocr.c \
 	common/hmem_ze.c \
 	common/hmem_neuron.c \
+	common/hmem_synapseai.c \
 	include/shared.h \
 	include/ft_list.h \
 	include/hmem.h \
@@ -292,10 +300,6 @@ functional_fi_mcast_SOURCES = \
 	functional/mcast.c
 functional_fi_mcast_LDADD = libfabtests.la
 
-functional_fi_dgram_waitset_SOURCES = \
-	functional/dgram_waitset.c
-functional_fi_dgram_waitset_LDADD = libfabtests.la
-
 functional_fi_rdm_tagged_peek_SOURCES = \
 	functional/rdm_tagged_peek.c
 functional_fi_rdm_tagged_peek_LDADD = libfabtests.la
@@ -315,10 +319,6 @@ functional_fi_scalable_ep_LDADD = libfabtests.la
 functional_fi_shared_ctx_SOURCES = \
 	functional/shared_ctx.c
 functional_fi_shared_ctx_LDADD = libfabtests.la
-
-functional_fi_poll_SOURCES = \
-	functional/poll.c
-functional_fi_poll_LDADD = libfabtests.la
 
 functional_fi_multi_ep_SOURCES = \
 	functional/multi_ep.c
@@ -420,6 +420,11 @@ benchmarks_fi_rdm_tagged_bw_SOURCES = \
 	benchmarks/rdm_tagged_bw.c \
 	$(benchmarks_srcs)
 benchmarks_fi_rdm_tagged_bw_LDADD = libfabtests.la
+
+benchmarks_fi_rdm_bw_SOURCES = \
+	benchmarks/rdm_bw.c \
+	$(benchmarks_srcs)
+benchmarks_fi_rdm_bw_LDADD = libfabtests.la
 
 
 unit_fi_eq_test_SOURCES = \
@@ -614,7 +619,6 @@ dummy_man_pages = \
 	man/man1/fi_cm_data.1 \
 	man/man1/fi_cq_data.1 \
 	man/man1/fi_dgram.1 \
-	man/man1/fi_dgram_waitset.1 \
 	man/man1/fi_inj_complete.1 \
 	man/man1/fi_mcast.1 \
 	man/man1/fi_msg.1 \
@@ -622,7 +626,6 @@ dummy_man_pages = \
 	man/man1/fi_msg_sockets.1 \
 	man/man1/fi_multi_ep.1 \
 	man/man1/fi_multi_mr.1 \
-	man/man1/fi_poll.1 \
 	man/man1/fi_rdm.1 \
 	man/man1/fi_rdm_atomic.1 \
 	man/man1/fi_rdm_deferred_wq.1 \
@@ -666,6 +669,9 @@ nroff:
         done
 
 include prov/efa/Makefile.include
+if !MACOS
+include prov/lpp/Makefile.include
+endif
 
 man_MANS = $(real_man_pages) $(dummy_man_pages)
 

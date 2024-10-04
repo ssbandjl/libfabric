@@ -82,7 +82,7 @@ const struct fi_domain_attr verbs_domain_attr = {
 	.control_progress	= FI_PROGRESS_AUTO,
 	.data_progress		= FI_PROGRESS_AUTO,
 	.resource_mgmt		= FI_RM_ENABLED,
-	.mr_mode		= OFI_MR_BASIC_MAP | FI_MR_LOCAL | FI_MR_BASIC,
+	.mr_mode		= OFI_MR_BASIC_MAP | FI_MR_LOCAL | OFI_MR_BASIC,
 	.mr_key_size		= sizeof_field(struct ibv_sge, lkey),
 	.cq_data_size		= sizeof_field(struct ibv_send_wr, imm_data),
 	.tx_ctx_cnt		= 1024,
@@ -109,8 +109,6 @@ const struct fi_rx_attr verbs_rx_attr = {
 	.mode			= VERBS_RX_MODE,
 	.op_flags		= FI_COMPLETION,
 	.msg_order		= VERBS_MSG_ORDER,
-	.comp_order		= FI_ORDER_STRICT | FI_ORDER_DATA,
-	.total_buffered_recv	= 0,
 };
 
 const struct fi_rx_attr verbs_dgram_rx_attr = {
@@ -118,8 +116,6 @@ const struct fi_rx_attr verbs_dgram_rx_attr = {
 	.mode			= VERBS_DGRAM_RX_MODE | VERBS_RX_MODE,
 	.op_flags		= FI_COMPLETION,
 	.msg_order		= VERBS_MSG_ORDER,
-	.comp_order		= FI_ORDER_STRICT | FI_ORDER_DATA,
-	.total_buffered_recv	= 0,
 };
 
 const struct fi_tx_attr verbs_tx_attr = {
@@ -127,7 +123,6 @@ const struct fi_tx_attr verbs_tx_attr = {
 	.mode			= 0,
 	.op_flags		= VERBS_TX_OP_FLAGS,
 	.msg_order		= VERBS_MSG_ORDER,
-	.comp_order		= FI_ORDER_STRICT,
 	.inject_size		= 0,
 	.rma_iov_limit		= 1,
 };
@@ -137,7 +132,6 @@ const struct fi_tx_attr verbs_dgram_tx_attr = {
 	.mode			= 0,
 	.op_flags		= VERBS_TX_OP_FLAGS,
 	.msg_order		= VERBS_MSG_ORDER,
-	.comp_order		= FI_ORDER_STRICT,
 	.inject_size		= 0,
 	.rma_iov_limit		= 1,
 };
@@ -754,6 +748,8 @@ static int vrb_alloc_info(struct ibv_context *ctx, struct fi_info **info,
 	const char *dev_name = ibv_get_device_name(ctx->device);
 	int ret;
 
+	vrb_prof_func_start(__func__);
+
 	if ((ctx->device->transport_type != IBV_TRANSPORT_IB) &&
 	    ((ep_dom->type == FI_EP_DGRAM) ||
 	    (ep_dom->protocol == FI_PROTO_RDMA_CM_IB_XRC)))
@@ -784,7 +780,8 @@ static int vrb_alloc_info(struct ibv_context *ctx, struct fi_info **info,
 		break;
 	default:
 		assert(0);
-		return -FI_EINVAL;
+		ret = -FI_EINVAL;
+		goto err;
 	}
 
 
@@ -871,10 +868,12 @@ static int vrb_alloc_info(struct ibv_context *ctx, struct fi_info **info,
 		 ctx->device->name, ep_dom->suffix);
 
 	*info = fi;
+	vrb_prof_func_end(__func__);
 
 	return 0;
 err:
 	fi_freeinfo(fi);
+	vrb_prof_func_end(__func__);
 	return ret;
 }
 
@@ -1358,6 +1357,7 @@ static int vrb_init_info(const struct fi_info **all_infos)
 	int ret = 0, i, j, num_devices, dom_count = 0;
 	static bool initialized = false;
 
+	vrb_prof_func_start(__func__);
 	ofi_mutex_lock(&vrb_init_mutex);
 
 	if (initialized)
@@ -1366,8 +1366,10 @@ static int vrb_init_info(const struct fi_info **all_infos)
 	initialized = true;
 	*all_infos = NULL;
 
+	vrb_prof_func_start("vrb_os_mem_support");
 	vrb_os_mem_support(&vrb_gl_data.peer_mem_support,
 			   &vrb_gl_data.dmabuf_support);
+	vrb_prof_func_end("vrb_os_mem_support");
 
 	if (vrb_read_params()) {
 		VRB_INFO(FI_LOG_FABRIC, "failed to read parameters\n");
@@ -1390,8 +1392,9 @@ static int vrb_init_info(const struct fi_info **all_infos)
 				"XRC not built into provider, skip allocating "
 				"fi_info for XRC FI_EP_MSG endpoints\n");
 	}
-
+	vrb_prof_func_start("vrb_getifaddrs");
 	vrb_getifaddrs(&verbs_devs);
+	vrb_prof_func_end("vrb_getifaddrs");
 	if (!vrb_gl_data.iface)
 		vrb_get_sib(&verbs_devs);
 
@@ -1414,6 +1417,7 @@ static int vrb_init_info(const struct fi_info **all_infos)
 		goto done;
 	}
 
+	vrb_prof_func_start("alloc_info_loop");
 	for (i = 0; i < num_devices; i++) {
 		if (!ctx_list[i]) {
 			FI_INFO(&vrb_prov, FI_LOG_FABRIC,
@@ -1468,12 +1472,14 @@ static int vrb_init_info(const struct fi_info **all_infos)
 			}
 		}
 	}
+	vrb_prof_func_end("alloc_info_loop");
 
 	/* note we are possibly discarding ENOMEM */
 	ret = *all_infos ? 0 : ret;
 
 	rdma_free_devices(ctx_list);
 done:
+	vrb_prof_func_end(__func__);
 	ofi_mutex_unlock(&vrb_init_mutex);
 	return ret;
 }
@@ -1879,12 +1885,31 @@ void vrb_alter_info(const struct fi_info *hints, struct fi_info *info)
 	}
 }
 
+static void vrb_filter_info_by_addr_format(struct fi_info **info, int addr_format)
+{
+	struct fi_info *cur, *prev= NULL, *next = NULL;
+	for (cur = *info; cur; cur = next) {
+		next = cur->next;
+		if (!ofi_match_addr_format(cur->addr_format, addr_format)) {
+			if (prev)
+				prev->next = cur->next;
+			else
+				*info = cur->next;
+			cur->next = NULL;
+			fi_freeinfo(cur);
+		} else {
+			prev = cur;
+		}
+	}
+}
+
 int vrb_getinfo(uint32_t version, const char *node, const char *service,
 		   uint64_t flags, const struct fi_info *hints,
 		   struct fi_info **info)
 {
 	int ret;
 
+	vrb_prof_func_start(__func__);
 	ret = vrb_init_info(&vrb_util_prov.info);
 	if (ret)
 		goto out;
@@ -1898,7 +1923,11 @@ int vrb_getinfo(uint32_t version, const char *node, const char *service,
 	ofi_alter_info(*info, hints, version);
 
 	vrb_alter_info(hints, *info);
+
+	if (hints)
+		vrb_filter_info_by_addr_format(info, hints->addr_format);
 out:
+	vrb_prof_func_end(__func__);
 	if (!ret || ret == -FI_ENOMEM || ret == -FI_ENODEV)
 		return ret;
 	else

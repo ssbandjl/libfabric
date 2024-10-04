@@ -58,7 +58,7 @@ Verbs provider requires applications to support the following modes:
 
 #### FI_EP_MSG endpoint type
 
-  * FI_LOCAL_MR / FI_MR_LOCAL mr mode.
+  * FI_MR_LOCAL mr mode.
 
   * FI_RX_CQ_DATA for applications that want to use RMA. Applications must
     take responsibility of posting receives for any incoming CQ data.
@@ -94,11 +94,6 @@ Verbs provider support the following message ordering:
   * Send after Write
 
   * Send after Send
-
-and the following completion ordering:
-
-  * TX contexts: FI_ORDER_STRICT
-  * RX contexts: FI_ORDER_DATA
 
 ### Fork
 Verbs provider does not provide fork safety by default. Fork safety can be requested
@@ -177,8 +172,10 @@ The verbs provider checks for the following environment variables.
   deprecated) EP type supports only 1
 
 *FI_VERBS_INLINE_SIZE*
-: Default maximum inline size. Actual inject size returned in fi_info
-  may be greater (default: 64)
+: Maximum inline size for the verbs device. Actual inline size returned may be
+  different depending on device capability. This value will be returned by
+  fi_info as the inject size for the application to use. Set to 0 for the
+  maximum device inline size to be used. (default: 256).
 
 *FI_VERBS_MIN_RNR_TIMER*
 : Set min_rnr_timer QP attribute (0 - 31) (default: 12)

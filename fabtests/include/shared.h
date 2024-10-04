@@ -53,7 +53,7 @@ extern "C" {
 #endif
 
 #ifndef FT_FIVERSION
-#define FT_FIVERSION FI_VERSION(1,20)
+#define FT_FIVERSION FI_VERSION(1,21)
 #endif
 
 #include "ft_osd.h"
@@ -64,6 +64,16 @@ extern "C" {
 #define ALIGN(x, a) ALIGN_MASK(x, (typeof(x))(a) - 1)
 #define ALIGN_DOWN(x, a) ALIGN((x) - ((a) - 1), (a))
 
+#ifndef container_of
+#define container_of(ptr, type, field) \
+	((type *) ((char *)ptr - offsetof(type, field)))
+#endif
+
+/*
+ * Internal version of deprecated APIs.
+ * These are used internally to avoid compiler warnings.
+ */
+#define OFI_MR_DEPRECATED	(0x3) /* FI_MR_BASIC | FI_MR_SCALABLE */
 #define OFI_MR_BASIC_MAP (FI_MR_ALLOCATED | FI_MR_PROV_KEY | FI_MR_VIRT_ADDR)
 
 /* exit codes must be 0-255 */
@@ -135,6 +145,7 @@ enum {
 	FT_OPT_DISABLE_TAG_VALIDATION	= 1 << 25,
 	FT_OPT_ADDR_IS_OOB		= 1 << 26,
 	FT_OPT_REG_DMABUF_MR		= 1 << 27,
+	FT_OPT_NO_PRE_POSTED_RX		= 1 << 28,
 	FT_OPT_OOB_CTRL			= FT_OPT_OOB_SYNC | FT_OPT_OOB_ADDR_EXCH,
 };
 
@@ -175,6 +186,8 @@ struct ft_opts {
 	int iterations;
 	int warmup_iterations;
 	size_t transfer_size;
+	size_t max_msg_size;
+	size_t inject_size;
 	int window_size;
 	int av_size;
 	int verbose;
@@ -186,6 +199,7 @@ struct ft_opts {
 	char *dst_addr;
 	char *av_name;
 	int sizes_enabled;
+	int use_fi_more;
 	int options;
 	enum ft_comp_method comp_method;
 	int machr;
@@ -202,6 +216,7 @@ struct ft_opts {
 	int force_prefix;
 	enum fi_hmem_iface iface;
 	uint64_t device;
+	enum fi_threading threading;
 
 	char **argv;
 };
@@ -269,7 +284,7 @@ int ft_sock_connect(char *node, char *service);
 int ft_sock_accept();
 int ft_sock_send(int fd, void *msg, size_t len);
 int ft_sock_recv(int fd, void *msg, size_t len);
-int ft_sock_sync(int value);
+int ft_sock_sync(int fd, int value);
 void ft_sock_shutdown(int fd);
 extern int (*ft_mr_alloc_func)(void);
 extern uint64_t ft_tag;
@@ -307,7 +322,8 @@ extern char default_port[8];
 		.iface = FI_HMEM_SYSTEM, \
 		.device = 0, \
 		.argc = argc, .argv = argv, \
-		.address_format = FI_FORMAT_UNSPEC \
+		.address_format = FI_FORMAT_UNSPEC, \
+		.threading = FI_THREAD_DOMAIN \
 	}
 
 #define FT_STR_LEN 32
@@ -453,6 +469,11 @@ int ft_init_av_dst_addr(struct fid_av *av_ptr, struct fid_ep *ep_ptr,
 		fi_addr_t *remote_addr);
 int ft_init_av_addr(struct fid_av *av, struct fid_ep *ep,
 		fi_addr_t *addr);
+int ft_fill_rma_info(struct fid_mr *mr, void *mr_buf,
+		     struct fi_rma_iov *rma_iov, size_t *key_size,
+		     size_t *rma_iov_len);
+int ft_get_rma_info(struct fi_rma_iov *rma_iov,
+		    struct fi_rma_iov *peer_iov, size_t key_size);
 int ft_exchange_keys(struct fi_rma_iov *peer_iov);
 void ft_fill_mr_attr(struct iovec *iov, struct fi_mr_dmabuf *dmabuf,
 		     int iov_count, uint64_t access,
@@ -540,6 +561,8 @@ void *ft_get_aligned_addr(void *ptr, size_t alignment)
 
 int ft_read_cq(struct fid_cq *cq, uint64_t *cur, uint64_t total,
 		int timeout, uint64_t tag);
+int ft_sync_oob(void);
+int ft_sync_inband(bool repost_rx);
 int ft_sync(void);
 int ft_sync_pair(int status);
 int ft_fork_and_pair(void);
@@ -567,7 +590,7 @@ ssize_t ft_tx(struct fid_ep *ep, fi_addr_t fi_addr, size_t size, void *ctx);
 ssize_t ft_tx_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote,
 		  struct fid_ep *ep, fi_addr_t fi_addr, size_t size, void *ctx);
 ssize_t ft_post_inject_buf(struct fid_ep *ep, fi_addr_t fi_addr, size_t size,
-		       void *op_buf, uint64_t op_tag);
+		       uint64_t data, void *op_buf, uint64_t op_tag);
 ssize_t ft_post_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size);
 ssize_t ft_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size);
 ssize_t ft_inject_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote,
@@ -576,6 +599,8 @@ ssize_t ft_post_rma(enum ft_rma_opcodes op, char *buf, size_t size,
 		struct fi_rma_iov *remote, void *context);
 ssize_t ft_post_rma_inject(enum ft_rma_opcodes op, char *buf, size_t size,
 		struct fi_rma_iov *remote);
+ssize_t ft_post_rma_writemsg(char *buf, size_t size, struct fi_rma_iov *remote,
+		void *context, uint64_t flags);
 int ft_rma_poll_buf(void *buf, int iter, size_t size);
 
 ssize_t ft_post_atomic(enum ft_atomic_opcodes opcode, struct fid_ep *ep,
@@ -599,9 +624,11 @@ int ft_get_cntr_comp(struct fid_cntr *cntr, uint64_t total, int timeout);
 int ft_recvmsg(struct fid_ep *ep, fi_addr_t fi_addr,
 		size_t size, void *ctx, int flags);
 int ft_sendmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-		size_t size, void *ctx, int flags);
+	       void *buf, size_t size, void *ctx, int flags);
+int ft_writemsg(struct fid_ep *ep, fi_addr_t fi_addr, void *buf, size_t size,
+		void *ctx, struct fi_rma_iov *remote, int flags);
 int ft_tx_msg(struct fid_ep *ep, fi_addr_t fi_addr,
-	      size_t size, void *ctx, uint64_t flags);
+	      void *buf, size_t size, void *ctx, uint64_t flags);
 int ft_cq_read_verify(struct fid_cq *cq, void *op_context);
 
 void eq_readerr(struct fid_eq *eq, const char *eq_str);
@@ -637,6 +664,9 @@ enum {
 	LONG_OPT_DEBUG_ASSERT,
 	LONG_OPT_DATA_PROGRESS,
 	LONG_OPT_CONTROL_PROGRESS,
+	LONG_OPT_MAX_MSG_SIZE,
+	LONG_OPT_USE_FI_MORE,
+	LONG_OPT_THREADING,
 };
 
 extern int debug_assert;

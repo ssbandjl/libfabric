@@ -701,6 +701,7 @@
     <ClCompile Include="prov\tcp\src\xnet_cm.c" />
     <ClCompile Include="prov\tcp\src\xnet_cq.c" />
     <ClCompile Include="prov\tcp\src\xnet_domain.c" />
+    <ClCompile Include="prov\tcp\src\xnet_av.c" />
     <ClCompile Include="prov\tcp\src\xnet_ep.c" />
     <ClCompile Include="prov\tcp\src\xnet_eq.c" />
     <ClCompile Include="prov\tcp\src\xnet_fabric.c" />
@@ -750,10 +751,12 @@
     <ClCompile Include="prov\util\src\util_mem_monitor.c" />
     <ClCompile Include="prov\util\src\util_mem_hooks.c" />
     <ClCompile Include="prov\util\src\util_mr_cache.c" />
+    <ClCompile Include="prov\util\src\util_profile.c" />
     <ClCompile Include="prov\util\src\cuda_mem_monitor.c" />
     <ClCompile Include="prov\util\src\rocr_mem_monitor.c" />
     <ClCompile Include="prov\util\src\ze_mem_monitor.c" />
     <ClCompile Include="prov\util\src\cuda_ipc_monitor.c" />
+    <ClCompile Include="prov\util\src\ze_ipc_monitor.c" />
     <ClCompile Include="prov\util\src\rocr_ipc_monitor.c" />
     <ClCompile Include="prov\util\src\xpmem_monitor.c" />
     <ClCompile Include="prov\coll\src\coll_attr.c" />
@@ -838,6 +841,9 @@
     <ClCompile Include="prov\verbs\src\verbs_rma.c">
       <AdditionalIncludeDirectories>$(ProjectDir)prov\verbs\src;$(ProjectDir)prov\verbs\include;$(ProjectDir)prov\verbs\include\windows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <ClCompile Include="prov\verbs\src\verbs_profile.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)prov\verbs\src;$(ProjectDir)prov\verbs\include;$(ProjectDir)prov\verbs\include\windows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="prov\verbs\src\windows\addrinfo.c">
       <AdditionalIncludeDirectories>$(ProjectDir)prov\verbs\src;$(ProjectDir)prov\verbs\include;$(ProjectDir)prov\verbs\include\windows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
@@ -886,7 +892,6 @@
     <ClCompile Include="prov\efa\src\rdm\efa_rdm_atomic.c" />
     <ClCompile Include="prov\efa\src\rdm\efa_rdm_ep_utils.c" />
     <ClCompile Include="prov\efa\src\rdm\efa_rdm_ep_fiops.c" />
-    <ClCompile Include="prov\efa\src\rdm\efa_rdm_ep_progress.c" />
     <ClCompile Include="prov\efa\src\rdm\efa_rdm_msg.c" />
     <ClCompile Include="prov\efa\src\rdm\efa_rdm_pke.c" />
     <ClCompile Include="prov\efa\src\rdm\efa_rdm_pke_cmd.c" />
@@ -932,6 +937,7 @@
     <ClInclude Include="include\ofi_tree.h" />
     <ClInclude Include="include\ofi_util.h" />
     <ClInclude Include="include\ofi_prov.h" />
+    <ClInclude Include="include\ofi_profile.h" />
     <ClInclude Include="include\rbtree.h" />
     <ClInclude Include="include\rdma\fabric.h" />
     <ClInclude Include="include\rdma\fi_atomic.h" />
@@ -945,6 +951,7 @@
     <ClInclude Include="include\rdma\fi_tagged.h" />
     <ClInclude Include="include\rdma\fi_trigger.h" />
     <ClInclude Include="include\rdma\fi_collective.h" />
+    <ClInclude Include="include\rdma\fi_profile.h" />
     <ClInclude Include="include\rdma\providers\fi_log.h" />
     <ClInclude Include="include\rdma\providers\fi_peer.h" />
     <ClInclude Include="include\rdma\providers\fi_prov.h" />

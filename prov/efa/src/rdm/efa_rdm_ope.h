@@ -126,14 +126,8 @@ struct efa_rdm_ope {
 	/* ep_entry is linked to tx/rxe_list in efa_rdm_ep */
 	struct dlist_entry ep_entry;
 
-	/* queued_ctrl_entry is linked with tx/rx_queued_ctrl_list in efa_rdm_ep */
-	struct dlist_entry queued_ctrl_entry;
-
-	/* queued_read_entry is linked with ope_queued_read_list in efa_rdm_ep */
-	struct dlist_entry queued_read_entry;
-
-	/* queued_rnr_entry is linked with tx/rx_queued_rnr_list in efa_rdm_ep */
-	struct dlist_entry queued_rnr_entry;
+	/* queued_entry is linked with ope_queued_list in efa_domain */
+	struct dlist_entry queued_entry;
 
 	/* Queued packets due to TX queue full or RNR backoff */
 	struct dlist_entry queued_pkts;
@@ -218,7 +212,7 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 /**
  * @brief flag to tell if an ope encouter RNR when sending packets
  *
- * If an ope has this flag, it is on the ope_queued_rnr_list
+ * If an ope has this flag, it is on the ope_queued_list
  * of the endpoint.
  */
 #define EFA_RDM_OPE_QUEUED_RNR BIT_ULL(9)
@@ -242,7 +236,7 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 /**
  * @brief flag to indicate an ope has queued ctrl packet,
  *
- * If this flag is on, the op_entyr is on the ope_queued_ctrl_list
+ * If this flag is on, the op_entyr is on the ope_queued_list
  * of the endpoint
  */
 #define EFA_RDM_OPE_QUEUED_CTRL BIT_ULL(11)
@@ -264,7 +258,7 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
 /**
  * @brief flag to indicate an ope has queued read requests
  *
- * When this flag is on, the ope is on ope_queued_read_list
+ * When this flag is on, the ope is on ope_queued_list
  * of the endpoint
  */
 #define EFA_RDM_OPE_QUEUED_READ 	BIT_ULL(12)
@@ -275,6 +269,17 @@ void efa_rdm_rxe_release_internal(struct efa_rdm_ope *rxe);
  *
  */
 #define EFA_RDM_OPE_READ_NACK 	BIT_ULL(13)
+
+/**
+ * @brief flag to indicate that the ope was queued because it hasn't
+ * made a handshake with the peer. Because this happens before
+ * EFA provider makes any protocol selection, the progress engine
+ * needs to determine the protocol from the peer status when
+ * progressing the queued opes.
+ */
+#define EFA_RDM_OPE_QUEUED_BEFORE_HANDSHAKE	BIT_ULL(14)
+
+#define EFA_RDM_OPE_QUEUED_FLAGS (EFA_RDM_OPE_QUEUED_RNR | EFA_RDM_OPE_QUEUED_CTRL | EFA_RDM_OPE_QUEUED_READ | EFA_RDM_OPE_QUEUED_BEFORE_HANDSHAKE)
 
 void efa_rdm_ope_try_fill_desc(struct efa_rdm_ope *ope, int mr_iov_start, uint64_t access);
 
@@ -323,5 +328,7 @@ ssize_t efa_rdm_ope_post_send_fallback(struct efa_rdm_ope *ope,
 					   int pkt_type, ssize_t err);
 
 ssize_t efa_rdm_ope_post_send_or_queue(struct efa_rdm_ope *ope, int pkt_type);
+
+ssize_t efa_rdm_ope_repost_ope_queued_before_handshake(struct efa_rdm_ope *ope);
 
 #endif

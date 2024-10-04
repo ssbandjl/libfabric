@@ -178,21 +178,6 @@ RXD_INI ;
 #  define RXD_INIT NULL
 #endif
 
-#ifdef _WIN32
-#if (HAVE_NETDIR) && (HAVE_NETDIR_DL)
-#  define NETDIR_INI FI_EXT_INI
-#  define NETDIR_INIT NULL
-#elif (HAVE_NETDIR)
-#  define NETDIR_INI INI_SIG(fi_netdir_ini)
-#  define NETDIR_INIT fi_netdir_ini()
-NETDIR_INI ;
-#else
-#  define NETDIR_INIT NULL
-#endif
-#else /* _WIN32 */
-#  define NETDIR_INIT NULL
-#endif /* _WIN32 */
-
 #if (HAVE_SHM) && (HAVE_SHM_DL)
 #  define SHM_INI FI_EXT_INI
 #  define SHM_INIT NULL
@@ -317,6 +302,21 @@ OPX_INI ;
 UCX_INI ;
 #else
 #  define UCX_INIT NULL
+#endif
+
+#if defined(_WIN32) && (HAVE_LPP)
+#  define LPP_INIT NULL
+#else
+#  if (HAVE_LPP) && (HAVE_LPP_DL)
+#    define LPP_INI FI_EXT_INI
+#    define LPP_INIT NULL
+#  elif (HAVE_LPP)
+#    define LPP_INI INI_SIG(fi_lpp_ini)
+#    define LPP_INIT fi_lpp_ini()
+LPP_INI ;
+#  else
+#    define LPP_INIT NULL
+#  endif
 #endif
 
 /* the utility collective provider is always enabled and built-in */

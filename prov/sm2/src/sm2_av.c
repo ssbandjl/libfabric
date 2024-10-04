@@ -91,18 +91,13 @@ static int sm2_av_insert(struct fid_av *av_fid, const void *addr, size_t count,
 		       "resulting AV Found = %d\n",
 		       gid);
 
-		if (ret) {
-			if (util_av->eq)
-				ofi_av_write_event(util_av, i, -ret, context);
+		if (ret)
 			continue;
-		}
 
 		ofi_mutex_lock(&util_av->lock);
 		ret = ofi_av_insert_addr(util_av, &gid, &util_addr);
 
 		if (ret) {
-			if (util_av->eq)
-				ofi_av_write_event(util_av, i, -ret, context);
 			ofi_mutex_unlock(&util_av->lock);
 			continue;
 		}
@@ -126,11 +121,6 @@ static int sm2_av_insert(struct fid_av *av_fid, const void *addr, size_t count,
 		sm2_ep = container_of(util_ep, struct sm2_ep, util_ep);
 		srx = sm2_get_peer_srx(sm2_ep);
 		srx->owner_ops->foreach_unspec_addr(srx, &sm2_get_addr);
-	}
-
-	if (flags & FI_EVENT) {
-		assert(util_av->eq);
-		ofi_av_write_event(util_av, succ_count, 0, context);
 	}
 
 	return succ_count;
@@ -174,7 +164,7 @@ static int sm2_av_lookup(struct fid_av *av, fi_addr_t fi_addr, void *addr,
 	struct sm2_ep_allocation_entry *entries;
 	sm2_gid_t gid;
 
-	*addrlen = MIN(FI_NAME_MAX, *addrlen);
+	*addrlen = MIN(OFI_NAME_MAX, *addrlen);
 
 	util_av = container_of(av, struct util_av, av_fid);
 	sm2_av = container_of(util_av, struct sm2_av, util_av);
@@ -195,7 +185,7 @@ static int sm2_av_lookup(struct fid_av *av, fi_addr_t fi_addr, void *addr,
 	entries = (void *) (sm2_av->mmap.base + header->ep_allocation_offset);
 
 	strncpy(addr, entries[gid].ep_name, *addrlen);
-	*addrlen = strnlen(entries[gid].ep_name, FI_NAME_MAX);
+	*addrlen = strnlen(entries[gid].ep_name, OFI_NAME_MAX);
 
 	FI_DBG(&sm2_prov, FI_LOG_AV, "sm2_av_lookup: %s\n", (char *) addr);
 
@@ -216,7 +206,7 @@ static const char *sm2_av_straddr(struct fid_av *av, const void *addr,
 static struct fi_ops sm2_av_fi_ops = {
 	.size = sizeof(struct fi_ops),
 	.close = sm2_av_close,
-	.bind = ofi_av_bind,
+	.bind = fi_no_bind,
 	.control = fi_no_control,
 	.ops_open = fi_no_ops_open,
 };

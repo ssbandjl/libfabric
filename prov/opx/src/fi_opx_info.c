@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 by Argonne National Laboratory.
- * Copyright (C) 2021 Cornelis Networks.
+ * Copyright (C) 2021-2024 Cornelis Networks.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -46,7 +46,6 @@ void fi_opx_set_info(struct fi_info *fi, enum fi_progress progress)
 		.mode		= FI_OPX_DEFAULT_MODE,
 		.op_flags	= FI_TRANSMIT_COMPLETE,
 		.msg_order	= FI_OPX_DEFAULT_MSG_ORDER,
-		.comp_order	= FI_ORDER_NONE,
 		.inject_size	= FI_OPX_HFI1_PACKET_IMM,
 		.size		= SIZE_MAX,
 		.iov_limit	= SIZE_MAX,
@@ -58,8 +57,6 @@ void fi_opx_set_info(struct fi_info *fi, enum fi_progress progress)
 		.mode		= FI_OPX_DEFAULT_MODE,
 		.op_flags	= FI_MULTI_RECV,
 		.msg_order	= FI_OPX_DEFAULT_MSG_ORDER,
-		.comp_order	= FI_ORDER_NONE,
-		.total_buffered_recv = FI_OPX_HFI1_PACKET_MTU + 64 /* header */,
 		.size		= SIZE_MAX,
 		.iov_limit	= SIZE_MAX
 	};
@@ -89,7 +86,7 @@ void fi_opx_set_info(struct fi_info *fi, enum fi_progress progress)
 		.data_progress	= progress,
 		.resource_mgmt	= FI_RM_ENABLED,
 		.av_type	= OPX_AV,
-		.mr_mode	= OPX_MR,
+		.mr_mode	= FI_OPX_BASE_MR_MODE,
 		.mr_key_size	= 2,
 		.cq_data_size	= FI_OPX_REMOTE_CQ_DATA_SIZE,
 		.cq_cnt		= SIZE_MAX,
@@ -144,7 +141,7 @@ int fi_opx_set_default_info()
 	fi_opx_set_info(fi, FI_PROGRESS_MANUAL);
 	fi_opx_set_info(fi_auto, FI_PROGRESS_AUTO);
 	fi->next = fi_auto;
-	
+
 	return 0;
 
 err:

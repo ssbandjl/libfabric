@@ -27,7 +27,6 @@ struct efa_hmem_info {
 	bool p2p_required_by_impl;	/* Is p2p required for this interface? */
 	bool p2p_supported_by_device;	/* do we support p2p with this device */
 
-	size_t max_intra_eager_size; /* Maximum message size to use eager protocol for intra-node */
 	size_t max_medium_msg_size;
 	size_t runt_size;
 	size_t min_read_msg_size;
@@ -103,6 +102,6 @@ static inline int efa_copy_to_hmem(void *desc, void *dest, const void *buff, siz
 	return ofi_copy_to_hmem(iface, device, dest, buff, size);
 };
 
-ssize_t efa_copy_from_hmem_iov(void **desc, char *buff, int buff_size, const struct iovec *hmem_iov, int iov_count);
-ssize_t efa_copy_to_hmem_iov(void **desc, struct iovec *hmem_iov, int iov_count, char *buff, int buff_size);
+ssize_t efa_copy_from_hmem_iov(void **desc, char *buff, size_t buff_size, const struct iovec *hmem_iov, size_t iov_count);
+ssize_t efa_copy_to_hmem_iov(void **desc, struct iovec *hmem_iov, size_t iov_count, char *buff, size_t buff_size);
 #endif

@@ -322,6 +322,7 @@ Table: 2.1 a list of extra features/requests
 | 4  | runting read message protocol    | extra feature | libfabric 1.16.0 | Section 4.5 |
 | 5  | RDMA-Write based data transfer   | extra feature | libfabric 1.18.0 | Section 4.6 |
 | 6  | Read nack packets                | extra feature | libfabric 1.20.0 | Section 4.7 |
+| 7  | User recv QP            | extra feature & request| libfabric 1.22.0 | Section 4.8 |
 
 How does protocol v4 maintain backward compatibility when extra features/requests are introduced?
 
@@ -388,6 +389,8 @@ Table: 2.2 binary format of the HANDSHAKE packet
 | `host_id`        | 8                     | integer       | `uint64_t`   | `HANDSHAKE_HOST_ID_HDR`        |
 | `device_version` | 4                     | integer       | `uint32_t`   | `HANDSHAKE_DEVICE_VERSION_HDR` |
 | _reserved_       | 4                     | _N/A_         | _N/A_        | `HANDSHAKE_DEVICE_VERSION_HDR` |
+| `qpn`            | 4                     | integer       | `uint32_t`   | `HANDSHAKE_USER_RECV_QP_HDR`   |
+| `qkey`           | 4                     | integer       | `uint32_t`   | `HANDSHAKE_USER_RECV_QP_HDR`   |
 
 The first 4 bytes (3 fields: `type`, `version`, `flags`) is the EFA RDM base header (section 1.3).
 
@@ -411,7 +414,7 @@ Note, the field `extra_info` was named `features` when protocol v4 was initially
 only planned for extra features. Later, we discovered that the handshake subprotocol can also be used to pass
 additional request information, thus introduced the concept of "extra request" and renamed this field `extra_info`.
 
-`nextra_p3` is number of `extra_info` flags of the endpoint plus 3. The "plus 3" is for historical reasons.
+`nextra_p3` is number of 64-bit `extra_info` elements of the endpoint plus 3. The "plus 3" is for historical reasons.
 When protocol v4 was initially introduced, this field is named `maxproto`. The original plan was that protocol
 v4 can only have 64 extra features/requests. If the number of extra feature/request ever exceeds 64, the next
 feature/request will be defined as version 5 feature/request, (version 6 if the number exceeds 128, so on so
@@ -435,6 +438,7 @@ HANDSHAKE packet's header (table 2.3).
 - `connid` is a universal field explained in detail in section 4.4.
 - `host_id` is an unsigned integer representing the host identifier of the sender.
 - `device_version` represents the version of the sender's EFA device.
+- `qpn` and `qkey` represent the QP number of the user receive QP, explained in detail in section 4.8.
 
 Table 2.3 Flags for optional HANDSHAKE packet fields
 
@@ -443,6 +447,7 @@ Table 2.3 Flags for optional HANDSHAKE packet fields
 | `CONNID_HDR`                   | $2^{15}$ | `0x8000` | `connid`         |
 | `HANDSHAKE_HOST_ID_HDR`        | $2^0$    | `0x0001` | `host_id`        |
 | `HANDSHAKE_DEVICE_VERSION_HDR` | $2^1$    | `0x0002` | `device_version` |
+| `HANDSHAKE_USER_RECV_QP_HDR`   | $2^2$    | `0x0004` | `qpn` and `qkey` |
 
 Refer to table 2.2 for field attributes, such as corresponding C data
 types and length in bytes (including padding).
@@ -648,9 +653,8 @@ later. The difficulty of implementing zero copy receive is that the EFA device d
 occurs when the eager RTM packet arrives before the application calls libfabric's receive API.
 
 4. If the application does not require ordered send, it would be possible to use the application's receive buffer to receive
-data directly. In this case, the receiver might need the sender to keep the packet header length constant throughout the
-communication. The extra request "constant header length" is designed for this use case - see section 4.3 for more discussion
-on this topic.
+data directly. In this case, the receiver might need the sender to send packets without any headers to its dedicated user recv
+QP - see section 4.8 for more discussion on this topic.
 
 5. One might notice that there is no application data length in the header, so how can the receiver of an eager RTM packet
    know how many application bytes are in the packet? The answer is to use the following formula:
@@ -1339,6 +1343,8 @@ for more information about the field `connid`.
 
 ### 4.3 Keep packet header length constant (constant header length) and zero-copy receive
 
+**This mode bit is deprecated since libfabric 1.22.0 and replaced by the "user recv qp" feature/request (See 4.8)**
+
 The extra request "keep packet header length constant" (constant header length) was introduced in the libfabric 1.13.0
 release and was assigned the ID 2.
 
@@ -1352,6 +1358,8 @@ buffer at a later time. However, if an application has the following set of requ
    2. Only sends/receives eager messages
    3. Does not use tagged send
    4. Does not require `FI_DIRECTED_RECV` (the ability to receive only from certain addresses)
+   5. Does not use Libfabric's shared memory communication, e.g. by setting `FI_OPT_SHARED_MEMORY_PERMITTED` as false
+   via `fi_setopt`.
 
 it should be possible to receive data directly using the application buffer since, under such conditions, the
 receiver does not have special requirements on the data it is going to receive, and it will thus accept any
@@ -1374,19 +1382,15 @@ change.
 In fact, because of the existence of the handshake subprotocol, the packet header length of an EAGER_MSGRTM
 will definitely change. Recall that the handshake subprotocol's workflow is:
 
-1. Before receiving handshake packet, an endpoint will always include the
-   optional raw address header in REQ packets.
-2. After receiving handshake packet, an endpoint will stop including the
-   optional raw address header in REQ packets.
+Before receiving handshake packet, an endpoint will always include the optional raw address header in REQ packets.
 
-Furthermore, a REQ packet may also contain the optional CQ data header (section
-3.1) header (`REQ_OPT_CQ_DATA_HDR`) and is not mutually exclusive with other
-optional REQ header components.  Therefore, a compliant request of _constant
-header length_ should include space for the CQ data header.
+After receiving handshake packet, an endpoint will stop including the optional raw address header in REQ packets.
 
-The extra feature "keep packet header length constant" (constant header length)
-is designed to solve this problem. When an endpoint toggles on this extra
-request, its peer will try to satisfy it by keeping the header length constant.
+The extra feature "keep packet header length constant" (constant header length) is designed to solve this problem.
+
+When an endpoint toggles on this extra request, its peer will try to satisfy it by keeping the header length
+constant.  Exactly how to achieve that is up to the implementation to decide.  The easiest way to do so is to keep
+including the raw address header in the EAGER_MSGRTM even after receiving the handshake packet.
 
 Note, because this is an extra request, an endpoint cannot assume its peer will comply with the request. Therefore,
 the receiving endpoint must be able to handle the situation that a received packet does not have the expected header
@@ -1501,8 +1505,9 @@ in order to support CQ entry generation in case the sender uses
 ### 4.7 Long read and runting read nack protocol
 
 Long read and runting read protocols in Libfabric 1.20 and above use a nack protocol
-when the receiver is unable to register a memory region for the RDMA read operation.
-Failure to register the memory region is typically because of a hardware limitation.
+when the receiver is unable to register a memory region for the RDMA read operation 
+or P2P support is unavailable for the RDMA read operation, typically because of a 
+hardware limitation.
 
 Table: 4.2 Format of the READ_NACK packet
 
@@ -1517,12 +1522,14 @@ Table: 4.2 Format of the READ_NACK packet
 
 The nack protocols work as follows
 * Sender has decided to use the long read or runting read protocol
-* The receiver receives the RTM packet(s)
+* The receiver receives the RTM packet(s) or RTW packet
    - One LONGREAD_RTM packet in case of long read protocol
    - Multiple RUNTREAD_RTM packets in case of runting read protocol
-* The receiver attempts to register a memory region for the RDMA operation but fails
-* After all RTM packets have been processed, the receiver sends a READ_NACK packet to the sender 
-* The sender then switches to the long CTS protocol and sends a LONGCTS_RTM packet
+   - One LONGREAD_RTW packet in case of emulated long-read write protocol
+* The receiver attempts to register a memory region for the RDMA operation but fails, 
+or P2P is unavailable for the RDMA operation
+* After all RTM/RTW packets have been processed, the receiver sends a READ_NACK packet to the sender 
+* The sender then switches to the long CTS protocol and sends a LONGCTS_RTM/LONGCTS_RTW packet
 * The receiver sends a CTS packet and the data transfer continues as in the long CTS protocol
 
 The LONGCTS_RTM packet sent in the nack protocol does not contain any application data.
@@ -1540,6 +1547,69 @@ The workflow for long read protocol is shown below
 The workflow for runting read protocol is shown below
 
 ![long-read fallback](message_runtread_fallback.png)
+
+### 4.8 User receive QP feature & request and zero-copy receive
+
+The extra feature/request "user recv(receive) qp" was introduced in the libfabric 1.22.0
+release and was assigned the ID 7. It is used if an endpoint wants to implement the "zero copy receive" optimization.
+(see 4.3)
+
+Historically, zero copy receive was implemented via the "constant header length" extra request (See 4.3). But
+such approach has the following drawbacks:
+
+1. It still keeps protocol headers (48 bytes) in the payload, which makes it impossible to make the payload
+fit into EFA device's inline data size (32 bytes). Especially the raw address header, which is 40 bytes, can
+be replaced by the connid header (8 bytes) after a handshake is made. But with this request, the raw address
+header will always be included and cause a waste of payload space. It will also require applications to use
+the FI_MSG_PREFIX mode that reserve some space in the receive buffers.
+
+2. It cannot address the buffer mix issue: When zero copy receive mode is enabled, Libfabric should mostly only
+post user recv buffers to rdma-core to maximize the possibility that the packets are delivered
+to the user buffers. However, each ep can still get the handshake packets from its peers. For a client/server
+model where each ep only talks to 1 peer, it needs to post 1 internal bounce buffer to get handshake packet
+, because user may only use the ep for send and never posts a receive buffer. For MPI/NCCL applications where 1
+ep talks to multiple peers, posting internal bounce buffers and user buffers to the same QP will never be
+safe or efficient because of the following buffer mix issues.
+
+   a. A bounce buffer receives a RTM packet. In zero copy receive mode, Libfabric posts
+   user receive buffer to rdma-core directly, and such post cannot be cancelled. If
+   libfabric chooses to copy data from the bounce buffer to the user receive buffer and
+   write completion, and later another packet delivers to the same user buffer, it will
+   cause a data corruption. There is no good way to avoid this case unless the ep knows
+   the number of peers it will send to and also make sure no peers will send RTM pkts to it
+   before it get all handshakes from its peers, which is impossibile.
+
+   b. A user receive buffer receives a handshake pkt. In this case, Libfabric needs to repost
+   the user receive buffer to rdma-core.
+
+The "user recv qp" approach is proposed to address the deficits above.
+
+When zero-copy recv is enabled, an EP creates an additional QP to post user receive buffers. This
+QP expects to get packets delivered to user buffers without any headers. The default QP
+is still used to receive the packets with headers. The user receive QP and default QP share the
+same AH but differ in QPN and QKEY. Only the default QP is exposed by fi_getname and inserted
+to AV.
+
+This mode bit is interpreted as an extra feature for both senders and receivers, and an extra
+request from receivers. For senders, it means senders can send packets to receivers' user
+recv QP for optimized performance. For receivers, it means receivers support getting packets
+that carries application data delivered to the user recv QP, and receivers only
+allow getting such packets delivered to the user recv QP.
+
+When the mode bit is turned on, a sender triggers a handshake (via a REQ) with the receiver
+before it does any real data transfer. The receiver includes the qpn and qkey of the user
+receive QP as an optional header in the handshake packet and sends back to the sender. Upon
+getting a handshake, the sender checks whether the receiver supports such extra feature.
+If the receiver supports it, sender will then send packets with user data to the user recv qp. Because
+there is no ordering or tagging requirement, and the receiver already knows the sender, sender can
+send packets without any headers in the payload. If the receiver doesn't support this extra feature,
+the sender will continue send packets with headers to the receiver's default QP.
+
+On the receiver side, it will post the user recv buffer to the user recv QP directly when the user
+calls fi_recv(). Currently such receive cannot be cancelled and fi_cancel() is not supported in
+zero-copy receive mode.
+If a receiver gets RTM packets delivered to its default QP, it raises an error
+because it requests all RTM packets must be delivered to its user recv QP.
 
 ## 5. What's not covered?
 

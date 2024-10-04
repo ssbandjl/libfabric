@@ -55,7 +55,6 @@ _efa_files = \
 	prov/efa/src/rdm/efa_rdm_cq.c \
 	prov/efa/src/rdm/efa_rdm_ep_utils.c \
 	prov/efa/src/rdm/efa_rdm_ep_fiops.c \
-	prov/efa/src/rdm/efa_rdm_ep_progress.c \
 	prov/efa/src/rdm/efa_rdm_rma.c	\
 	prov/efa/src/rdm/efa_rdm_msg.c	\
 	prov/efa/src/rdm/efa_rdm_pke.c \
@@ -146,7 +145,10 @@ nodist_prov_efa_test_efa_unit_test_SOURCES = \
 	prov/efa/test/efa_unit_test_ope.c \
 	prov/efa/test/efa_unit_test_send.c \
 	prov/efa/test/efa_unit_test_fork_support.c \
-	prov/efa/test/efa_unit_test_runt.c
+	prov/efa/test/efa_unit_test_runt.c \
+	prov/efa/test/efa_unit_test_mr.c \
+	prov/efa/test/efa_unit_test_rdm_peer.c \
+	prov/efa/test/efa_unit_test_pke.c
 
 
 efa_CPPFLAGS += -I$(top_srcdir)/include -I$(top_srcdir)/prov/efa/test $(cmocka_CPPFLAGS)
@@ -157,7 +159,9 @@ prov_efa_test_efa_unit_test_LDFLAGS = $(cmocka_rpath) $(efa_LDFLAGS) $(cmocka_LD
 					-Wl,--wrap=ibv_create_ah \
 					-Wl,--wrap=ibv_is_fork_initialized \
 					-Wl,--wrap=efadv_query_device \
-					-Wl,--wrap=ofi_copy_from_hmem_iov
+					-Wl,--wrap=ofi_cudaMalloc \
+					-Wl,--wrap=ofi_copy_from_hmem_iov \
+					-Wl,--wrap=efa_rdm_pke_read
 
 if HAVE_EFADV_CQ_EX
 prov_efa_test_efa_unit_test_LDFLAGS += -Wl,--wrap=efadv_create_cq
