@@ -425,7 +425,7 @@ static int rma_bw_rx_comp()
 	return ft_tx(ep, remote_fi_addr, FT_RMA_SYNC_MSG_BYTES, &tx_ctx);
 }
 
-static int set_fi_more_flag(int i, int j, int flags)
+static uint64_t set_fi_more_flag(int i, int j, uint64_t flags)
 {
 	if (j < opts.window_size - 1 && i >= opts.warmup_iterations &&
 	    i < opts.iterations + opts.warmup_iterations - 1) {
@@ -438,7 +438,8 @@ static int set_fi_more_flag(int i, int j, int flags)
 
 int bandwidth(void)
 {
-	int ret, i, j, flags = 0;
+	int ret, i, j;
+	uint64_t flags = 0;
 	size_t inject_size = fi->tx_attr->inject_size;
 
 	ret = fi_getopt(&ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_MSG_SIZE,
@@ -511,10 +512,20 @@ int bandwidth(void)
 			if (i == opts.warmup_iterations)
 				ft_start();
 
-			ret = ft_post_rx_buf(ep, opts.transfer_size,
-					     &rx_ctx_arr[j].context,
-					     rx_ctx_arr[j].buf, mr_desc,
-					     ft_tag);
+			if (opts.use_fi_more) {
+				flags = set_fi_more_flag(i, j, flags);
+				ret = ft_recvmsg(ep, remote_fi_addr,
+						 rx_ctx_arr[j].buf,
+						 MAX(opts.transfer_size,
+						     FT_MAX_CTRL_MSG) +
+							 ft_rx_prefix_size(),
+						 &rx_ctx_arr[j].context, flags);
+			} else {
+				ret = ft_post_rx_buf(ep, opts.transfer_size,
+						     &rx_ctx_arr[j].context,
+						     rx_ctx_arr[j].buf, mr_desc,
+						     ft_tag);
+			}
 			if (ret)
 				return ret;
 
@@ -569,7 +580,8 @@ static int bw_rma_comp(enum ft_rma_opcodes rma_op, int num_completions)
 
 int bandwidth_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote)
 {
-	int ret, i, j, flags = 0;
+	int ret, i, j;
+	uint64_t flags = 0;
 	size_t offset, inject_size = fi->tx_attr->inject_size;
 
 	ret = fi_getopt(&ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_RMA_SIZE,

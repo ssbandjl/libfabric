@@ -43,10 +43,13 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <assert.h>
+#include <complex.h>
 
 #include <rdma/fabric.h>
 #include <rdma/fi_rma.h>
 #include <rdma/fi_domain.h>
+
+#include "ofi_atomic.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -188,6 +191,7 @@ struct ft_opts {
 	size_t transfer_size;
 	size_t max_msg_size;
 	size_t inject_size;
+	size_t min_multi_recv_size;
 	int window_size;
 	int av_size;
 	int verbose;
@@ -276,7 +280,11 @@ void ft_mcusage(char *name, char *desc);
 void ft_csusage(char *name, char *desc);
 
 int ft_fill_buf(void *buf, size_t size);
+int ft_fill_atomic(void *buf, size_t count, enum fi_datatype datatype);
 int ft_check_buf(void *buf, size_t size);
+int ft_check_atomic(enum ft_atomic_opcodes atomic, enum fi_op op,
+		    enum fi_datatype type, void *src, void *orig_dst, void *dst,
+		    void *cmp, void *res, size_t count);
 int ft_check_opts(uint64_t flags);
 uint64_t ft_init_cq_data(struct fi_info *info);
 int ft_sock_listen(char *node, char *service);
@@ -451,8 +459,8 @@ int ft_alloc_ep_res(struct fi_info *fi, struct fid_cq **new_txcq,
 		    struct fid_cntr **new_rma_cntr,
 		    struct fid_av **new_av);
 int ft_alloc_msgs(void);
-int ft_alloc_host_tx_buf(size_t size);
-void ft_free_host_tx_buf(void);
+int ft_alloc_host_bufs(size_t size);
+void ft_free_host_bufs(void);
 int ft_alloc_active_res(struct fi_info *fi);
 int ft_enable_ep_recv(void);
 int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *bind_av,
@@ -622,11 +630,9 @@ int ft_get_cq_comp(struct fid_cq *cq, uint64_t *cur, uint64_t total, int timeout
 int ft_get_cntr_comp(struct fid_cntr *cntr, uint64_t total, int timeout);
 
 int ft_recvmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-		size_t size, void *ctx, int flags);
+	       void *buf, size_t size, void *ctx, uint64_t flags);
 int ft_sendmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-	       void *buf, size_t size, void *ctx, int flags);
-int ft_writemsg(struct fid_ep *ep, fi_addr_t fi_addr, void *buf, size_t size,
-		void *ctx, struct fi_rma_iov *remote, int flags);
+	       void *buf, size_t size, void *ctx, uint64_t flags);
 int ft_tx_msg(struct fid_ep *ep, fi_addr_t fi_addr,
 	      void *buf, size_t size, void *ctx, uint64_t flags);
 int ft_cq_read_verify(struct fid_cq *cq, void *op_context);
@@ -744,5 +750,101 @@ static inline void *ft_get_page_end(const void *addr, size_t page_size)
 	return (void *)((uintptr_t)ft_get_page_start((const char *)addr
 			+ page_size, page_size) - 1);
 }
+
+/*
+ * Common validation functions and variables
+ */
+
+#define integ_alphabet "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+#define integ_alphabet_length (sizeof(integ_alphabet) - 1)
+
+#define FT_FILL(dst,cnt,type)					\
+	do {							\
+		int i, a = 0;					\
+		type *d = (dst);				\
+		for (i = 0; i < cnt; i++) {			\
+			d[i] = integ_alphabet[a];		\
+			if (++a >= integ_alphabet_length)	\
+				a = 0;				\
+		}						\
+	} while (0);
+
+#define FT_FILL_COMPLEX(dst,cnt,type)				\
+	do {							\
+		int i, a = 0;					\
+		OFI_COMPLEX(type) *d = (dst);			\
+		for (i = 0; i < cnt; i++) {			\
+			ofi_complex_fill_##type (&d[i], 	\
+					(type) integ_alphabet[a]); \
+			if (++a >= integ_alphabet_length)	\
+				a = 0;				\
+		}						\
+	} while (0);
+
+#define FT_CHECK(buf,cmp,cnt,type)				\
+	do {							\
+		int i;						\
+		type *b = (buf);				\
+		type *c = (cmp);				\
+		for (i = 0; i < cnt; i++) {			\
+			if (b[i] != c[i])			\
+				return -FI_EIO;			\
+		}						\
+	} while (0);
+
+#define FT_CHECK_COMPLEX(buf,cmp,cnt,type)			\
+	do {							\
+		int i;						\
+		OFI_COMPLEX(type) *b = (buf);			\
+		OFI_COMPLEX(type) *c = (cmp);			\
+		for (i = 0; i < cnt; i++) {			\
+			if (!ofi_complex_eq_##type (b[i], c[i])) \
+				return -FI_EIO;			\
+		}						\
+	} while (0);
+
+
+#ifdef  HAVE___INT128
+
+/* If __int128 supported, things just work. */
+#define FT_FILL_INT128(...)	FT_FILL(__VA_ARGS__)
+#define FT_CHECK_INT128(...)	FT_CHECK(__VA_ARGS__)
+
+#else
+
+/* If __int128, we're not going to fill/verify. */
+#define FT_FILL_INT128(...)
+#define FT_CHECK_INT128(...)
+
+#endif
+
+#define EXPAND( x ) x
+
+#define SWITCH_REAL_TYPES(type,FUNC,...)				\
+	switch (type) {						\
+	case FI_INT8:	EXPAND( FUNC(__VA_ARGS__,int8_t) ); break;	\
+	case FI_UINT8:	EXPAND( FUNC(__VA_ARGS__,uint8_t) ); break;	\
+	case FI_INT16:	EXPAND( FUNC(__VA_ARGS__,int16_t) ); break;	\
+	case FI_UINT16: EXPAND( FUNC(__VA_ARGS__,uint16_t) ); break;	\
+	case FI_INT32:	EXPAND( FUNC(__VA_ARGS__,int32_t) ); break;	\
+	case FI_UINT32: EXPAND( FUNC(__VA_ARGS__,uint32_t) ); break;	\
+	case FI_INT64:	EXPAND( FUNC(__VA_ARGS__,int64_t) ); break;	\
+	case FI_UINT64: EXPAND( FUNC(__VA_ARGS__,uint64_t) ); break;	\
+	case FI_INT128:	EXPAND( FUNC##_INT128(__VA_ARGS__,ofi_int128_t) ); break;	\
+	case FI_UINT128: EXPAND( FUNC##_INT128(__VA_ARGS__,ofi_uint128_t) ); break; \
+	case FI_FLOAT:	EXPAND( FUNC(__VA_ARGS__,float) ); break;		\
+	case FI_DOUBLE:	EXPAND( FUNC(__VA_ARGS__,double) ); break;	\
+	case FI_LONG_DOUBLE: EXPAND( FUNC(__VA_ARGS__,long double) ); break;		\
+	default: return -FI_EOPNOTSUPP;				\
+	}
+
+#define SWITCH_COMPLEX_TYPES(type,FUNC,...)				\
+	switch (type) {						\
+	case FI_FLOAT_COMPLEX:	EXPAND( FUNC(__VA_ARGS__,float) ); break;	\
+	case FI_DOUBLE_COMPLEX:	EXPAND( FUNC(__VA_ARGS__,double) ); break;	\
+	case FI_LONG_DOUBLE_COMPLEX: EXPAND( FUNC(__VA_ARGS__,long_double) ); break;\
+	default: return -FI_EOPNOTSUPP;				\
+	}
+
 
 #endif /* _SHARED_H_ */

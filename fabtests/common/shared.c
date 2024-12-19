@@ -90,7 +90,7 @@ char *buf = NULL, *tx_buf, *rx_buf;
  * dev_host_buf are used by ft_fill_buf() to stage data sent over wire,
  * when tx_buf is on device memory.
  */
-void *dev_host_buf = NULL;
+void *dev_host_buf = NULL, *dev_host_comp = NULL, *dev_host_res = NULL;
 
 char **tx_mr_bufs = NULL, **rx_mr_bufs = NULL;
 size_t buf_size, tx_buf_size, rx_buf_size;
@@ -160,10 +160,6 @@ unsigned int test_cnt = (sizeof def_test_sizes / sizeof def_test_sizes[0]);
 struct test_size_param *test_size = def_test_sizes;
 /* range of messages is dynamically allocated */
 struct test_size_param *user_test_sizes;
-
-static const char integ_alphabet[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-static const int integ_alphabet_length = (sizeof(integ_alphabet)/sizeof(*integ_alphabet)) - 1;
-
 
 int ft_poll_fd(int fd, int timeout)
 {
@@ -550,14 +546,30 @@ static void ft_set_tx_rx_sizes(size_t *set_tx, size_t *set_rx)
 	*set_tx += ft_tx_prefix_size();
 }
 
-void ft_free_host_tx_buf(void)
+void ft_free_host_bufs(void)
 {
 	int ret;
 
-	ret = ft_hmem_free_host(opts.iface, dev_host_buf);
-	if (ret)
-		FT_PRINTERR("ft_hmem_free_host", ret);
-	dev_host_buf = NULL;
+	if (dev_host_buf) {
+		ret = ft_hmem_free_host(opts.iface, dev_host_buf);
+		if (ret)
+			FT_PRINTERR("ft_hmem_free_host", ret);
+		dev_host_buf = NULL;
+	}
+
+	if (dev_host_res) {
+		ret = ft_hmem_free_host(opts.iface, dev_host_res);
+		if (ret)
+			FT_PRINTERR("ft_hmem_free_host", ret);
+		dev_host_res = NULL;
+	}
+
+	if (dev_host_comp) {
+		ret = ft_hmem_free_host(opts.iface, dev_host_comp);
+		if (ret)
+			FT_PRINTERR("ft_hmem_free_host", ret);
+		dev_host_comp = NULL;
+	}
 }
 
 /*
@@ -645,6 +657,18 @@ int ft_alloc_msgs(void)
 					 max_msg_size * opts.window_size);
 		if (ret)
 			return ret;
+
+		if (fi->caps & FI_ATOMIC) {
+			ret = ft_hmem_alloc_host(opts.iface, &dev_host_comp,
+						 buf_size);
+			if (ret)
+				return ret;
+
+			ret = ft_hmem_alloc_host(opts.iface, &dev_host_res,
+						 buf_size);
+			if (ret)
+				return ret;
+		}
 	}
 
 	ret = ft_hmem_memset(opts.iface, opts.device, (void *) buf, 0, buf_size);
@@ -1067,6 +1091,13 @@ int ft_init_fabric_cm(void)
 
 	ret = opts.dst_addr ? ft_client_connect() : ft_server_connect();
 
+	if (ft_check_opts(FT_OPT_NO_PRE_POSTED_RX) &&
+	    !ft_check_opts(FT_OPT_SKIP_MSG_ALLOC) &&
+	    (fi->caps & (FI_MSG | FI_TAGGED))) {
+		ret = ft_sync_inband(false);
+		if (ret)
+			return ret;
+	}
 	return ret;
 }
 
@@ -1432,7 +1463,8 @@ int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *
 	}
 
 	if (opts.max_msg_size) {
-		ret = fi_setopt(&bind_ep->fid, FI_OPT_ENDPOINT, FI_OPT_MAX_MSG_SIZE, &opts.max_msg_size, sizeof opts.max_msg_size);
+		ret = fi_setopt(&bind_ep->fid, FI_OPT_ENDPOINT, FI_OPT_MAX_MSG_SIZE,
+				&opts.max_msg_size, sizeof opts.max_msg_size);
 		if (ret && ret != -FI_EOPNOTSUPP) {
 			FT_PRINTERR("fi_setopt(FI_OPT_MAX_MSG_SIZE)", ret);
 			return ret;
@@ -1450,6 +1482,15 @@ int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *
 				&opts.inject_size, sizeof opts.inject_size);
 		if (ret && ret != -FI_EOPNOTSUPP) {
 			FT_PRINTERR("fi_setopt(FI_OPT_INJECT_RMA_SIZE)", ret);
+			return ret;
+		}
+	}
+
+	if (opts.min_multi_recv_size) {
+		ret = fi_setopt(&bind_ep->fid, FI_OPT_ENDPOINT, FI_OPT_MIN_MULTI_RECV,
+				&opts.min_multi_recv_size, sizeof opts.min_multi_recv_size);
+		if (ret && ret != -FI_EOPNOTSUPP) {
+			FT_PRINTERR("fi_setopt(FI_OPT_MIN_MULTI_RECV_SIZE)", ret);
 			return ret;
 		}
 	}
@@ -1910,8 +1951,7 @@ void ft_free_res(void)
 		buf = rx_buf = tx_buf = NULL;
 		buf_size = rx_size = tx_size = tx_mr_size = rx_mr_size = 0;
 	}
-	if (dev_host_buf)
-		ft_free_host_tx_buf();
+	ft_free_host_bufs();
 
 	if (fi_pep) {
 		fi_freeinfo(fi_pep);
@@ -2441,18 +2481,18 @@ ssize_t ft_post_atomic(enum ft_atomic_opcodes opcode, struct fid_ep *ep,
 	switch (opcode) {
 	case FT_ATOMIC_BASE:
 		FT_POST(fi_atomic, ft_progress, txcq, tx_seq, &tx_cq_cntr,
-			"fi_atomic", ep, buf, count, mr_desc, remote_fi_addr,
+			"fi_atomic", ep, tx_buf, count, mr_desc, remote_fi_addr,
 			remote->addr, remote->key, datatype, atomic_op, context);
 		break;
 	case FT_ATOMIC_FETCH:
 		FT_POST(fi_fetch_atomic, ft_progress, txcq, tx_seq, &tx_cq_cntr,
-			"fi_fetch_atomic", ep, buf, count, mr_desc, result,
+			"fi_fetch_atomic", ep, tx_buf, count, mr_desc, result,
 			result_desc, remote_fi_addr, remote->addr, remote->key,
 			datatype, atomic_op, context);
 		break;
 	case FT_ATOMIC_COMPARE:
 		FT_POST(fi_compare_atomic, ft_progress, txcq, tx_seq,
-			&tx_cq_cntr, "fi_compare_atomic", ep, buf, count,
+			&tx_cq_cntr, "fi_compare_atomic", ep, tx_buf, count,
 			mr_desc, compare, compare_desc, result, result_desc,
 			remote_fi_addr, remote->addr, remote->key, datatype,
 			atomic_op, context);
@@ -2883,7 +2923,7 @@ int ft_tx_msg(struct fid_ep *ep, fi_addr_t fi_addr, void *buf, size_t size, void
 }
 
 int ft_sendmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-		void *buf, size_t size, void *ctx, int flags)
+		void *buf, size_t size, void *ctx, uint64_t flags)
 {
 	struct fi_msg msg;
 	struct fi_msg_tagged tagged_msg;
@@ -2922,14 +2962,14 @@ int ft_sendmsg(struct fid_ep *ep, fi_addr_t fi_addr,
 }
 
 
-int ft_recvmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-	       size_t size, void *ctx, int flags)
+int ft_recvmsg(struct fid_ep *ep, fi_addr_t fi_addr, void *buf,
+	       size_t size, void *ctx, uint64_t flags)
 {
 	struct fi_msg msg;
 	struct fi_msg_tagged tagged_msg;
 	struct iovec msg_iov;
 
-	msg_iov.iov_base = rx_buf;
+	msg_iov.iov_base = (char *) buf;
 	msg_iov.iov_len = size;
 
 	if (hints->caps & FI_TAGGED) {
@@ -2939,7 +2979,7 @@ int ft_recvmsg(struct fid_ep *ep, fi_addr_t fi_addr,
 		tagged_msg.addr = fi_addr;
 		tagged_msg.data = NO_CQ_DATA;
 		tagged_msg.context = ctx;
-		tagged_msg.tag = ft_tag ? ft_tag : tx_seq;
+		tagged_msg.tag = ft_tag ? ft_tag : rx_seq;
 		tagged_msg.ignore = 0;
 
 		FT_POST(fi_trecvmsg, ft_progress, rxcq, rx_seq,
@@ -3051,7 +3091,7 @@ int ft_sync_inband(bool repost_rx)
 	int ret;
 
 	if (opts.dst_addr) {
-		ret = ft_tx_msg(ep, remote_fi_addr, tx_buf, 1, &tx_ctx,
+		ret = ft_tx_msg(ep, remote_fi_addr, tx_buf, 0, &tx_ctx,
 				FI_DELIVERY_COMPLETE);
 		if (ret)
 			return ret;
@@ -3064,7 +3104,7 @@ int ft_sync_inband(bool repost_rx)
 		if (ret)
 			return ret;
 
-		ret = ft_tx_msg(ep, remote_fi_addr, tx_buf, 1, &tx_ctx,
+		ret = ft_tx_msg(ep, remote_fi_addr, tx_buf, 0, &tx_ctx,
 				FI_DELIVERY_COMPLETE);
 		if (ret)
 			return ret;
@@ -3729,6 +3769,189 @@ int ft_fill_buf(void *buf, size_t size)
 	}
 out:
 	return ret;
+}
+
+int ft_fill_atomic(void *buf, size_t count, enum fi_datatype datatype)
+{
+	void *fill_buf;
+	int ret = 0;
+
+	if (opts.iface != FI_HMEM_SYSTEM) {
+		assert(dev_host_buf);
+		fill_buf = dev_host_buf;
+	} else {
+		fill_buf = buf;
+	}
+
+	switch (datatype) {
+	case FI_INT8:
+	case FI_UINT8:
+	case FI_INT16:
+	case FI_UINT16:
+	case FI_INT32:
+	case FI_UINT32:
+	case FI_INT64:
+	case FI_UINT64:
+	case FI_INT128:
+	case FI_UINT128:
+	case FI_FLOAT:
+	case FI_DOUBLE:
+	case FI_LONG_DOUBLE:
+		SWITCH_REAL_TYPES(datatype, FT_FILL, fill_buf, count);
+		break;
+	case FI_FLOAT_COMPLEX:
+	case FI_DOUBLE_COMPLEX:
+	case FI_LONG_DOUBLE_COMPLEX:
+		SWITCH_COMPLEX_TYPES(datatype, FT_FILL_COMPLEX, fill_buf, count);
+		break;
+	default:
+		return -FI_EOPNOTSUPP;
+	}
+
+	if (opts.iface != FI_HMEM_SYSTEM) {
+		ret = ft_hmem_copy_to(opts.iface, opts.device, buf, fill_buf,
+				      count * datatype_to_size(datatype));
+		if (ret)
+			FT_ERR("Failed to fill atomic buffer\n");
+	}
+	return ret;
+}
+
+static int ft_check_atomic_compare(void *buf, void *cmp,
+				   enum fi_datatype datatype, size_t count)
+{
+	switch (datatype) {
+	case FI_INT8:
+	case FI_UINT8:
+	case FI_INT16:
+	case FI_UINT16:
+	case FI_INT32:
+	case FI_UINT32:
+	case FI_INT64:
+	case FI_UINT64:
+	case FI_INT128:
+	case FI_UINT128:
+	case FI_FLOAT:
+	case FI_DOUBLE:
+	case FI_LONG_DOUBLE:
+		SWITCH_REAL_TYPES(datatype, FT_CHECK, buf, cmp, count);
+		break;
+	case FI_FLOAT_COMPLEX:
+	case FI_DOUBLE_COMPLEX:
+	case FI_LONG_DOUBLE_COMPLEX:
+		SWITCH_COMPLEX_TYPES(datatype, FT_CHECK_COMPLEX, buf, cmp,
+				     count);
+		break;
+	default:
+		return -FI_EOPNOTSUPP;
+	}
+	return 0;
+}
+
+int ft_check_atomic(enum ft_atomic_opcodes atomic, enum fi_op op,
+		    enum fi_datatype type, void *src, void *dst_cpy, void *dst,
+		    void *cmp, void *res, size_t count)
+{
+	int ret = 0;
+	void *check_res = res, *check_buf, *check_comp = cmp;
+
+	/*
+	 * If we don't have the test function, return > 0 to indicate
+	 * verification is unsupported.
+	 */
+	if (atomic == FT_ATOMIC_COMPARE) {
+		if (!ofi_atomic_swap_handler(op, type))
+			return 1;
+	} else if (atomic == FT_ATOMIC_FETCH) {
+		if (!ofi_atomic_readwrite_handler(op, type))
+			return 1;
+	} else {
+		if (!ofi_atomic_write_handler(op, type))
+			return 1;
+	}
+
+	if (atomic == FT_ATOMIC_COMPARE || atomic == FT_ATOMIC_FETCH) {
+		if (opts.iface != FI_HMEM_SYSTEM) {
+			assert(dev_host_res);
+			ret = ft_hmem_copy_from(opts.iface, opts.device,
+						dev_host_res, res,
+						count * datatype_to_size(type));
+			if (ret) {
+				FT_ERR("Failed to copy from atomic buffer\n");
+				return ret;
+			}
+
+			check_res = dev_host_res;
+		} else {
+			check_res = res;
+		}
+		if (ft_check_atomic_compare(dst_cpy, check_res, type, count)) {
+			printf("Data check error on atomic fetch buffer\n");
+			return -1;
+		}
+	}
+
+	if (atomic == FT_ATOMIC_COMPARE) {
+		if (opts.iface != FI_HMEM_SYSTEM) {
+			assert(dev_host_comp);
+			ret = ft_hmem_copy_from(opts.iface, opts.device,
+						dev_host_comp, cmp,
+						count * datatype_to_size(type));
+			if (ret) {
+				FT_ERR("Failed to copy from atomic buffer\n");
+				return ret;
+			}
+			check_comp = dev_host_comp;
+		} else {
+			check_comp = cmp;
+		}
+	}
+
+	if (opts.iface != FI_HMEM_SYSTEM) {
+		assert(dev_host_buf);
+		ret = ft_hmem_copy_from(opts.iface, opts.device, dev_host_buf,
+					src, count * datatype_to_size(type));
+		if (ret) {
+			FT_ERR("Failed to copy from atomic buffer\n");
+			return ret;
+		}
+
+		check_buf = dev_host_buf;
+
+	} else {
+		check_buf = src;
+	}
+
+	if (atomic == FT_ATOMIC_COMPARE) {
+		ofi_atomic_swap_op(op, type, dst_cpy, check_buf, check_comp,
+				   check_res, count);
+	} else if (atomic == FT_ATOMIC_FETCH) {
+		ofi_atomic_readwrite_op(op, type, dst_cpy, check_buf,
+					check_res, count);
+	} else {
+		ofi_atomic_write_op(op, type, dst_cpy, check_buf, count);
+	}
+
+	if (opts.iface != FI_HMEM_SYSTEM) {
+		ret = ft_hmem_copy_from(opts.iface, opts.device,
+					dev_host_buf, dst,
+					count * datatype_to_size(type));
+		if (ret) {
+			FT_ERR("Failed to copy from atomic buffer\n");
+			return ret;
+		}
+
+		check_buf = dev_host_buf;
+	} else {
+		check_buf = dst;
+	}
+
+	if (ft_check_atomic_compare(dst_cpy, check_buf, type, count)) {
+		printf("Data check error on atomic target buffer\n");
+		return -1;
+	}
+
+	return FI_SUCCESS;
 }
 
 int ft_check_buf(void *buf, size_t size)

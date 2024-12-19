@@ -629,8 +629,9 @@ static int cxip_ux_send(struct cxip_req *match_req, struct cxip_req *oflow_req,
 
 	/* Copy data out of overflow buffer. */
 	oflow_bytes = MIN(put_event->tgt_long.mlength, match_req->data_len);
-	cxip_copy_to_md(match_req->recv.recv_md, match_req->recv.recv_buf,
-			oflow_va, oflow_bytes);
+	cxip_ep_obj_copy_to_md(match_req->recv.rxc->ep_obj,
+			       match_req->recv.recv_md,
+			       match_req->recv.recv_buf, oflow_va, oflow_bytes);
 
 	if (oflow_req->type == CXIP_REQ_OFLOW)
 		oflow_req_put_bytes(oflow_req, put_event->tgt_long.mlength);
@@ -1066,7 +1067,7 @@ int cxip_rdzv_pte_zbp_cb(struct cxip_req *req, const union c_event *event)
 		 */
 		cxip_report_send_completion(put_req, true);
 
-		ofi_atomic_dec32(&put_req->send.txc->otx_reqs);
+		cxip_txc_otx_reqs_dec(put_req->send.txc);
 		cxip_evtq_req_free(put_req);
 
 		return FI_SUCCESS;
@@ -1337,12 +1338,13 @@ static int cxip_recv_rdzv_cb(struct cxip_req *req, const union c_event *event)
 				if (req->recv.multi_recv &&
 				    !req->recv.rdzv_events) {
 					dlist_remove(&req->recv.children);
+					req->recv.parent->recv.multirecv_inflight--;
 					cxip_evtq_req_free(req);
 				}
 				return -FI_EAGAIN;
 			}
 
-			RXC_DBG(rxc, "Software issued Get, req: %p\n", req);
+			RXC_DBG(rxc, "Software issued RGet, req: %p\n", req);
 		}
 
 		/* Count the rendezvous event. */
@@ -1357,17 +1359,22 @@ static int cxip_recv_rdzv_cb(struct cxip_req *req, const union c_event *event)
 		}
 
 		/* If a rendezvous operation requires a done notification
-		 * send it. Must wait for the ACK from the notify to be returned
-		 * before completing the target operation.
+		 * it was initiated by software. Re-use the existing
+		 * rendezvous get TX credit. Need to wait for the ACK from
+		 * the done notify to be returned before releasing the
+		 * TX credit and completing the target operation.
 		 */
-		if (req->recv.done_notify) {
-			if (ofi_atomic_inc32(&rxc->orx_tx_reqs) >
-			    rxc->base.max_tx || cxip_rdzv_done_notify(req)) {
+		if (req->recv.done_notify && cxip_rdzv_done_notify(req))
+			return -FI_EAGAIN;
 
-				/* Could not issue notify, will be retried */
-				ofi_atomic_dec32(&rxc->orx_tx_reqs);
-				return -FI_EAGAIN;
-			}
+		/* If RGet initiated by software return the TX credit unless
+		 * it will be used for sending an alt_read done_notify message.
+		 */
+		if (!event->init_short.rendezvous &&
+		    !req->recv.done_notify) {
+			ofi_atomic_dec32(&req->recv.rxc_hpc->orx_tx_reqs);
+			assert(ofi_atomic_get32(&req->recv.rxc_hpc->orx_tx_reqs)
+			       >= 0);
 		}
 
 		/* Rendezvous Get completed, update event counts and
@@ -1375,13 +1382,6 @@ static int cxip_recv_rdzv_cb(struct cxip_req *req, const union c_event *event)
 		 */
 		req->recv.rc = cxi_init_event_rc(event);
 		rdzv_recv_req_event(req, event->hdr.event_type);
-
-		/* If RGet initiated by software return the TX credit */
-		if (!event->init_short.rendezvous) {
-			ofi_atomic_dec32(&req->recv.rxc_hpc->orx_tx_reqs);
-			assert(ofi_atomic_get32(&req->recv.rxc_hpc->orx_tx_reqs)
-			       >= 0);
-		}
 
 		return FI_SUCCESS;
 
@@ -1394,7 +1394,7 @@ static int cxip_recv_rdzv_cb(struct cxip_req *req, const union c_event *event)
 
 		/* Special case of the ZBP destination EQ being full and ZBP
 		 * could not complete. This must be retried, we use the TX
-		 * credit already allocated.
+		 * credit already allocated for the done notify.
 		 */
 		if (event_rc == C_RC_ENTRY_NOT_FOUND) {
 			usleep(CXIP_DONE_NOTIFY_RETRY_DELAY_US);
@@ -2059,14 +2059,14 @@ static void cxip_ux_onload_complete(struct cxip_req *req)
 	rxc->sw_pending_ux_list_len = 0;
 
 	RXC_WARN(rxc, "Software UX list updated, %d SW UX entries\n",
-		 rxc->sw_ux_list_len);
+		rxc->sw_ux_list_len);
 
 	if (rxc->base.state == RXC_PENDING_PTLTE_SOFTWARE_MANAGED)
 		cxip_post_ux_onload_sw(rxc);
 	else
 		cxip_post_ux_onload_fc(rxc);
 
-	ofi_atomic_dec32(&rxc->base.orx_reqs);
+	cxip_rxc_orx_reqs_dec(&rxc->base);
 	cxip_evtq_req_free(req);
 }
 
@@ -2126,6 +2126,7 @@ static int cxip_ux_onload_cb(struct cxip_req *req, const union c_event *event)
 	struct cxip_deferred_event *def_ev;
 	struct cxip_ux_send *ux_send;
 	bool matched;
+	struct fid_peer_srx *owner_srx = cxip_get_owner_srx(&rxc->base);
 
 	assert(rxc->base.state == RXC_ONLOAD_FLOW_CONTROL ||
 	       rxc->base.state == RXC_ONLOAD_FLOW_CONTROL_REENABLE ||
@@ -2180,8 +2181,13 @@ static int cxip_ux_onload_cb(struct cxip_req *req, const union c_event *event)
 		}
 		rxc->cur_ule_offsets++;
 
-		dlist_insert_tail(&ux_send->rxc_entry, &rxc->sw_ux_list);
-		rxc->sw_ux_list_len++;
+		/* TODO: support onloading in peer mode */
+		if (owner_srx) {
+			RXC_FATAL(rxc, "Software onloading is currently not supported in peer mode\n");
+		} else {
+			dlist_insert_tail(&ux_send->rxc_entry, &rxc->sw_ux_list);
+			rxc->sw_ux_list_len++;
+		}
 
 		RXC_DBG(rxc, "Onloaded Send: %p\n", ux_send);
 
@@ -2253,7 +2259,7 @@ static int cxip_ux_onload(struct cxip_rxc_hpc *rxc)
 		ret = -FI_EAGAIN;
 		goto err_free_onload_offset;
 	}
-	ofi_atomic_inc32(&rxc->base.orx_reqs);
+	cxip_rxc_orx_reqs_inc(&rxc->base);
 
 	req->cb = cxip_ux_onload_cb;
 	req->type = CXIP_REQ_SEARCH;
@@ -2279,7 +2285,7 @@ static int cxip_ux_onload(struct cxip_rxc_hpc *rxc)
 	return FI_SUCCESS;
 
 err_dec_free_cq_req:
-	ofi_atomic_dec32(&rxc->base.orx_reqs);
+	cxip_rxc_orx_reqs_dec(&rxc->base);
 	cxip_evtq_req_free(req);
 err_free_onload_offset:
 	free(rxc->ule_offsets);
@@ -2304,7 +2310,7 @@ static int cxip_flush_appends_cb(struct cxip_req *req,
 
 	ret = cxip_ux_onload(rxc);
 	if (ret == FI_SUCCESS) {
-		ofi_atomic_dec32(&rxc->base.orx_reqs);
+		cxip_rxc_orx_reqs_dec(&rxc->base);
 		cxip_evtq_req_free(req);
 	}
 
@@ -3034,7 +3040,9 @@ static void cxip_set_ux_dump_entry(struct cxip_req *req,
 		}
 
 		if (src_addr && req->recv.rxc->attr.caps & FI_SOURCE)
-			*src_addr = cxip_recv_req_src_addr(req);
+			*src_addr = cxip_recv_req_src_addr(req->recv.rxc,
+					req->recv.initiator,
+					req->recv.vni, false);
 	}
 }
 
@@ -3179,19 +3187,23 @@ static int cxip_recv_sw_matched(struct cxip_req *req,
 		/* Make sure we can issue the RGet; if not we stall
 		 * and TX event queue progress will free up credits.
 		 */
-		if (ofi_atomic_inc32(&rxc->orx_tx_reqs) > rxc->base.max_tx) {
-			ofi_atomic_dec32(&rxc->orx_tx_reqs);
-			return -FI_EAGAIN;
-		}
+		do {
+			if (ofi_atomic_inc32(&rxc->orx_tx_reqs) <=
+			    rxc->base.max_tx)
+				break;
 
-		ret = cxip_ux_send(req, ux_send->req, &ux_send->put_ev,
-				   mrecv_start, mrecv_len, req_done);
-		if (ret != FI_SUCCESS) {
-			req->recv.start_offset -= mrecv_len;
 			ofi_atomic_dec32(&rxc->orx_tx_reqs);
+			cxip_evtq_progress(&rxc->base.ep_obj->txc->tx_evtq);
+		} while (true);
 
-			return ret;
-		}
+		do {
+			ret = cxip_ux_send(req, ux_send->req, &ux_send->put_ev,
+					   mrecv_start, mrecv_len, req_done);
+			if (ret == FI_SUCCESS)
+				break;
+
+			cxip_evtq_progress(&rxc->base.ep_obj->txc->tx_evtq);
+		} while (true);
 
 		/* If multi-recv, a child request was created from
 		 * cxip_ux_send(). Need to lookup this request.
@@ -3243,7 +3255,7 @@ static int cxip_recv_sw_matched(struct cxip_req *req,
 
 		if (ret != FI_SUCCESS) {
 			/* undo mrecv_req_put_bytes() */
-			req->recv.start_offset -= mrecv_len;
+			req->recv.start_offset = mrecv_start;
 			return ret;
 		}
 	}
@@ -3314,6 +3326,192 @@ static int cxip_recv_sw_matcher(struct cxip_rxc_hpc *rxc, struct cxip_req *req,
 	return ret;
 }
 
+static int
+cxip_recv_req_init(struct cxip_rxc *rxc, void *buf, size_t len, fi_addr_t addr,
+		uint64_t tag, uint64_t ignore, uint64_t flags, bool tagged,
+		void *context, struct cxip_cntr *comp_cntr,
+		struct cxip_req **req_out)
+{
+	struct cxip_req *req;
+	uint32_t match_id;
+	int ret;
+	uint16_t vni;
+
+	if (len && !buf) {
+		ret = -FI_EINVAL;
+		goto err;
+	}
+
+	if (rxc->state == RXC_DISABLED) {
+		ret = -FI_EOPBADSTATE;
+		goto err;
+	}
+
+	/* HW to SW PtlTE transition, ensure progress is made */
+	if (rxc->state != RXC_ENABLED && rxc->state != RXC_ENABLED_SOFTWARE) {
+		cxip_cq_progress(rxc->recv_cq);
+		ret = -FI_EAGAIN;
+		goto err;
+	}
+
+	if (tagged) {
+		if (tag & ~CXIP_TAG_MASK || ignore & ~CXIP_TAG_MASK) {
+			RXC_WARN(rxc,
+				 "Invalid tag: %#018lx ignore: %#018lx (%#018lx)\n",
+				 tag, ignore, CXIP_TAG_MASK);
+			ret = -FI_EINVAL;
+			goto err;
+		}
+		flags &= ~FI_MULTI_RECV;
+	}
+
+	ret = cxip_set_recv_match_id(rxc, addr, rxc->ep_obj->av_auth_key &&
+				     (flags & FI_AUTH_KEY), &match_id, &vni);
+	if (ret) {
+		RXC_WARN(rxc, "Error setting match_id: %d %s\n",
+			 ret, fi_strerror(-ret));
+		goto err;
+	}
+
+	ofi_genlock_lock(&rxc->ep_obj->lock);
+	ret = cxip_recv_req_alloc(rxc, buf, len, NULL, &req, cxip_recv_cb);
+	ofi_genlock_unlock(&rxc->ep_obj->lock);
+	if (ret)
+		return ret;
+
+	/* req->data_len, req->tag, req->data must be set later. req->buf may
+	 * be overwritten later.
+	 */
+	req->context = (uint64_t)context;
+
+	req->flags = FI_RECV | (flags & FI_COMPLETION);
+	if (tagged)
+		req->flags |= FI_TAGGED;
+	else
+		req->flags |= FI_MSG;
+
+	req->recv.cntr = comp_cntr ? comp_cntr : rxc->recv_cntr;
+	req->recv.match_id = match_id;
+	req->recv.tag = tag;
+	req->recv.ignore = ignore;
+	req->recv.flags = flags;
+	req->recv.tagged = tagged;
+	req->recv.multi_recv = (flags & FI_MULTI_RECV ? true : false);
+
+	*req_out = req;
+
+	return FI_SUCCESS;
+
+err:
+	return ret;
+}
+
+int cxip_unexp_start(struct fi_peer_rx_entry *rx_entry)
+{
+	int ret;
+	struct cxip_ux_send *ux;
+	union cxip_match_bits ux_mb;
+	struct cxip_req *req;
+	struct cxip_rxc *rxc;
+
+	ux = rx_entry->peer_context;
+	ux_mb.raw = ux->put_ev.tgt_long.match_bits;
+	rxc = ux->rxc;
+
+	ret = cxip_recv_req_init(rxc, rx_entry->iov[0].iov_base,
+				rx_entry->iov[0].iov_len, rx_entry->addr,
+				rx_entry->tag, 0, rx_entry->flags,
+				ux_mb.tagged, rx_entry->context, NULL, &req);
+	if (ret)
+		return ret;
+
+	req->rx_entry = rx_entry;
+
+	ret = cxip_recv_sw_matched(req, ux);
+	if (ret == -FI_EAGAIN)
+		return ret;
+
+	/* FI_EINPROGRESS is return for a multi-recv match. */
+	assert(ret == FI_SUCCESS || ret == -FI_EINPROGRESS);
+
+	if (ux->req && ux->req->type == CXIP_REQ_RBUF)
+		cxip_req_buf_ux_free(ux);
+	else
+		free(ux);
+
+	RXC_DBG(rxc,
+		"Software match, req: %p ux_send: %p\n", req, ux);
+
+	return ret;
+}
+
+static int cxip_process_srx_ux_matcher(struct cxip_rxc *rxc,
+		struct fid_peer_srx *owner_srx, struct cxip_ux_send *ux)
+{
+	int ret;
+	uint32_t ux_init;
+	union cxip_match_bits ux_mb;
+	struct fi_peer_rx_entry *rx_entry = NULL;
+	struct cxip_req *req;
+	uint16_t vni;
+	struct fi_peer_match_attr match = {0};
+
+	/* stash the rxc because we're going to need it if the peer
+	 * address isn't already inserted into the AV table.
+	 */
+	ux->rxc = rxc;
+	ux_init = ux->put_ev.tgt_long.initiator.initiator.process;
+	vni = ux->put_ev.tgt_long.vni;
+
+	match.addr = cxip_recv_req_src_addr(rxc, ux_init, vni, true);
+
+	ux_mb.raw = ux->put_ev.tgt_long.match_bits;
+
+	if (ux_mb.tagged) {
+		match.tag = ux_mb.tag;
+		ret = owner_srx->owner_ops->get_tag(owner_srx, &match, &rx_entry);
+	} else {
+		ret = owner_srx->owner_ops->get_msg(owner_srx, &match, &rx_entry);
+	}
+
+	/* return it back to the caller */
+	ux->rx_entry = rx_entry;
+
+	if (ret == -FI_ENOENT) {
+		/* this is used when the owner calls start_msg */
+		rx_entry->peer_context = ux;
+		return -FI_ENOMSG;
+	} else if (ret) {
+		return ret;
+	}
+
+	ret = cxip_recv_req_init(rxc, rx_entry->iov[0].iov_base,
+				rx_entry->iov[0].iov_len, rx_entry->addr,
+				rx_entry->tag, 0, rx_entry->flags,
+				ux_mb.tagged, rx_entry->context, NULL, &req);
+	if (ret)
+		return ret;
+
+	req->rx_entry = rx_entry;
+
+	ret = cxip_recv_sw_matched(req, ux);
+	if (ret == -FI_EAGAIN)
+		return -FI_EAGAIN;
+
+	/* FI_EINPROGRESS is return for a multi-recv match. */
+	assert(ret == FI_SUCCESS || ret == -FI_EINPROGRESS);
+
+	if (ux->req && ux->req->type == CXIP_REQ_RBUF)
+		cxip_req_buf_ux_free(ux);
+	else
+		free(ux);
+
+	RXC_DBG(rxc,
+		"Software match, req: %p ux_send: %p\n", req, ux);
+
+	return ret;
+}
+
 /*
  * cxip_recv_ux_sw_matcher() - Attempt to match an unexpected message to a user
  * posted receive.
@@ -3324,9 +3522,16 @@ int cxip_recv_ux_sw_matcher(struct cxip_ux_send *ux)
 {
 	struct cxip_ptelist_buf *rbuf = ux->req->req_ctx;
 	struct cxip_rxc_hpc *rxc = rbuf->rxc;
+	struct fid_peer_srx *owner_srx = cxip_get_owner_srx(&rxc->base);
 	struct cxip_req *req;
 	struct dlist_entry *tmp;
 	int ret;
+
+	if (owner_srx) {
+		/* we never add anything on the sw_ux_list */
+		rxc->sw_ux_list_len--;
+		return cxip_process_srx_ux_matcher(&rxc->base, owner_srx, ux);
+	}
 
 	if (dlist_empty(&rxc->sw_recv_queue))
 		return -FI_ENOMSG;
@@ -3464,8 +3669,7 @@ static int cxip_recv_req_queue(struct cxip_req *req, bool restart_seq)
 		if (ret)
 			goto err_dequeue_req;
 	} else {
-
-		req->recv.software_list = true;
+		req->recv.hw_offloaded = false;
 		dlist_insert_tail(&req->recv.rxc_entry, &rxc->sw_recv_queue);
 	}
 
@@ -3866,7 +4070,7 @@ static int cxip_rxc_check_recv_count_hybrid_preempt(struct cxip_rxc *rxc)
 
 	if (cxip_env.rx_match_mode == CXIP_PTLTE_HYBRID_MODE &&
 	    cxip_env.hybrid_posted_recv_preemptive == 1) {
-		count = ofi_atomic_get32(&rxc->orx_reqs);
+		count = cxip_rxc_orx_reqs_get(rxc);
 
 		if (count > rxc->attr.size) {
 			assert(rxc->state == RXC_ENABLED);
@@ -3985,71 +4189,16 @@ cxip_recv_common(struct cxip_rxc *rxc, void *buf, size_t len, void *desc,
 	int ret;
 	struct cxip_req *req;
 	struct cxip_ux_send *ux_msg;
-	uint32_t match_id;
-	uint16_t vni;
 
 	assert(rxc_hpc->base.protocol == FI_PROTO_CXI);
 
-	if (len && !buf)
-		return -FI_EINVAL;
-
-	if (rxc->state == RXC_DISABLED)
-		return -FI_EOPBADSTATE;
-
-	/* HW to SW PtlTE transition, ensure progress is made */
-	if (rxc->state != RXC_ENABLED && rxc->state != RXC_ENABLED_SOFTWARE) {
-		cxip_cq_progress(rxc->recv_cq);
-		return -FI_EAGAIN;
-	}
-
-	if (tagged) {
-		if (tag & ~CXIP_TAG_MASK || ignore & ~CXIP_TAG_MASK) {
-			RXC_WARN(rxc,
-				 "Invalid tag: %#018lx ignore: %#018lx (%#018lx)\n",
-				 tag, ignore, CXIP_TAG_MASK);
-			return -FI_EINVAL;
-		}
-	}
-
-	ret = cxip_set_recv_match_id(rxc, src_addr, rxc->ep_obj->av_auth_key &&
-				     (flags & FI_AUTH_KEY), &match_id, &vni);
-	if (ret) {
-		RXC_WARN(rxc, "Error setting match_id: %d %s\n",
-			 ret, fi_strerror(-ret));
-		return ret;
-	}
-
-	ofi_genlock_lock(&rxc->ep_obj->lock);
-	ret = cxip_recv_req_alloc(rxc, buf, len, NULL, &req, cxip_recv_cb);
+	ret = cxip_recv_req_init(rxc, buf, len, src_addr, tag, ignore, flags,
+				 tagged, context, comp_cntr, &req);
 	if (ret)
 		goto err;
 
-	/* req->data_len, req->tag, req->data must be set later. req->buf may
-	 * be overwritten later.
-	 */
-	req->context = (uint64_t)context;
-
-	req->flags = FI_RECV | (flags & FI_COMPLETION);
-	if (tagged)
-		req->flags |= FI_TAGGED;
-	else
-		req->flags |= FI_MSG;
-
-	req->recv.cntr = comp_cntr ? comp_cntr : rxc->recv_cntr;
-	req->recv.match_id = match_id;
-	req->recv.tag = tag;
-	req->recv.ignore = ignore;
-	req->recv.flags = flags;
-	req->recv.tagged = tagged;
-	req->recv.multi_recv = (flags & FI_MULTI_RECV ? true : false);
-
-	if (rxc->state != RXC_ENABLED && rxc->state != RXC_ENABLED_SOFTWARE) {
-		ret = -FI_EAGAIN;
-		goto err_free_request;
-	}
-
+	ofi_genlock_lock(&rxc->ep_obj->lock);
 	if (!(req->recv.flags & (FI_PEEK | FI_CLAIM))) {
-
 		ret = cxip_recv_req_queue(req, false);
 		/* Match made in software? */
 		if (ret == -FI_EALREADY) {
@@ -4108,9 +4257,8 @@ cxip_recv_common(struct cxip_rxc *rxc, void *buf, size_t len, void *desc,
 
 err_free_request:
 	cxip_recv_req_free(req);
-err:
 	ofi_genlock_unlock(&rxc->ep_obj->lock);
-
+err:
 	return ret;
 }
 
@@ -4125,7 +4273,7 @@ static void rdzv_send_req_complete(struct cxip_req *req)
 
 	cxip_report_send_completion(req, true);
 
-	ofi_atomic_dec32(&req->send.txc->otx_reqs);
+	cxip_txc_otx_reqs_dec(req->send.txc);
 	cxip_evtq_req_free(req);
 }
 
@@ -4460,7 +4608,7 @@ static int cxip_send_eager_cb(struct cxip_req *req,
 	/* If MATCH_COMPLETE was requested, software must manage counters. */
 	cxip_report_send_completion(req, match_complete);
 
-	ofi_atomic_dec32(&req->send.txc->otx_reqs);
+	cxip_txc_otx_reqs_dec(req->send.txc);
 	cxip_evtq_req_free(req);
 
 	return FI_SUCCESS;
@@ -4885,7 +5033,7 @@ int cxip_fc_resume(struct cxip_ep_obj *ep_obj, uint32_t nic_addr, uint32_t pid,
 		 * a TXC credit for replay. _cxip_send_req() will take the
 		 * credit again.
 		 */
-		ofi_atomic_dec32(&txc->base.otx_reqs);
+		cxip_txc_otx_reqs_dec(&txc->base);
 
 		/* -FI_EAGAIN can be return if the command queue is full. Loop
 		 * until this goes through.
@@ -5159,7 +5307,7 @@ cxip_send_common(struct cxip_txc *txc, uint32_t tclass, const void *buf,
 	}
 
 	/* Restrict outstanding success event requests to queue size */
-	if (ofi_atomic_get32(&txc->otx_reqs) >= txc->attr.size) {
+	if (cxip_txc_otx_reqs_get(txc) >= txc->attr.size) {
 		ret = -FI_EAGAIN;
 		goto err_req_free;
 	}

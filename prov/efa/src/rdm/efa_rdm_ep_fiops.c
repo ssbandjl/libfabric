@@ -26,14 +26,6 @@ void efa_rdm_ep_construct_ibv_qp_init_attr_ex(struct efa_rdm_ep *ep,
 	attr_ex->cap.max_recv_sge = ep->base_ep.domain->device->rdm_info->rx_attr->iov_limit;
 	attr_ex->cap.max_inline_data = ep->base_ep.domain->device->efa_attr.inline_buf_size;
 	attr_ex->qp_type = IBV_QPT_DRIVER;
-	attr_ex->comp_mask = IBV_QP_INIT_ATTR_PD | IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
-	attr_ex->send_ops_flags = IBV_QP_EX_WITH_SEND | IBV_QP_EX_WITH_SEND_WITH_IMM;
-	if (efa_device_support_rdma_read())
-		attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_READ;
-	if (efa_device_support_rdma_write()) {
-		attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE;
-		attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE_WITH_IMM;
-	}
 	attr_ex->pd = efa_rdm_ep_domain(ep)->ibv_pd;
 	attr_ex->qp_context = ep;
 	attr_ex->sq_sig_all = 1;
@@ -236,7 +228,9 @@ int efa_rdm_ep_create_buffer_pools(struct efa_rdm_ep *ep)
 	ret = ofi_bufpool_create(&ep->user_rx_pkt_pool,
 			sizeof(struct efa_rdm_pke),
 			EFA_RDM_BUFPOOL_ALIGNMENT,
-			0, ep->base_ep.info->rx_attr->size, 0);
+			ep->base_ep.info->rx_attr->size,
+			ep->base_ep.info->rx_attr->size, /* max count==chunk_cnt means pool is not allowed to grow */
+			0);
 	if (ret)
 		goto err_free;
 
@@ -434,7 +428,6 @@ static inline
 void efa_rdm_ep_set_use_zcpy_rx(struct efa_rdm_ep *ep)
 {
 	enum fi_hmem_iface iface;
-	struct efa_hmem_info *hmem_info;
 	uint64_t unsupported_caps = FI_DIRECTED_RECV | FI_TAGGED | FI_ATOMIC;
 
 	ep->use_zcpy_rx = true;
@@ -454,9 +447,12 @@ void efa_rdm_ep_set_use_zcpy_rx(struct efa_rdm_ep *ep)
 	}
 
 	/* Max msg size is too large, turn off zcpy recv */
-	if (ep->max_msg_size > ep->mtu_size - ep->base_ep.info->ep_attr->msg_prefix_size) {
-		EFA_INFO(FI_LOG_EP_CTRL, "max_msg_size (%zu) is greater than the mtu size limit: %zu. Zero-copy receive protocol will be disabled.\n",
-			ep->max_msg_size, ep->mtu_size - ep->base_ep.info->ep_attr->msg_prefix_size);
+	if (ep->base_ep.max_msg_size > ep->mtu_size - ep->base_ep.info->ep_attr->msg_prefix_size) {
+		EFA_INFO(FI_LOG_EP_CTRL,
+			 "max_msg_size (%zu) is greater than the mtu size limit: %zu. "
+			 "Zero-copy receive protocol will be disabled.\n",
+			 ep->base_ep.max_msg_size,
+			 ep->mtu_size - ep->base_ep.info->ep_attr->msg_prefix_size);
 		ep->use_zcpy_rx = false;
 		goto out;
 	}
@@ -482,11 +478,11 @@ void efa_rdm_ep_set_use_zcpy_rx(struct efa_rdm_ep *ep)
 	}
 
 	/* Zero-copy receive requires P2P support. Disable it if any initialized HMEM iface does not support P2P. */
-	for (iface = FI_HMEM_SYSTEM; iface < OFI_HMEM_MAX; ++iface) {
-		hmem_info = &ep->base_ep.domain->hmem_info[iface];
-		if (hmem_info->initialized &&
-		    !hmem_info->p2p_disabled_by_user &&
-		    !hmem_info->p2p_supported_by_device) {
+	EFA_HMEM_IFACE_FOREACH_NON_SYSTEM(iface) {
+		if (g_efa_hmem_info[iface].initialized &&
+		    (ofi_hmem_p2p_disabled() ||
+		    ep->hmem_p2p_opt == FI_HMEM_P2P_DISABLED ||
+		    !g_efa_hmem_info[iface].p2p_supported_by_device)) {
 			EFA_INFO(FI_LOG_EP_CTRL,
 			         "%s does not support P2P, zero-copy receive "
 			         "protocol will be disabled\n",
@@ -530,6 +526,7 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 	struct efa_domain *efa_domain = NULL;
 	struct efa_rdm_ep *efa_rdm_ep = NULL;
 	int ret, retv, i;
+	enum fi_hmem_iface iface;
 
 	efa_rdm_ep = calloc(1, sizeof(*efa_rdm_ep));
 	if (!efa_rdm_ep)
@@ -557,14 +554,11 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 		EFA_INFO(FI_LOG_EP_CTRL, "efa_rdm_ep->host_id: i-%017lx\n", efa_rdm_ep->host_id);
 	}
 
-	efa_rdm_ep->max_msg_size = info->ep_attr->max_msg_size;
 	efa_rdm_ep->max_tagged_size = info->ep_attr->max_msg_size;
-	efa_rdm_ep->max_rma_size = info->ep_attr->max_msg_size;
 	efa_rdm_ep->max_atomic_size = info->ep_attr->max_msg_size;
-	efa_rdm_ep->inject_msg_size = info->tx_attr->inject_size;
 	efa_rdm_ep->inject_tagged_size = info->tx_attr->inject_size;
-	efa_rdm_ep->inject_rma_size = info->tx_attr->inject_size;
 	efa_rdm_ep->inject_atomic_size = info->tx_attr->inject_size;
+	efa_rdm_ep->base_ep.inject_rma_size = info->tx_attr->inject_size;
 	efa_rdm_ep->efa_max_outstanding_tx_ops = efa_domain->device->rdm_info->tx_attr->size;
 	efa_rdm_ep->efa_max_outstanding_rx_ops = efa_domain->device->rdm_info->rx_attr->size;
 	efa_rdm_ep->use_device_rdma = efa_rdm_get_use_device_rdma(info->fabric_attr->api_version);
@@ -606,6 +600,7 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 
 	efa_rdm_ep_init_linked_lists(efa_rdm_ep);
 
+	efa_rdm_ep->cuda_api_permitted = (FI_VERSION_GE(info->fabric_attr->api_version, FI_VERSION(1, 18)));
 	/* Set hmem_p2p_opt */
 	efa_rdm_ep->hmem_p2p_opt = FI_HMEM_P2P_DISABLED;
 
@@ -615,16 +610,21 @@ int efa_rdm_ep_open(struct fid_domain *domain, struct fi_info *info,
 	 * tighter requirements for the default p2p opt
 	 */
 	EFA_HMEM_IFACE_FOREACH_NON_SYSTEM(i) {
-		if (efa_rdm_ep->base_ep.domain->hmem_info[efa_hmem_ifaces[i]].initialized &&
-			efa_rdm_ep->base_ep.domain->hmem_info[efa_hmem_ifaces[i]].p2p_supported_by_device) {
-			efa_rdm_ep->hmem_p2p_opt = efa_rdm_ep->base_ep.domain->hmem_info[efa_hmem_ifaces[i]].p2p_required_by_impl
-				? FI_HMEM_P2P_REQUIRED
-				: FI_HMEM_P2P_PREFERRED;
+		iface = efa_hmem_ifaces[i];
+		if (g_efa_hmem_info[iface].initialized &&
+		    g_efa_hmem_info[iface].p2p_supported_by_device) {
+			/* If user is using libfabric API 1.18 or later, by default EFA
+	 		 * provider is permitted to use CUDA library to support CUDA
+	 		 * memory, therefore p2p is not required.
+	 		 */
+			efa_rdm_ep->hmem_p2p_opt =
+				(iface == FI_HMEM_CUDA && efa_rdm_ep->cuda_api_permitted) ?
+				FI_HMEM_P2P_PREFERRED :
+				FI_HMEM_P2P_REQUIRED;
 			break;
 		}
 	}
 
-	efa_rdm_ep->cuda_api_permitted = (FI_VERSION_GE(info->fabric_attr->api_version, FI_VERSION(1, 18)));
 	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = false;
 	efa_rdm_ep->write_in_order_aligned_128_bytes = false;
 
@@ -942,6 +942,42 @@ void efa_rdm_ep_remove_cq_ibv_cq_poll_list(struct efa_rdm_ep *ep)
 }
 
 /**
+ * @brief Clean efa_rdm_ep's shm ep level resources as the best effort
+ *
+ * @param efa_rdm_ep pointer to efa rdm ep
+ * @return int FI_SUCCESS on success, negative integer on failure
+ */
+static int efa_rdm_ep_close_shm_ep_resources(struct efa_rdm_ep *efa_rdm_ep)
+{
+	int ret, retv = 0;
+
+	if (efa_rdm_ep->shm_srx) {
+		ret = fi_close(&efa_rdm_ep->shm_srx->fid);
+		if (ret) {
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm srx\n");
+			retv = ret;
+		}
+		efa_rdm_ep->shm_srx = NULL;
+	}
+
+	if (efa_rdm_ep->shm_peer_srx) {
+		free(efa_rdm_ep->shm_peer_srx);
+		efa_rdm_ep->shm_peer_srx = NULL;
+	}
+
+	if (efa_rdm_ep->shm_ep) {
+		ret = fi_close(&efa_rdm_ep->shm_ep->fid);
+		if (ret) {
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm ep\n");
+			retv = ret;
+		}
+		efa_rdm_ep->shm_ep = NULL;
+	}
+
+	return retv;
+}
+
+/**
  * @brief implement the fi_close() API for the EFA RDM endpoint
  * @param[in,out]	fid		Endpoint to close
  */
@@ -981,13 +1017,9 @@ static int efa_rdm_ep_close(struct fid *fid)
 		retv = ret;
 	}
 
-	if (efa_rdm_ep->shm_ep) {
-		ret = fi_close(&efa_rdm_ep->shm_ep->fid);
-		if (ret) {
-			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm EP\n");
-			retv = ret;
-		}
-	}
+	ret = efa_rdm_ep_close_shm_ep_resources(efa_rdm_ep);
+	if (ret)
+		retv = ret;
 
 	efa_rdm_ep_destroy_buffer_pools(efa_rdm_ep);
 
@@ -1053,12 +1085,8 @@ static void efa_rdm_ep_close_shm_resources(struct efa_rdm_ep *efa_rdm_ep)
 	struct efa_av *efa_av;
 	struct efa_rdm_cq *efa_rdm_cq;
 
-	if (efa_rdm_ep->shm_ep) {
-		ret = fi_close(&efa_rdm_ep->shm_ep->fid);
-		if (ret)
-			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close shm ep\n");
-		efa_rdm_ep->shm_ep = NULL;
-	}
+
+	(void) efa_rdm_ep_close_shm_ep_resources(efa_rdm_ep);
 
 	efa_av = efa_rdm_ep->base_ep.av;
 	if (efa_av->shm_rdm_av) {
@@ -1174,6 +1202,9 @@ int efa_rdm_ep_insert_cntr_ibv_cq_poll_list(struct efa_rdm_ep *ep)
 				if (ret)
 					return ret;
 			}
+			ofi_genlock_lock(&efa_cntr->util_cntr.ep_list_lock);
+			efa_cntr->need_to_scan_ep_list = true;
+			ofi_genlock_unlock(&efa_cntr->util_cntr.ep_list_lock);
 		}
 	}
 
@@ -1199,6 +1230,9 @@ int efa_rdm_ep_insert_cq_ibv_cq_poll_list(struct efa_rdm_ep *ep)
 			if (ret)
 				return ret;
 		}
+		ofi_genlock_lock(&tx_cq->util_cq.ep_list_lock);
+		tx_cq->need_to_scan_ep_list = true;
+		ofi_genlock_unlock(&tx_cq->util_cq.ep_list_lock);
 	}
 
 	if (rx_cq) {
@@ -1211,6 +1245,9 @@ int efa_rdm_ep_insert_cq_ibv_cq_poll_list(struct efa_rdm_ep *ep)
 			if (ret)
 				return ret;
 		}
+		ofi_genlock_lock(&rx_cq->util_cq.ep_list_lock);
+		rx_cq->need_to_scan_ep_list = true;
+		ofi_genlock_unlock(&rx_cq->util_cq.ep_list_lock);
 	}
 
 	return FI_SUCCESS;
@@ -1230,7 +1267,6 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 	int ret = 0;
 	struct fi_peer_srx_context peer_srx_context = {0};
 	struct fi_rx_attr peer_srx_attr = {0};
-	struct fid_ep *peer_srx_ep = NULL;
 	struct util_srx_ctx *srx_ctx;
 
 	switch (command) {
@@ -1255,8 +1291,14 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 		 * TODO: Distinguish between inline data sizes for RDMA {send,write}
 		 * when supported
 		 */
-		if (ep->use_zcpy_rx)
-			ep->inject_rma_size = MIN(ep->inject_rma_size, efa_rdm_ep_domain(ep)->device->efa_attr.inline_buf_size);
+		if (ep->use_zcpy_rx) {
+			ep->base_ep.inject_msg_size =
+				MIN(ep->base_ep.inject_msg_size,
+				    efa_rdm_ep_domain(ep)->device->efa_attr.inline_buf_size);
+			ep->base_ep.inject_rma_size =
+				MIN(ep->base_ep.inject_rma_size,
+				    efa_rdm_ep_domain(ep)->device->efa_attr.inline_buf_size);
+		}
 
 		ret = efa_rdm_ep_create_base_ep_ibv_qp(ep);
 		if (ret)
@@ -1294,26 +1336,36 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 		 * shared memory region.
 		 */
 		if (ep->shm_ep) {
-			peer_srx_context.srx = util_get_peer_srx(ep->peer_srx_ep);
+			ep->shm_peer_srx = calloc(1, sizeof(*ep->shm_peer_srx));
+			if (!ep->shm_peer_srx) {
+				ret = -FI_ENOMEM;
+				goto err_close_shm;
+			}
+			memcpy(ep->shm_peer_srx, util_get_peer_srx(ep->peer_srx_ep),
+			       sizeof(*ep->shm_peer_srx));
+
+			peer_srx_context.size = sizeof(peer_srx_context);
+			peer_srx_context.srx = ep->shm_peer_srx;
+
 			peer_srx_attr.op_flags |= FI_PEER;
 			ret = fi_srx_context(efa_rdm_ep_domain(ep)->shm_domain,
-				&peer_srx_attr, &peer_srx_ep, &peer_srx_context);
+				&peer_srx_attr, &ep->shm_srx, &peer_srx_context);
 			if (ret)
-				goto err_unlock;
+				goto err_close_shm;
 			shm_ep_name_len = EFA_SHM_NAME_MAX;
 			ret = efa_shm_ep_name_construct(shm_ep_name, &shm_ep_name_len, &ep->base_ep.src_addr);
 			if (ret < 0)
-				goto err_unlock;
+				goto err_close_shm;
 			fi_setname(&ep->shm_ep->fid, shm_ep_name, shm_ep_name_len);
 
 			/* Bind srx to shm ep */
-			ret = fi_ep_bind(ep->shm_ep, &ep->peer_srx_ep->fid, 0);
+			ret = fi_ep_bind(ep->shm_ep, &ep->shm_srx->fid, 0);
 			if (ret)
-				goto err_unlock;
+				goto err_close_shm;
 
 			ret = fi_enable(ep->shm_ep);
 			if (ret)
-				goto err_unlock;
+				goto err_close_shm;
 		}
 		ofi_genlock_unlock(srx_ctx->lock);
 		break;
@@ -1324,7 +1376,8 @@ static int efa_rdm_ep_ctrl(struct fid *fid, int command, void *arg)
 
 	return ret;
 
-err_unlock:
+err_close_shm:
+	efa_rdm_ep_close_shm_ep_resources(ep);
 	ofi_genlock_unlock(srx_ctx->lock);
 err_destroy_qp:
 	efa_base_ep_destruct_qp(&ep->base_ep);
@@ -1373,7 +1426,9 @@ static int efa_rdm_ep_set_fi_hmem_p2p_opt(struct efa_rdm_ep *efa_rdm_ep, int opt
 	 * tighter restrictions on valid p2p options.
 	 */
 	EFA_HMEM_IFACE_FOREACH_NON_SYSTEM(i) {
-		err = efa_domain_hmem_validate_p2p_opt(efa_rdm_ep_domain(efa_rdm_ep), efa_hmem_ifaces[i], opt);
+		err = efa_hmem_validate_p2p_opt(
+			efa_hmem_ifaces[i], opt,
+			efa_rdm_ep->base_ep.info->fabric_attr->api_version);
 		if (err == -FI_ENODATA)
 			continue;
 
@@ -1409,7 +1464,7 @@ static int efa_rdm_ep_set_cuda_api_permitted(struct efa_rdm_ep *ep, bool cuda_ap
 	/* CUDA memory can be supported by using either peer to peer or CUDA API. If neither is
 	 * available, we cannot support CUDA memory
 	 */
-	if (!efa_rdm_ep_domain(ep)->hmem_info[FI_HMEM_CUDA].p2p_supported_by_device)
+	if (!g_efa_hmem_info[FI_HMEM_CUDA].p2p_supported_by_device)
 		return -FI_EOPNOTSUPP;
 
 	ep->cuda_api_permitted = false;
@@ -1595,7 +1650,6 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 {
 	struct efa_rdm_ep *efa_rdm_ep;
 	int intval, ret;
-	struct util_srx_ctx *srx;
 
 	efa_rdm_ep = container_of(fid, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
 
@@ -1608,8 +1662,6 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 			return -FI_EINVAL;
 
 		efa_rdm_ep->min_multi_recv_size = *(size_t *)optval;
-		srx = util_get_peer_srx(efa_rdm_ep->peer_srx_ep)->ep_fid.fid.context;
-		srx->min_multi_recv_size = *(size_t *)optval;
 		break;
 	case FI_OPT_EFA_RNR_RETRY:
 		if (optlen != sizeof(size_t))
@@ -1663,25 +1715,25 @@ static int efa_rdm_ep_setopt(fid_t fid, int level, int optname,
 			return ret;
 		break;
 	case FI_OPT_MAX_MSG_SIZE:
-		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_MSG_SIZE, efa_rdm_ep->max_msg_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
+		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_MSG_SIZE, efa_rdm_ep->base_ep.max_msg_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
 		break;
 	case FI_OPT_MAX_TAGGED_SIZE:
 		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_TAGGED_SIZE, efa_rdm_ep->max_tagged_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
 		break;
 	case FI_OPT_MAX_RMA_SIZE:
-		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_RMA_SIZE, efa_rdm_ep->max_rma_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
+		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_RMA_SIZE, efa_rdm_ep->base_ep.max_rma_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
 		break;
 	case FI_OPT_MAX_ATOMIC_SIZE:
 		EFA_RDM_EP_SETOPT_THRESHOLD(MAX_ATOMIC_SIZE, efa_rdm_ep->max_atomic_size, efa_rdm_ep->base_ep.info->ep_attr->max_msg_size)
 		break;
 	case FI_OPT_INJECT_MSG_SIZE:
-		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_MSG_SIZE, efa_rdm_ep->inject_msg_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
+		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_MSG_SIZE, efa_rdm_ep->base_ep.inject_msg_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
 		break;
 	case FI_OPT_INJECT_TAGGED_SIZE:
 		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_TAGGED_SIZE, efa_rdm_ep->inject_tagged_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
 		break;
 	case FI_OPT_INJECT_RMA_SIZE:
-		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_RMA_SIZE, efa_rdm_ep->inject_rma_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
+		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_RMA_SIZE, efa_rdm_ep->base_ep.inject_rma_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
 		break;
 	case FI_OPT_INJECT_ATOMIC_SIZE:
 		EFA_RDM_EP_SETOPT_THRESHOLD(INJECT_ATOMIC_SIZE, efa_rdm_ep->inject_atomic_size, efa_rdm_ep->base_ep.info->tx_attr->inject_size)
@@ -1765,7 +1817,7 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 	case FI_OPT_MAX_MSG_SIZE:
 		if (*optlen < sizeof (size_t))
 			return -FI_ETOOSMALL;
-		*(size_t *) optval = efa_rdm_ep->max_msg_size;
+		*(size_t *) optval = efa_rdm_ep->base_ep.max_msg_size;
 		*optlen = sizeof (size_t);
 		break;
 	case FI_OPT_MAX_TAGGED_SIZE:
@@ -1777,7 +1829,7 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 	case FI_OPT_MAX_RMA_SIZE:
 		if (*optlen < sizeof (size_t))
 			return -FI_ETOOSMALL;
-		*(size_t *) optval = efa_rdm_ep->max_rma_size;
+		*(size_t *) optval = efa_rdm_ep->base_ep.max_rma_size;
 		*optlen = sizeof (size_t);
 		break;
 	case FI_OPT_MAX_ATOMIC_SIZE:
@@ -1789,7 +1841,7 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 	case FI_OPT_INJECT_MSG_SIZE:
 		if (*optlen < sizeof (size_t))
 			return -FI_ETOOSMALL;
-		*(size_t *) optval = efa_rdm_ep->inject_msg_size;
+		*(size_t *) optval = efa_rdm_ep->base_ep.inject_msg_size;
 		*optlen = sizeof (size_t);
 		break;
 	case FI_OPT_INJECT_TAGGED_SIZE:
@@ -1801,7 +1853,7 @@ static int efa_rdm_ep_getopt(fid_t fid, int level, int optname, void *optval,
 	case FI_OPT_INJECT_RMA_SIZE:
 		if (*optlen < sizeof (size_t))
 			return -FI_ETOOSMALL;
-		*(size_t *) optval = efa_rdm_ep->inject_rma_size;
+		*(size_t *) optval = efa_rdm_ep->base_ep.inject_rma_size;
 		*optlen = sizeof (size_t);
 		break;
 	case FI_OPT_INJECT_ATOMIC_SIZE:

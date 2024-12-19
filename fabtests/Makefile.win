@@ -46,7 +46,7 @@ CFLAGS = $(CFLAGS) /O2 /MT
 basedeps = common\hmem.c common\shared.c \
 	common\windows\getopt.c common\windows\osd.c \
 	common\hmem_cuda.c common\hmem_rocr.c common\hmem_ze.c \
-	common\hmem_neuron.c common\hmem_synapseai.c
+	common\hmem_neuron.c common\hmem_synapseai.c common\ofi_atomic.c
 
 includes = /Iinclude /Iinclude\windows /I..\include /FIft_osd.h \
 	/Iinclude\windows\getopt /Imultinode\include
@@ -77,7 +77,7 @@ benchmarks: $(outdir)\dgram_pingpong.exe $(outdir)\msg_bw.exe \
 	$(outdir)\rdm_pingpong.exe $(outdir)\rma_pingpong.exe $(outdir)\rdm_tagged_bw.exe \
 	$(outdir)\rdm_bw.exe $(outdir)\rdm_tagged_pingpong.exe $(outdir)\rma_bw.exe
 
-functional: $(outdir)\av_xfer.exe $(outdir)\bw.exe $(outdir)\cm_data.exe $(outdir)\cq_data.exe \
+functional: $(outdir)\av_xfer.exe $(outdir)\flood.exe $(outdir)\cm_data.exe $(outdir)\cq_data.exe \
 	$(outdir)\dgram.exe $(outdir)\msg.exe $(outdir)\msg_epoll.exe \
 	$(outdir)\inject_test.exe $(outdir)\msg_sockets.exe $(outdir)\multi_mr.exe \
 	$(outdir)\multi_ep.exe $(outdir)\multi_recv.exe $(outdir)\rdm.exe \
@@ -120,7 +120,7 @@ $(outdir)\rma_bw.exe: {benchmarks}rma_bw.c $(basedeps) {benchmarks}benchmark_sha
 
 $(outdir)\av_xfer.exe: {functional}av_xfer.c $(basedeps)
 
-$(outdir)\bw.exe: {functional}bw.c $(basedeps)
+$(outdir)\flood.exe: {functional}flood.c $(basedeps)
 
 $(outdir)\cm_data.exe: {functional}cm_data.c $(basedeps)
 

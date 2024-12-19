@@ -51,6 +51,26 @@ Test(mr, invalid_fi_directed_recv_flag)
 	cr_assert_eq(ret, -FI_EINVAL, "fi_mr_regattr failed: %d", ret);
 }
 
+Test(mr, invalid_client_rkey)
+{
+	int ret;
+	struct fi_mr_attr attr = {};
+	struct iovec iov = {};
+	struct fid_mr *mr;
+
+	iov.iov_len = sizeof(ret);
+	iov.iov_base = (void *)&ret;
+
+	attr.mr_iov = &iov;
+	attr.iov_count = 1;
+	attr.access = FI_REMOTE_READ | FI_REMOTE_WRITE;
+	attr.requested_key = ~1;
+
+	ret = fi_mr_regattr(cxit_domain, &attr, 0, &mr);
+	if ((cxit_fi->domain_attr->mr_mode & FI_MR_PROV_KEY) != FI_MR_PROV_KEY)
+		cr_assert_eq(ret, -FI_EKEYREJECTED, "fi_mr_regattr failed: %d", ret);
+}
+
 Test(mr, std_mrs, .timeout = 600, .disabled = true)
 {
 	int std_mr_cnt = 16*1024;
@@ -159,7 +179,7 @@ Test(mr, mr_zero_len)
 /* Validate that unique keys are enforced. */
 Test(mr, mr_unique_key)
 {
-	char buf[256];
+	char buf[256] = {};
 	struct fid_mr *mr1;
 	struct fid_mr *mr2;
 	int ret;
@@ -185,7 +205,7 @@ Test(mr, mr_unique_key)
 /* Validate not recycling non-cached FI_MR_PROV_KEY */
 Test(mr, mr_recycle)
 {
-	char buf[256];
+	char buf[256] = {};
 	struct fid_mr *mr1;
 	struct fid_mr *mr2;
 	struct fid_mr *mr3;
@@ -273,7 +293,7 @@ Test(mr, mr_recycle)
 /* Validate that RKEY are not required for local MR */
 Test(mr, mr_no_local_rkey)
 {
-	char buf[256];
+	char buf[256] = {};
 	struct fid_mr *mr1;
 	struct fid_mr *mr2;
 	uint64_t rkey = 0;

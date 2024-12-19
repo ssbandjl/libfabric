@@ -54,15 +54,15 @@ struct efa_rdm_ep {
 
 	/* shm provider fid */
 	struct fid_ep *shm_ep;
+	/* shm srx fid (shm-owned) */
+	struct fid_ep *shm_srx;
+	/* shm peer_srx (efa-owned) */
+	struct fid_peer_srx *shm_peer_srx;
 
 	size_t mtu_size;
-	size_t max_msg_size;		/**< #FI_OPT_MAX_MSG_SIZE */
 	size_t max_tagged_size;		/**< #FI_OPT_MAX_TAGGED_SIZE */
-	size_t max_rma_size;		/**< #FI_OPT_MAX_RMA_SIZE */
 	size_t max_atomic_size;		/**< #FI_OPT_MAX_ATOMIC_SIZE */
-	size_t inject_msg_size;		/**< #FI_OPT_INJECT_MSG_SIZE */
 	size_t inject_tagged_size;	/**< #FI_OPT_INJECT_TAGGED_SIZE */
-	size_t inject_rma_size;		/**< #FI_OPT_INJECT_RMA_SIZE */
 	size_t inject_atomic_size;	/**< #FI_OPT_INJECT_ATOMIC_SIZE */
 
 	/* Endpoint's capability to support zero-copy rx */
@@ -263,6 +263,8 @@ struct efa_domain *efa_rdm_ep_domain(struct efa_rdm_ep *ep)
 
 void efa_rdm_ep_post_internal_rx_pkts(struct efa_rdm_ep *ep);
 
+int efa_rdm_ep_bulk_post_internal_rx_pkts(struct efa_rdm_ep *ep);
+
 /**
  * @brief return whether this endpoint should write error cq entry for RNR.
  *
@@ -303,7 +305,7 @@ int efa_rdm_ep_use_p2p(struct efa_rdm_ep *efa_rdm_ep, struct efa_mr *efa_mr)
 	if (!efa_mr || efa_mr->peer.iface == FI_HMEM_SYSTEM)
 		return 1;
 
-	if (efa_rdm_ep_domain(efa_rdm_ep)->hmem_info[efa_mr->peer.iface].p2p_supported_by_device)
+	if (g_efa_hmem_info[efa_mr->peer.iface].p2p_supported_by_device)
 		return (efa_rdm_ep->hmem_p2p_opt != FI_HMEM_P2P_DISABLED);
 
 	if (efa_rdm_ep->hmem_p2p_opt == FI_HMEM_P2P_REQUIRED) {

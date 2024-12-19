@@ -487,22 +487,17 @@ static int cuda_hmem_dl_init(void)
 		return -FI_ENOSYS;
 	}
 
-	cuda_attr.driver_handle = dlopen("libcuda.so", RTLD_NOW);
+	cuda_attr.driver_handle = dlopen("libcuda.so.1", RTLD_NOW);
 	if (!cuda_attr.driver_handle) {
 		FI_WARN(&core_prov, FI_LOG_CORE,
-			"Failed to dlopen libcuda.so\n");
+			"Failed to dlopen libcuda.so.1\n");
 		goto err_dlclose_cuda_runtime;
 	}
 
-	cuda_attr.nvml_handle = dlopen("libnvidia-ml.so", RTLD_NOW);
+	cuda_attr.nvml_handle = dlopen("libnvidia-ml.so.1", RTLD_NOW);
 	if (!cuda_attr.nvml_handle) {
-		FI_INFO(&core_prov, FI_LOG_CORE,
-			"Failed to dlopen libnvidia-ml.so.  Trying libnvidia-ml.so.1\n");
-		cuda_attr.nvml_handle = dlopen("libnvidia-ml.so.1", RTLD_NOW);
-		if (!cuda_attr.nvml_handle) {
-			FI_WARN(&core_prov, FI_LOG_CORE,
-			"Failed to dlopen libnvidia-ml.so or libnvidia-ml.so.1, bypassing nvml calls\n");
-		}
+		FI_WARN(&core_prov, FI_LOG_CORE,
+			"Failed to dlopen libnvidia-ml.so.1, bypassing nvml calls\n");
 	}
 
 	CUDA_DRIVER_FUNCS_DEF(CUDA_DRIVER_FUNCS_DLOPEN)
@@ -763,6 +758,9 @@ int cuda_hmem_init(void)
 			"If libfabric is not compiled with gdrcopy support, "
 			"this variable is not checked. (default: true)");
 
+	fi_param_define(NULL, "hmem_cuda_use_dmabuf", FI_PARAM_BOOL,
+			"Use dma-buf for sharing buffer with hardware. (default:true)");
+
 	ret = cuda_hmem_dl_init();
 	if (ret != FI_SUCCESS)
 		return ret;
@@ -936,7 +934,11 @@ bool cuda_is_gdrcopy_enabled(void)
 
 bool cuda_is_dmabuf_supported(void)
 {
-	return cuda_attr.dmabuf_supported;
+	int use_dmabuf = 1;
+
+	fi_param_get_bool(NULL, "hmem_cuda_use_dmabuf", &use_dmabuf);
+
+	return use_dmabuf && cuda_attr.dmabuf_supported;
 }
 
 #else

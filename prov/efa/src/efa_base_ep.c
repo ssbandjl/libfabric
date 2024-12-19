@@ -86,6 +86,9 @@ int efa_base_ep_destruct(struct efa_base_ep *base_ep)
 
 	if (base_ep->efa_recv_wr_vec)
 		free(base_ep->efa_recv_wr_vec);
+	
+	if (base_ep->user_recv_wr_vec)
+		free(base_ep->user_recv_wr_vec);
 
 	return err;
 }
@@ -175,24 +178,44 @@ int efa_qp_create(struct efa_qp **qp, struct ibv_qp_init_attr_ex *init_attr_ex, 
 	if (!*qp)
 		return -FI_ENOMEM;
 
+	init_attr_ex->comp_mask = IBV_QP_INIT_ATTR_PD | IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
+	init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_SEND | IBV_QP_EX_WITH_SEND_WITH_IMM;
+
 	if (init_attr_ex->qp_type == IBV_QPT_UD) {
 		(*qp)->ibv_qp = ibv_create_qp_ex(init_attr_ex->pd->context,
 					      init_attr_ex);
 	} else {
 		assert(init_attr_ex->qp_type == IBV_QPT_DRIVER);
+		if (efa_device_support_rdma_read())
+			init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_READ;
+		if (efa_device_support_rdma_write()) {
+			init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE;
+			init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE_WITH_IMM;
+		}
 #if HAVE_CAPS_UNSOLICITED_WRITE_RECV
 		if (efa_rdm_use_unsolicited_write_recv())
 			efa_attr.flags |= EFADV_QP_FLAGS_UNSOLICITED_WRITE_RECV;
 #endif
 		efa_attr.driver_qp_type = EFADV_QP_DRIVER_TYPE_SRD;
 #if HAVE_EFADV_SL
+		efa_attr.sl = EFA_QP_DEFAULT_SERVICE_LEVEL;
 		if (tclass == FI_TC_LOW_LATENCY)
-			efa_attr.sl = EFA_QP_DEFAULT_SERVICE_LEVEL;
+			efa_attr.sl = EFA_QP_LOW_LATENCY_SERVICE_LEVEL;
 #endif
 		(*qp)->ibv_qp = efadv_create_qp_ex(
 			init_attr_ex->pd->context, init_attr_ex, &efa_attr,
 			sizeof(struct efadv_qp_init_attr));
 	}
+
+#if HAVE_EFADV_SL
+	if (!(*qp)->ibv_qp && tclass == FI_TC_LOW_LATENCY) {
+		EFA_INFO(FI_LOG_EP_CTRL, "ibv_create_qp failed with sl %u, errno: %d. Retrying with default sl.\n", efa_attr.sl, errno);
+		efa_attr.sl = EFA_QP_DEFAULT_SERVICE_LEVEL;
+		(*qp)->ibv_qp = efadv_create_qp_ex(
+			init_attr_ex->pd->context, init_attr_ex, &efa_attr,
+			sizeof(struct efadv_qp_init_attr));
+	}
+#endif
 
 	if (!(*qp)->ibv_qp) {
 		EFA_WARN(FI_LOG_EP_CTRL, "ibv_create_qp failed. errno: %d\n", errno);
@@ -327,16 +350,27 @@ int efa_base_ep_construct(struct efa_base_ep *base_ep,
 
 	base_ep->rnr_retry = efa_env.rnr_retry;
 
-	base_ep->xmit_more_wr_tail = &base_ep->xmit_more_wr_head;
-	base_ep->recv_more_wr_tail = &base_ep->recv_more_wr_head;
 	base_ep->efa_recv_wr_vec = calloc(sizeof(struct efa_recv_wr), EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV);
 	if (!base_ep->efa_recv_wr_vec) {
 		EFA_WARN(FI_LOG_EP_CTRL, "cannot alloc memory for base_ep->efa_recv_wr_vec!\n");
 		return -FI_ENOMEM;
 	}
+	base_ep->user_recv_wr_vec = calloc(sizeof(struct efa_recv_wr), EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV);
+	if (!base_ep->user_recv_wr_vec) {
+		EFA_WARN(FI_LOG_EP_CTRL, "cannot alloc memory for base_ep->user_recv_wr_vec!\n");
+		return -FI_ENOMEM;
+	}
+	base_ep->recv_wr_index = 0;
 	base_ep->efa_qp_enabled = false;
 	base_ep->qp = NULL;
 	base_ep->user_recv_qp = NULL;
+
+	base_ep->max_msg_size = info->ep_attr->max_msg_size;
+	base_ep->max_rma_size = info->ep_attr->max_msg_size;
+	base_ep->inject_msg_size = info->tx_attr->inject_size;
+	/* TODO: update inject_rma_size to inline size after firmware
+	 * supports inline rdma write */
+	base_ep->inject_rma_size = 0;
 	return 0;
 }
 

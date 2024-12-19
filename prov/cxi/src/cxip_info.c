@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0-only
  *
- * Copyright (c) 2019,2022 Hewlett Packard Enterprise Development LP
+ * Copyright (c) 2019,2022-2024 Hewlett Packard Enterprise Development LP
  */
 
 /* CXI fabric discovery implementation. */
@@ -249,8 +249,8 @@ struct fi_ep_attr cxip_ep_attr = {
 	.protocol = FI_PROTO_CXI,
 	.protocol_version = CXIP_WIRE_PROTO_VERSION,
 	.max_msg_size = CXIP_EP_MAX_MSG_SZ,
-	.max_order_raw_size = -1,
-	.max_order_war_size = -1,
+	.max_order_raw_size = 0,
+	.max_order_war_size = 0,
 	.max_order_waw_size = -1,
 	.mem_tag_format = FI_TAG_GENERIC >> (64 - CXIP_TAG_WIDTH),
 	.auth_key_size = sizeof(struct cxi_auth_key),
@@ -386,13 +386,13 @@ struct util_prov cxip_util_prov = {
 	.flags = 0,
 };
 
-int s_page_size;
+int sc_page_size;
 
 /* Get _SC_PAGESIZE */
 static void set_system_page_size(void)
 {
-	if (!s_page_size)
-		s_page_size = sysconf(_SC_PAGESIZE);
+	if (!sc_page_size)
+		sc_page_size = sysconf(_SC_PAGESIZE);
 }
 
 /*
@@ -510,6 +510,7 @@ static int cxip_info_init(void)
 			fi->tx_attr->inject_size = 0;
 			fi->rx_attr->msg_order = CXIP_MSG_ORDER & ~FI_ORDER_SAS;
 			fi->rx_attr->caps |= FI_DIRECTED_RECV;
+			fi->rx_attr->total_buffered_recv = 0;
 
 			CXIP_DBG("%s RNR info created\n",
 				 nic_if->info->device_name);
@@ -607,8 +608,6 @@ struct cxip_environment cxip_env = {
 	.force_odp = false,
 	.ats = false,
 	.iotlb = true,
-	.disable_dmabuf_cuda = false,
-	.disable_dmabuf_rocr = false,
 	.ats_mlock_mode = CXIP_ATS_MLOCK_ALL,
 	.fork_safe_requested = false,
 	.rx_match_mode = CXIP_PTLTE_DEFAULT_MODE,
@@ -649,7 +648,6 @@ struct cxip_environment cxip_env = {
 	.disable_eq_hugetlb = false,
 	.zbcoll_radix = 2,
 	.cq_fill_percent = 50,
-	.enable_unrestricted_end_ro = true,
 	.rget_tc = FI_TC_UNSPEC,
 	.cacheline_size = CXIP_DEFAULT_CACHE_LINE_SIZE,
 	.coll_job_id = NULL,
@@ -660,12 +658,19 @@ struct cxip_environment cxip_env = {
 	.coll_fabric_mgr_url = NULL,
 	.coll_retry_usec = CXIP_COLL_MAX_RETRY_USEC,
 	.coll_timeout_usec = CXIP_COLL_MAX_TIMEOUT_USEC,
+	.coll_fm_timeout_msec = CXIP_COLL_DFL_FM_TIMEOUT_MSEC,
 	.coll_use_dma_put = false,
 	.telemetry_rgid = -1,
 	.disable_hmem_dev_register = 0,
 	.ze_hmem_supported = 0,
 	.rdzv_proto = CXIP_RDZV_PROTO_DEFAULT,
 	.enable_trig_op_limit = false,
+	.mr_cache_events_disable_poll_nsecs =
+		CXIP_MR_CACHE_EVENTS_DISABLE_POLL_NSECS,
+	.mr_cache_events_disable_le_poll_nsecs =
+		CXIP_MR_CACHE_EVENTS_DISABLE_LE_POLL_NSECS,
+	.force_dev_reg_copy = false,
+	.mr_target_ordering = MR_ORDER_DEFAULT,
 };
 
 static void cxip_env_init(void)
@@ -738,11 +743,6 @@ static void cxip_env_init(void)
 	fi_param_get_bool(&cxip_prov, "disable_host_register",
 			  &cxip_env.disable_host_register);
 
-	fi_param_define(&cxip_prov, "enable_unrestricted_end_ro", FI_PARAM_BOOL,
-			"Default: %d", cxip_env.enable_unrestricted_end_ro);
-	fi_param_get_bool(&cxip_prov, "enable_unrestricted_end_ro",
-			  &cxip_env.enable_unrestricted_end_ro);
-
 	fi_param_define(&cxip_prov, "odp", FI_PARAM_BOOL,
 			"Enables on-demand paging (default %d).", cxip_env.odp);
 	fi_param_get_bool(&cxip_prov, "odp", &cxip_env.odp);
@@ -764,17 +764,17 @@ static void cxip_env_init(void)
 			"Enables the NIC IOTLB (default %d).", cxip_env.iotlb);
 	fi_param_get_bool(&cxip_prov, "iotlb", &cxip_env.iotlb);
 
-	fi_param_define(&cxip_prov, "disable_dmabuf_cuda", FI_PARAM_BOOL,
-			"Disables the DMABUF interface for CUDA (default %d).",
-			cxip_env.disable_dmabuf_cuda);
-	fi_param_get_bool(&cxip_prov, "disable_dmabuf_cuda",
-			  &cxip_env.disable_dmabuf_cuda);
+	/* Use ROCR DMABUF by default - honors the env if already set */
+	ret = setenv("FI_HMEM_ROCR_USE_DMABUF", "1", 0);
+	if (ret)
+		CXIP_INFO("Could not enable FI_HMEM_ROCR_USE_DMABUF ret:%d %s\n",
+			  ret, fi_strerror(errno));
 
-	fi_param_define(&cxip_prov, "disable_dmabuf_rocr", FI_PARAM_BOOL,
-			"Disables the DMABUF interface for ROCR (default %d).",
-			cxip_env.disable_dmabuf_rocr);
-	fi_param_get_bool(&cxip_prov, "disable_dmabuf_rocr",
-			  &cxip_env.disable_dmabuf_rocr);
+	/* Disable cuda DMABUF by default - honors the env if already set */
+	ret = setenv("FI_HMEM_CUDA_USE_DMABUF", "0", 0);
+	if (ret)
+		CXIP_INFO("Could not disable FI_HMEM_CUDA_USE_DMABUF ret:%d %s\n",
+			  ret, fi_strerror(errno));
 
 	fi_param_define(&cxip_prov, "ats_mlock_mode", FI_PARAM_STRING,
 			"Sets ATS mlock mode (off | all).");
@@ -828,27 +828,8 @@ static void cxip_env_init(void)
 
 	fi_param_define(&cxip_prov, "rx_match_mode", FI_PARAM_STRING,
 			"Sets RX message match mode (hardware | software | hybrid).");
-	fi_param_get_str(&cxip_prov, "rx_match_mode", &param_str);
 
-	if (param_str) {
-		if (!strcasecmp(param_str, "hardware")) {
-			cxip_env.rx_match_mode = CXIP_PTLTE_HARDWARE_MODE;
-			cxip_env.msg_offload = true;
-		} else if (!strcmp(param_str, "software")) {
-			cxip_env.rx_match_mode = CXIP_PTLTE_SOFTWARE_MODE;
-			cxip_env.msg_offload = false;
-		} else if (!strcmp(param_str, "hybrid")) {
-			cxip_env.rx_match_mode = CXIP_PTLTE_HYBRID_MODE;
-			cxip_env.msg_offload = true;
-		} else {
-			CXIP_WARN("Unrecognized rx_match_mode: %s\n",
-				  param_str);
-			cxip_env.rx_match_mode = CXIP_PTLTE_HARDWARE_MODE;
-			cxip_env.msg_offload = true;
-		}
-
-		param_str = NULL;
-	}
+	cxip_set_env_rx_match_mode();
 
 	fi_param_define(&cxip_prov, "rdzv_threshold", FI_PARAM_SIZE_T,
 			"Message size threshold for rendezvous protocol.");
@@ -1036,54 +1017,6 @@ static void cxip_env_init(void)
 	fi_param_get_size_t(&cxip_prov, "req_buf_max_cached",
 			    &cxip_env.req_buf_max_cached);
 
-	/* Parameters to tailor hybrid hardware to software transitions
-	 * that are initiated by software.
-	 */
-	fi_param_define(&cxip_prov, "hybrid_preemptive", FI_PARAM_BOOL,
-			"Enable/Disable low LE preemptive UX transitions.");
-	fi_param_get_bool(&cxip_prov, "hybrid_preemptive",
-			  &cxip_env.hybrid_preemptive);
-	if (cxip_env.rx_match_mode != CXIP_PTLTE_HYBRID_MODE &&
-	    cxip_env.hybrid_preemptive) {
-		cxip_env.hybrid_preemptive = false;
-		CXIP_WARN("Not in hybrid mode, ignoring preemptive\n");
-	}
-
-	fi_param_define(&cxip_prov, "hybrid_recv_preemptive", FI_PARAM_BOOL,
-			"Enable/Disable low LE preemptive recv transitions.");
-	fi_param_get_bool(&cxip_prov, "hybrid_recv_preemptive",
-			  &cxip_env.hybrid_recv_preemptive);
-
-	if (cxip_env.rx_match_mode != CXIP_PTLTE_HYBRID_MODE &&
-	    cxip_env.hybrid_recv_preemptive) {
-		CXIP_WARN("Not in hybrid mode, ignore LE  recv preemptive\n");
-		cxip_env.hybrid_recv_preemptive = 0;
-	}
-
-	fi_param_define(&cxip_prov, "hybrid_posted_recv_preemptive",
-			FI_PARAM_BOOL,
-			"Enable preemptive transition to software endpoint when number of posted receives exceeds RX attribute size");
-	fi_param_get_bool(&cxip_prov, "hybrid_posted_recv_preemptive",
-			  &cxip_env.hybrid_posted_recv_preemptive);
-
-	if (cxip_env.rx_match_mode != CXIP_PTLTE_HYBRID_MODE &&
-	    cxip_env.hybrid_posted_recv_preemptive) {
-		CXIP_WARN("Not in hybrid mode, ignore hybrid_posted_recv_preemptive\n");
-		cxip_env.hybrid_posted_recv_preemptive = 0;
-	}
-
-	fi_param_define(&cxip_prov, "hybrid_unexpected_msg_preemptive",
-			FI_PARAM_BOOL,
-			"Enable preemptive transition to software endpoint when number of hardware unexpected messages exceeds RX attribute size");
-	fi_param_get_bool(&cxip_prov, "hybrid_unexpected_msg_preemptive",
-			  &cxip_env.hybrid_unexpected_msg_preemptive);
-
-	if (cxip_env.rx_match_mode != CXIP_PTLTE_HYBRID_MODE &&
-	    cxip_env.hybrid_unexpected_msg_preemptive) {
-		CXIP_WARN("Not in hybrid mode, ignore hybrid_unexpected_msg_preemptive\n");
-		cxip_env.hybrid_unexpected_msg_preemptive = 0;
-	}
-
 	if (cxip_software_pte_allowed()) {
 		min_free = CXIP_REQ_BUF_HEADER_MAX_SIZE +
 			cxip_env.rdzv_threshold + cxip_env.rdzv_get_min;
@@ -1246,6 +1179,17 @@ static void cxip_env_init(void)
 	if (cxip_env.coll_timeout_usec > CXIP_COLL_MAX_TIMEOUT_USEC)
 		cxip_env.coll_timeout_usec = CXIP_COLL_MAX_TIMEOUT_USEC;
 
+	fi_param_define(&cxip_prov, "coll_fm_timeout_msec", FI_PARAM_SIZE_T,
+		"FM API timeout (msec) (default %d, min %d, max %d).",
+		cxip_env.coll_fm_timeout_msec, CXIP_COLL_MIN_FM_TIMEOUT_MSEC,
+		CXIP_COLL_MAX_FM_TIMEOUT_MSEC);
+	fi_param_get_size_t(&cxip_prov, "coll_fm_timeout_msec",
+			    &cxip_env.coll_fm_timeout_msec);
+	if (cxip_env.coll_fm_timeout_msec < CXIP_COLL_MIN_FM_TIMEOUT_MSEC)
+		cxip_env.coll_fm_timeout_msec = CXIP_COLL_MIN_FM_TIMEOUT_MSEC;
+	if (cxip_env.coll_fm_timeout_msec > CXIP_COLL_MAX_FM_TIMEOUT_MSEC)
+		cxip_env.coll_fm_timeout_msec = CXIP_COLL_MAX_FM_TIMEOUT_MSEC;
+
 	fi_param_define(&cxip_prov, "default_tx_size", FI_PARAM_SIZE_T,
 			"Default provider tx_attr.size (default: %lu).",
 			cxip_env.default_tx_size);
@@ -1324,6 +1268,42 @@ static void cxip_env_init(void)
 				  param_str);
 			cxip_env.rdzv_proto = CXIP_RDZV_PROTO_DEFAULT;
 		}
+
+		param_str = NULL;
+	}
+
+	fi_param_define(&cxip_prov, "mr_cache_events_disable_poll_nsecs", FI_PARAM_SIZE_T,
+			"Max amount of time to poll when disabling an MR configured with MR match events (default: %lu).",
+			cxip_env.mr_cache_events_disable_poll_nsecs);
+	fi_param_get_size_t(&cxip_prov, "mr_cache_events_disable_poll_nsecs",
+			    &cxip_env.mr_cache_events_disable_poll_nsecs);
+
+	fi_param_define(&cxip_prov, "mr_cache_events_disable_le_poll_nsecs", FI_PARAM_SIZE_T,
+			"Max amount of time to poll when LE invalidate disabling an MR configured with MR match events (default: %lu).",
+			cxip_env.mr_cache_events_disable_le_poll_nsecs);
+	fi_param_get_size_t(&cxip_prov, "mr_cache_events_disable_le_poll_nsecs",
+			    &cxip_env.mr_cache_events_disable_le_poll_nsecs);
+
+	fi_param_define(&cxip_prov, "force_dev_reg_copy", FI_PARAM_BOOL,
+			"Force device register copy operations. Default: %d",
+			cxip_env.force_dev_reg_copy);
+	fi_param_get_bool(&cxip_prov, "force_dev_reg_copy",
+			  &cxip_env.force_dev_reg_copy);
+
+	fi_param_define(&cxip_prov, "mr_target_ordering", FI_PARAM_STRING,
+			"MR target ordering (i.e. PCI ordering). Options: default, strict, or relaxed. Recommendation is to leave at default behavior.");
+	fi_param_get_str(&cxip_prov, "mr_target_ordering", &param_str);
+
+	if (param_str) {
+		if (!strcmp(param_str, "default"))
+			cxip_env.mr_target_ordering = MR_ORDER_DEFAULT;
+		else if (!strcmp(param_str, "strict"))
+			cxip_env.mr_target_ordering = MR_ORDER_STRICT;
+		else if (!strcmp(param_str, "relaxed"))
+			cxip_env.mr_target_ordering = MR_ORDER_RELAXED;
+		else
+			CXIP_WARN("Unrecognized mr_target_ordering: %s\n",
+				  param_str);
 
 		param_str = NULL;
 	}

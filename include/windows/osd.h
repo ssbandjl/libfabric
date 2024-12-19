@@ -930,11 +930,6 @@ static inline char *strcasestr(const char *haystack, const char *needle)
 	return pos;
 }
 
-static inline char *strtok_r(char *str, const char *delimiters, char **saveptr)
-{
-	return strtok_s(str, delimiters, saveptr);
-}
-
 #ifndef _SC_PAGESIZE
 #define _SC_PAGESIZE	0
 #endif
@@ -1054,12 +1049,16 @@ static inline ofi_complex_## type ofi_complex_prod_## type	\
 	res.imag = a.real * b.imag + a.imag * b.real;		\
 	return res;						\
 }								\
+static bool ofi_complex_is_true_## type (ofi_complex_ ## type a)\
+{								\
+	return a.real != 0 || a.imag != 0;			\
+}								\
 static inline ofi_complex_## type ofi_complex_land_## type	\
 	(ofi_complex_## type a, ofi_complex_## type b)		\
 {								\
 	ofi_complex_## type res;				\
-	res.real = (type)(((a.real != 0) || (a.imag != 0)) &&	\
-		((b.real != 0) || (b.imag != 0)));		\
+	res.real = (type)(ofi_complex_is_true_## type (a) &&	\
+			  ofi_complex_is_true_## type (b));	\
 	res.imag = 0;						\
 	return res;						\
 }								\
@@ -1067,8 +1066,8 @@ static inline ofi_complex_## type ofi_complex_lor_## type	\
 	(ofi_complex_## type a, ofi_complex_## type b)		\
 {								\
 	ofi_complex_## type res;				\
-	res.real = (type)(((a.real != 0) || (a.imag != 0)) &&	\
-		((b.real != 0) || (b.imag != 0)));		\
+	res.real = (type)(ofi_complex_is_true_## type (a) ||	\
+			  ofi_complex_is_true_## type (b));	\
 	res.imag = 0;						\
 	return res;						\
 }								\
@@ -1076,10 +1075,10 @@ static inline ofi_complex_## type ofi_complex_lxor_## type	\
 	(ofi_complex_## type a, ofi_complex_## type b)		\
 {								\
 	ofi_complex_## type res;				\
-	res.real = (type)((((a.real != 0) || (a.imag != 0)) &&	\
-		    !((b.real != 0) || (b.imag != 0))) ||	\
-		   (!((a.real != 0) || (a.imag != 0)) &&	\
-		    ((b.real != 0) || (b.imag != 0))));		\
+	res.real = (type)((ofi_complex_is_true_## type (a) &&	\
+			   !ofi_complex_is_true_## type (b))) || \
+			  (!ofi_complex_is_true_## type (a) &&	\
+			   ofi_complex_is_true_## type (b));	\
 	res.imag = 0;						\
 	return res;						\
 }

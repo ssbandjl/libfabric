@@ -955,12 +955,15 @@ struct rxm_av {
 	struct fid_peer_av peer_av;
 	struct fid_av *util_coll_av;
 	struct fid_av *offload_coll_av;
+	void (*foreach_ep)(struct util_av *av, struct util_ep *util_ep);
 };
 
 int rxm_util_av_open(struct fid_domain *domain_fid, struct fi_av_attr *attr,
 		     struct fid_av **fid_av, void *context, size_t conn_size,
 		     void (*remove_handler)(struct util_ep *util_ep,
-					    struct util_peer_addr *peer));
+					    struct util_peer_addr *peer),
+		     void (*foreach_ep)(struct util_av *av,
+					struct util_ep *ep));
 size_t rxm_av_max_peers(struct rxm_av *av);
 void rxm_ref_peer(struct util_peer_addr *peer);
 void *rxm_av_alloc_conn(struct rxm_av *av);
@@ -1172,9 +1175,11 @@ void ofi_fabric_remove(struct util_fabric *fabric);
  * Utility Providers
  */
 
-#define OFI_NAME_DELIM	';'
+#define OFI_NAME_LNX_DELIM ':'
+#define OFI_NAME_DELIM ';'
 #define OFI_UTIL_PREFIX "ofi_"
 #define OFI_OFFLOAD_PREFIX "off_"
+#define OFI_LNX "lnx"
 
 static inline int ofi_has_util_prefix(const char *str)
 {
@@ -1184,6 +1189,16 @@ static inline int ofi_has_util_prefix(const char *str)
 static inline int ofi_has_offload_prefix(const char *str)
 {
 	return !strncasecmp(str, OFI_OFFLOAD_PREFIX, strlen(OFI_OFFLOAD_PREFIX));
+}
+
+static inline int ofi_is_lnx(const char *str)
+{
+	return !strncasecmp(str, OFI_LNX, strlen(OFI_LNX));
+}
+
+static inline int ofi_is_linked(const char *str)
+{
+	return (strcasestr(str, OFI_LNX)) ? 1 : 0;
 }
 
 int ofi_get_core_info(uint32_t version, const char *node, const char *service,
@@ -1201,6 +1216,7 @@ int ofi_get_core_info_fabric(const struct fi_provider *prov,
 			     struct fi_info **core_info);
 
 
+char *ofi_strdup_link_append(const char *head, const char *tail);
 char *ofi_strdup_append(const char *head, const char *tail);
 // char *ofi_strdup_head(const char *str);
 // char *ofi_strdup_tail(const char *str);

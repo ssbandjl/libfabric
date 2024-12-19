@@ -91,6 +91,7 @@ common_srcs =				\
 	prov/util/src/rocr_ipc_monitor.c \
 	prov/util/src/ze_ipc_monitor.c	\
 	prov/util/src/xpmem_monitor.c	\
+        prov/util/src/kdreg2_mem_monitor.c \
 	prov/util/src/util_profile.c \
 	prov/coll/src/coll_attr.c	\
 	prov/coll/src/coll_av.c		\
@@ -222,7 +223,7 @@ src_libfabric_la_LIBADD =
 src_libfabric_la_DEPENDENCIES = libfabric.map
 
 if !EMBEDDED
-src_libfabric_la_LDFLAGS += -version-info 2:0:0
+src_libfabric_la_LDFLAGS += -version-info 27:0:26
 endif
 src_libfabric_la_LDFLAGS += -export-dynamic \
 			   $(libfabric_version_script)
@@ -450,9 +451,6 @@ dist-hook: libfabric.spec
 	cp libfabric.spec $(distdir)
 	perl $(top_srcdir)/config/distscript.pl "$(distdir)" "$(PACKAGE_VERSION)"
 
-install-exec-hook:
-	ln -sf libfabric.so.2 $(DESTDIR)$(libdir)/libfabric.so.1
-
 TESTS = \
 	util/fi_info
 
@@ -484,6 +482,7 @@ include prov/sm2/Makefile.include
 include prov/tcp/Makefile.include
 include prov/ucx/Makefile.include
 include prov/lpp/Makefile.include
+include prov/lnx/Makefile.include
 include prov/hook/Makefile.include
 include prov/hook/perf/Makefile.include
 include prov/hook/trace/Makefile.include

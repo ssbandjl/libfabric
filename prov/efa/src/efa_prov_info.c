@@ -75,7 +75,7 @@ const struct fi_domain_attr efa_domain_attr = {
 	.resource_mgmt		= FI_RM_DISABLED,
 	.mr_mode		= OFI_MR_BASIC_MAP | FI_MR_LOCAL | OFI_MR_BASIC,
 	.mr_key_size		= sizeof_field(struct ibv_sge, lkey),
-	.cq_data_size		= 0,
+	.cq_data_size		= EFA_CQ_DATA_SIZE,
 	.tx_ctx_cnt		= 1024,
 	.rx_ctx_cnt		= 1024,
 	.max_ep_tx_ctx		= 1,
@@ -145,7 +145,9 @@ const struct fi_ep_attr efa_ep_attr = {
 	.protocol		= FI_PROTO_EFA,
 	.protocol_version	= 1,
 	.msg_prefix_size	= 0,
+	.max_order_raw_size	= 0,
 	.max_order_war_size	= 0,
+	.max_order_waw_size	= 0,
 	.mem_tag_format		= 0,
 	.tx_ctx_cnt		= 1,
 	.rx_ctx_cnt		= 1,
@@ -182,13 +184,14 @@ void efa_prov_info_set_ep_attr(struct fi_info *prov_info,
 		 * a completion, therefore there is no way for dgram endpoint
 		 * to implement FI_INJECT. Because FI_INJECT is not an optional
 		 * feature, we had to set inject_size to 0.
+		 * 
+		 * TODO:
+		 * Remove this after implementing cq read for efa-raw
                  */
 		prov_info->tx_attr->inject_size = 0;
 	}
 
 	prov_info->ep_attr->max_msg_size		= device->ibv_port_attr.max_msg_sz;
-	prov_info->ep_attr->max_order_raw_size	= device->ibv_port_attr.max_msg_sz;
-	prov_info->ep_attr->max_order_waw_size	= device->ibv_port_attr.max_msg_sz;
 }
 
 /**
@@ -553,10 +556,6 @@ int efa_prov_info_alloc_for_rdm(struct fi_info **prov_info_rdm_ptr,
 		 * buffer. EFA RDM endpoint does not have this requirement, hence unset the flag
 		 */
 		prov_info_rdm->domain_attr->mr_mode &= ~FI_MR_LOCAL;
-
-		/* EFA RDM endpoint support writing CQ data by put it in packet header
-		 */
-		prov_info_rdm->domain_attr->cq_data_size = EFA_RDM_CQ_DATA_SIZE;
 	}
 
 	/* update ep_attr */
@@ -579,6 +578,8 @@ int efa_prov_info_alloc_for_rdm(struct fi_info **prov_info_rdm_ptr,
 					- device->rdm_info->src_addrlen
 					- EFA_RDM_IOV_LIMIT * sizeof(struct fi_rma_iov);
 		prov_info_rdm->ep_attr->max_order_raw_size = max_atomic_size;
+		prov_info_rdm->ep_attr->max_order_war_size = max_atomic_size;
+		prov_info_rdm->ep_attr->max_order_waw_size = max_atomic_size;
 	}
 
 	/* update tx_attr */

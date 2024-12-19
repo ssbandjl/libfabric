@@ -7,6 +7,7 @@ properties([disableConcurrentBuilds(abortPrevious: true)])
 @Field def BUILD_MODES=["reg", "dbg", "dl"]
 @Field def PYTHON_VERSION="3.9"
 @Field def TIMEOUT="7200"
+@Field def weekly=false
 
 def run_python(version, command, output=null) {
   if (output != null)
@@ -16,10 +17,10 @@ def run_python(version, command, output=null) {
 }
 
 def slurm_batch(partition, node_num, output, command) {
-  
   try {
     sh """sbatch --partition=${partition} -N ${node_num} \
           --wait -o ${output} --open-mode=append \
+          -J ${env.SLURM_JOB_NAME} \
           --wrap=\'env; timeout $TIMEOUT ${command}\'
        """
   } catch (Exception e) {
@@ -101,9 +102,16 @@ def run_ci(stage_name, config_name) {
      """
 }
 
+def build_ci(config_name) {
+  sh """source ${CI_LOCATION}/${env.CI_MODULE}/venv/bin/activate;\
+        python run.py \
+        --output=${env.CUSTOM_WORKSPACE}/pre-build \
+        --job=${config_name}
+     """
+}
+
 def gather_logs(cluster, key, dest, source) {
   def address = "${env.USER}@${cluster}"
-
   try {
     sh "scp -r -i ${key} ${address}:${source}/* ${dest}/"
   } catch (Exception e) {
@@ -200,27 +208,17 @@ def checkout_external_resources() {
   checkout_ci()
 }
 
-def generate_diff(def branch_name, def output_loc) {
-  sh """
-    git remote add mainRepo ${env.UPSTREAM}
-    git fetch mainRepo
-    git diff --name-only HEAD..mainRepo/${branch_name} > ${output_loc}/commit_id
-    git remote remove mainRepo
-  """
-}
+def git_diffs() {
+  dir ("${CUSTOM_WORKSPACE}/source/libfabric") {
+    sh """
+      git diff --name-only HEAD..upstream/${TARGET} > ./commit_id
+      git diff upstream/${TARGET}:Makefile.am Makefile.am > ./Makefile.am.diff
+      git diff upstream/${TARGET}:configure.ac configure.ac > ./configure.ac.diff
 
-def generate_release_num(def branch_name, def output_loc) {
-  sh """
-    git remote add mainRepo ${env.UPSTREAM}
-    git fetch mainRepo
-    git diff mainRepo/${branch_name}:Makefile.am Makefile.am > \
-        ${output_loc}/Makefile.am.diff
-    git diff mainRepo/${branch_name}:configure.ac configure.ac > \
-        ${output_loc}/configure.ac.diff
-    cat configure.ac | grep AC_INIT | cut -d ' ' -f 2 | \
-        cut -d '[' -f 2 | cut -d ']' -f 1 > ${output_loc}/release_num.txt
-    git remote remove mainRepo
-  """
+      cat configure.ac | grep AC_INIT | cut -d ' ' -f 2 | \
+      cut -d '[' -f 2 | cut -d ']' -f 1 > ./release_num.txt
+    """
+  }
 }
 
 def slurm_build(modes, partition, location, tag, hw=null, additional_args=null) {
@@ -276,8 +274,30 @@ def build(item, mode=null, hw=null, additional_args=null) {
   run_python(PYTHON_VERSION, cmd)
 }
 
-def build_ci() {
+def bootstrap_ci() {
   sh "${CI_LOCATION}/${env.CI_MODULE}/bootstrap.sh"
+}
+
+def checkout_tar(name) {
+  if (env.WEEKLY == null) {
+    weekly = false
+  } else {
+    weekly = env.WEEKLY.toBoolean()
+  }
+  dir ("${env.CUSTOM_WORKSPACE}/${name}/libfabric") {
+    checkout scm
+    TARGET=check_target()
+    if (weekly) {
+      TARGET=env.WEEKLY_TARGET
+    }
+    sh """
+      git remote add upstream ${env.UPSTREAM}
+      git pull --rebase upstream ${TARGET}
+    """
+  }
+  dir ("${env.CUSTOM_WORKSPACE}/${name}/") {
+    sh "tar -cvf libfabric.tar.gz libfabric/*"
+  }
 }
 
 def check_target() {
@@ -331,7 +351,7 @@ def skip() {
   }
 
   echo "Changeset is: ${changeStrings.toArray()}"
-  if (changeStrings.toArray().every { it =~ /(?:fabtests\/pytests|man|prov\/efa|prov\/opx|contrib\/aws).*$/ }) {
+  if (changeStrings.toArray().every { it =~ /(?:fabtests\/pytests|man|prov\/efa|prov\/opx|prov\/cxi|prov\/lpp|contrib\/aws).*$/ }) {
     echo "DONT RUN!"
     return true
   }
@@ -347,7 +367,7 @@ def skip() {
 pipeline {
   agent {
     node {
-      label 'main'
+      label 'cbj-main'
       customWorkspace "workspace/${JOB_NAME}/${env.BUILD_NUMBER}"
     }
   }
@@ -361,6 +381,7 @@ pipeline {
       WITH_ENV="'PATH+EXTRA=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin:$PYTHONPATH'"
       CUSTOM_WORKSPACE="${CB_HOME}/workspace/${JOB_NAME}/${env.BUILD_NUMBER}"
       DELETE_LOCATION="${env.CUSTOM_WORKSPACE}/middlewares"
+      SLURM_JOB_NAME="${env.JOB_NAME}_${env.BUILD_NUMBER}"
       RUN_LOCATION="${env.CUSTOM_WORKSPACE}/ci_resources/legacy_pipeline_scripts/"
       CI_LOCATION="${env.CUSTOM_WORKSPACE}/ci"
       LOG_DIR = "${env.CUSTOM_WORKSPACE}/log_dir"
@@ -369,27 +390,7 @@ pipeline {
     stage ('checkout') {
       steps {
         script {
-          dir ("${CUSTOM_WORKSPACE}/source/libfabric") {
-            checkout scm
-          }
-          dir ("${CUSTOM_WORKSPACE}/grass/libfabric") {
-            checkout scm
-          }
-          dir ("${CUSTOM_WORKSPACE}/water/libfabric") {
-            checkout scm
-          }
-          dir ("${CUSTOM_WORKSPACE}/electric/libfabric") {
-            checkout scm
-          }
-          dir ("${CUSTOM_WORKSPACE}/ucx/libfabric") {
-            checkout scm
-          }
-          dir ("${CUSTOM_WORKSPACE}/cuda/libfabric") {
-            checkout scm
-          }
-          dir ("${CUSTOM_WORKSPACE}/iouring/libfabric") {
-            checkout scm
-          }
+          checkout_tar("source")
           dir (CUSTOM_WORKSPACE) {
             checkout_external_resources()
           }
@@ -399,17 +400,7 @@ pipeline {
     stage ('opt-out') {
       steps {
         script {
-          TARGET=check_target()
-          dir ("${CUSTOM_WORKSPACE}/source/libfabric") {
-            generate_diff("${TARGET}", "${env.WORKSPACE}/source/libfabric")
-            generate_release_num("${TARGET}", "${env.WORKSPACE}/source/libfabric")
-          }
-
-          if (env.WEEKLY == null) {
-            weekly = false
-          } else {
-            weekly = env.WEEKLY.toBoolean()
-          }
+          git_diffs()
           if (weekly) {
             TIMEOUT="21600" 
           } 
@@ -417,6 +408,16 @@ pipeline {
           RELEASE = release()
           if (skip && !weekly) {
             DO_RUN=false
+          }
+        }
+      }
+    }
+    stage ('health check') {
+      when { equals expected: true, actual: DO_RUN }
+      steps {
+        script {
+          dir (CI_LOCATION) {
+            sh "./temperature.sh"
           }
         }
       }
@@ -432,84 +433,62 @@ pipeline {
         }
       }
     }
-    stage ('parallel-builds') {
+    stage ('bootstrap-ci') {
+      steps {
+        script {
+          bootstrap_ci()
+        }
+      }
+    }
+    stage ('build-libfabric') {
       when { equals expected: true, actual: DO_RUN }
       parallel {
-        stage ('build-ci') {
+        stage ('water') {
           steps {
             script {
-              build_ci()
+              dir (CI_LOCATION) {
+                build_ci("pr_build_water.json")
+              }
             }
           }
         }
-        stage ('build-water') {
+        stage ('grass') {
           steps {
             script {
-              slurm_build(BUILD_MODES, "totodile", "water", "water", "water")
-              slurm_batch("totodile", "1",
-                            "${env.LOG_DIR}/build_mpich_water_log",
-                            """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
-                              --build_item=mpich --build_hw=water"""
-                          )
-              slurm_batch("totodile", "1",
-                          "${env.LOG_DIR}/build_shmem_water_log",
-                          """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
-                              --build_item=shmem --build_hw=water"""
-                         )
+              dir (CI_LOCATION) {
+                build_ci("pr_build_grass.json")
+              }
             }
           }
         }
-        stage ('build-grass') {
+        stage ('electric') {
           steps {
             script {
-              slurm_build(BUILD_MODES, "grass", "grass", "grass", "grass")
-              slurm_batch("grass", "1",
-                            "${env.LOG_DIR}/build_mpich_grass_log",
-                            """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
-                              --build_item=mpich --build_hw=grass"""
-                          )
-              slurm_batch("grass", "1",
-                          "${env.LOG_DIR}/build_shmem_grass_log",
-                          """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
-                              --build_item=shmem --build_hw=grass"""
-                         )
+              dir (CI_LOCATION) {
+                build_ci("pr_build_electric.json")
+              }
             }
           }
         }
-        stage ('build-electric') {
+        stage ('cyndaquil') {
           steps {
             script {
-              slurm_build(BUILD_MODES, "electric", "electric", "electric",
-                          "electric")
+              dir (CI_LOCATION) {
+                build_ci("pr_build_cyndaquil.json")
+              }
             }
           }
         }
-        stage ('build-ucx') {
+        stage ('quilava') {
           steps {
             script {
-              slurm_build(BUILD_MODES, "totodile", "ucx", "ucx", "ucx")
+              dir (CI_LOCATION) {
+                build_ci("pr_build_quilava.json")
+              }
             }
           }
         }
-        stage ('build-cuda') {
-          steps {
-            script {
-              slurm_build(["reg"], "cyndaquil", "cuda", "cyndaquil",
-                          "cyndaquil", "--cuda")
-              slurm_build(["reg"], "quilava", "cuda", "quilava",
-                          "quilava", "--cuda")
-            }
-          }
-        }
-        stage ('build-iouring') {
-          steps {
-            script {
-              slurm_build(BUILD_MODES, "ivysaur", "iouring", "ivysaur",
-                          "ivysaur")
-            }
-          }
-        }
-        stage ('build-daos') {
+        stage ('daos') {
           agent {
             node {
               label 'daos_head'
@@ -519,17 +498,19 @@ pipeline {
           options { skipDefaultCheckout() }
           steps {
             script {
-              dir ("${CUSTOM_WORKSPACE}/source/libfabric") { checkout scm }
+              checkout_tar("source")
               checkout_external_resources()
               dir (CUSTOM_WORKSPACE) {
                 build("logdir")
-                build("libfabric", "reg", "daos")
-                build("fabtests", "reg", "daos")
+              }
+              bootstrap_ci()
+              dir (CI_LOCATION) {
+                build_ci("pr_build_daos.json")
               }
             }
           }
         }
-        stage ('build-gpu') {
+        stage ('fire') {
           agent {
             node {
               label 'ze'
@@ -539,14 +520,82 @@ pipeline {
           options { skipDefaultCheckout() }
           steps {
             script {
-              dir ("${CUSTOM_WORKSPACE}/source/libfabric") { checkout scm }
+              checkout_tar("source")
               checkout_external_resources()
               dir (CUSTOM_WORKSPACE) {
                 build("logdir")
                 build("builddir")
-                build_ci()
-                slurm_build(BUILD_MODES, "fabrics-ci", "source", "ze", "gpu",
-                            "--gpu")
+              }
+              bootstrap_ci()
+              dir (CI_LOCATION) {
+                build_ci("pr_build_fire.json")
+              }
+            }
+          }
+        }
+      }
+    }
+    stage('build-middlewares') {
+      when { equals expected: true, actual: DO_RUN }
+      parallel {
+        stage ('shmem-water') {
+          steps {
+            script {
+              dir (CI_LOCATION) {
+                build_ci("pr_build_shmem_water.json")
+              }
+            }
+          }
+        }
+        stage ('shmem-grass') {
+          steps {
+            script {
+              dir (CI_LOCATION) {
+                build_ci("pr_build_shmem_grass.json")
+              }
+            }
+          }
+        }
+        stage ('ompi-water') {
+          steps {
+            script {
+              dir (CI_LOCATION) {
+                build_ci("pr_build_ompi_water.json")
+              }
+            }
+          }
+        }
+        stage ('ompi-grass') {
+          steps {
+            script {
+              dir (CI_LOCATION) {
+                build_ci("pr_build_ompi_grass.json")
+              }
+            }
+          }
+        }
+        stage ('mpich-water') {
+          steps {
+            script {
+              dir (CI_LOCATION) {
+                slurm_batch("water", "1",
+                            "${env.LOG_DIR}/build_mpich_water_log",
+                            """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
+                              --build_item=mpich --build_hw=water"""
+                           )
+              }
+            }
+          }
+        }
+        stage ('mpich-grass') {
+          steps {
+            script {
+              dir (CI_LOCATION) {
+                slurm_batch("grass", "1",
+                            "${env.LOG_DIR}/build_mpich_grass_log",
+                            """python$PYTHON_VERSION ${RUN_LOCATION}/build.py \
+                              --build_item=mpich --build_hw=grass"""
+                           )
               }
             }
           }
@@ -556,6 +605,41 @@ pipeline {
     stage('parallel-tests') {
       when { equals expected: true, actual: DO_RUN }
       parallel {
+        stage('mpichtestsuite-tcp') {
+          steps {
+            script {
+              dir (RUN_LOCATION) {
+                def providers = [['tcp', null]]
+                def MPIS = ["mpich"]
+                if (env.WEEKLY.toBoolean()) {
+                  MPIS = ["impi", "mpich"]
+                }
+                for (def mpi in MPIS) {
+                  run_middleware(providers, "mpichtestsuite", "mpichtestsuite",
+                                 "grass", "bulbasaur,ivysaur", "2", "${mpi}")
+                }
+              }
+            }
+          }
+        }
+        stage('mpichtestsuite-verbs') {
+          steps {
+            script {
+              dir (RUN_LOCATION) {
+                def providers = [["verbs","rxm"]]
+                def MPIS = ["mpich"]
+                if (env.WEEKLY.toBoolean()) {
+                  MPIS = ["impi", "mpich"]
+                }
+                for (def mpi in MPIS) {
+                  run_middleware(providers, "mpichtestsuite", "mpichtestsuite",
+                                 "water", "squirtle,wartortle,articuno", "2",
+                                 "${mpi}")
+                }
+              }
+            }
+          }
+        }
         stage ('CI_mpi_verbs-rxm_imb') {
           steps {
             script {
@@ -603,6 +687,19 @@ pipeline {
             }
           }
         }
+        stage('CI_fabtests_tcp-rxm') {
+           steps {
+            script {
+              dir (CI_LOCATION) {
+                run_ci("CI_fabtests_tcp-rxm_reg",
+                       "pr_fabtests_tcp-rxm_reg.json")
+                run_ci("CI_fabtests_tcp-rxm_dbg",
+                       "pr_fabtests_tcp-rxm_dbg.json")
+                run_ci("CI_fabtests_tcp-rxm_dl", "pr_fabtests_tcp-rxm_dl.json")
+              }
+            }
+          }
+        }
         stage('CI_fabtests_sockets') {
            steps {
             script {
@@ -636,13 +733,16 @@ pipeline {
             }
           }
         }
-        stage('CI_fabtests_ivysaur') {
+        stage('CI_fabtests_tcp_io_uring') {
           steps {
             script {
               dir (CI_LOCATION) {
-                run_ci("CI_fabtests_ivysaur_reg", "pr_fabtests_ivysaur_reg.json")
-                run_ci("CI_fabtests_ivysaur_dbg", "pr_fabtests_ivysaur_dbg.json")
-                run_ci("CI_fabtests_ivysaur_dl", "pr_fabtests_ivysaur_dl.json")
+                run_ci("CI_fabtests_tcp_io_uring_reg",
+                       "pr_fabtests_tcp_io_uring_reg.json")
+                run_ci("CI_fabtests_tcp_io_uring_dbg",
+                       "pr_fabtests_tcp_io_uring_dbg.json")
+                run_ci("CI_fabtests_tcp_io_uring_dl",
+                       "pr_fabtests_tcp_io_uring_dl.json")
               }
             }
           }
@@ -691,29 +791,12 @@ pipeline {
             }
           }
         }
-        stage('mpichtestsuite') {
-          steps {
-            script {
-              dir (RUN_LOCATION) {
-                def providers = [['tcp', null], ["verbs","rxm"]]
-                def MPIS = ["mpich"]
-                if (env.WEEKLY.toBoolean()) {
-                  MPIS = ["impi", "mpich"]
-                }
-                for (def mpi in MPIS) {
-                  run_middleware(providers, "mpichtestsuite", "mpichtestsuite",
-                                 "water", "totodile", "2", "${mpi}")
-                }
-              }
-            }
-          }
-        }
         stage('SHMEM_grass') {
           steps {
             script {
-              dir (RUN_LOCATION) {
-                run_middleware([["tcp", null]], "SHMEM", "shmem",
-                                "grass", "bulbasaur,chikorita", "2")
+              dir (CI_LOCATION) {
+                run_ci("CI_shmem_grass", "pr_shmem_1n2ppn_grass.json")
+                run_ci("CI_shmem_grass", "pr_shmem_2n1ppn_grass.json")
               }
             }
           }
@@ -721,9 +804,9 @@ pipeline {
         stage('SHMEM_water') {
           steps {
             script {
-              dir (RUN_LOCATION) {
-                run_middleware([["verbs", "rxm"], ["sockets", null]], "SHMEM",
-                                "shmem", "water", "totodile", "2")
+              dir (CI_LOCATION) {
+                run_ci("CI_shmem_water", "pr_shmem_1n2ppn_water.json")
+                run_ci("CI_shmem_water", "pr_shmem_2n1ppn_water.json")
               }
             }
           }
@@ -731,12 +814,11 @@ pipeline {
         stage ('multinode_performance') {
           steps {
             script {
-              dir (RUN_LOCATION) {
-                run_middleware([["tcp", null],["sockets", null]],
-                               "multinode_performance", "multinode", "grass",
-                               "bulbasaur,chikorita", "2")
-                run_middleware([["verbs", "rxm"]], "multinode_performance",
-                               "multinode", "water", "totodile", "2")
+              dir (CI_LOCATION) {
+                run_ci("CI_multinode_performance_grass",
+                       "pr_multinode_performance_grass.json")
+                run_ci("CI_multinode_performance_water",
+                       "pr_multinode_performance_water.json")
               }
             }
           }
@@ -746,13 +828,15 @@ pipeline {
             script {
               dir (RUN_LOCATION) {
 		            run_middleware([["verbs", null]], "oneCCL",
-                               "oneccl", "water", "totodile", "2")
+                               "oneccl", "water",
+                               "squirtle,wartortle,articuno", "2")
 		            run_middleware([["shm", null]], "oneCCL",
-			                         "oneccl", "grass", "bulbasaur,chikorita", "1")
+			                         "oneccl", "grass", "bulbasaur,ivysaur", "1")
 		            run_middleware([["psm3", null]], "oneCCL",
-			                         "oneccl", "water", "totodile", "2")
+			                         "oneccl", "water",
+                               "squirtle,wartortle,articuno", "2")
 		            run_middleware([["tcp", null]], "oneCCL",
-			                         "oneccl", "grass", "bulbasaur,chikorita", "2")
+			                         "oneccl", "grass", "bulbasaur,ivysaur", "2")
                 run_middleware([["shm", null]], "oneCCL_DSA",
                                "oneccl", "electric", "pikachu", "1", null, null,
                                """CCL_ATL_SHM=1 FI_SHM_DISABLE_CMA=1 \
@@ -767,18 +851,18 @@ pipeline {
           steps {
             script {
               dir (RUN_LOCATION) {
-		            run_middleware([["psm3", null]], "oneCCL-GPU-v3", "onecclgpu",
-			       "gpu", "torchic", "1", null, null,
+                run_middleware([["psm3", null]], "oneCCL-GPU-v3", "onecclgpu",
+                               "fire", "torchic", "1", null, null,
                                "FI_HMEM_DISABLE_P2P=1")
-		            run_middleware([["verbs", null]], "oneCCL-GPU-v3", "onecclgpu",
-                               "gpu", "torchic", "1", null, null,
+                run_middleware([["verbs", null]], "oneCCL-GPU-v3", "onecclgpu",
+                                "fire", "torchic", "1", null, null,
+                                "FI_HMEM_DISABLE_P2P=1")
+                run_middleware([["tcp", null]], "oneCCL-GPU-v3", "onecclgpu",
+                               "fire", "torchic", "1", null, null,
                                "FI_HMEM_DISABLE_P2P=1")
-			    run_middleware([["tcp", null]], "oneCCL-GPU-v3", "onecclgpu",
-			       "gpu", "torchic", "1", null, null,
-			       "FI_HMEM_DISABLE_P2P=1")
-			    run_middleware([["shm", null]], "oneCCL-GPU-v3", "onecclgpu",
-			       "gpu", "torchic", "1", null, null,
-			       "FI_HMEM_DISABLE_P2P=1")
+                run_middleware([["shm", null]], "oneCCL-GPU-v3", "onecclgpu",
+                               "fire", "torchic", "1", null, null,
+                               "FI_HMEM_DISABLE_P2P=1")
               }
             }
           }
@@ -819,7 +903,7 @@ pipeline {
               dir (RUN_LOCATION) {
                 dmabuf_output = "${LOG_DIR}/DMABUF-Tests_verbs-rxm_dmabuf"
                 cmd = """ python3.9 runtests.py --test=dmabuf \
-                           --prov=verbs --util=rxm --build_hw=gpu"""
+                           --prov=verbs --util=rxm --build_hw=fire"""
                 slurm_batch("torchic", "1", "${dmabuf_output}_reg",
                             "${cmd}")
               }
@@ -907,24 +991,6 @@ pipeline {
           CI_summarize()
           summarize("all", verbose=true)
           summarize("all")
-        }
-      }
-    }
-    aborted {
-      node ('daos_head') {
-        dir ("${DELETE_LOCATION}/middlewares") { deleteDir() }
-      }
-      node ('ze') {
-        dir ("${DELETE_LOCATION}/middlewares") { deleteDir() }
-      }
-      dir ("${DELETE_LOCATION}/middlewares") { deleteDir() }
-    }
-    success {
-      script {
-        if (DO_RUN) {
-          CI_summarize(verbose=true)
-          summarize("all", verbose=true, release=false,
-          send_mail=env.WEEKLY.toBoolean())
         }
       }
       node ('daos_head') {

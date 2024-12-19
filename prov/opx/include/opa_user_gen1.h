@@ -83,6 +83,7 @@
 #include "opa_udebug.h"
 #include "opa_service.h"
 #include "opa_user.h"
+#include "ofi_mem.h"
 
 #define HFI_RHF_USE_EGRBFR_MASK 0x1
 #define HFI_RHF_USE_EGRBFR_SHIFT 15
@@ -329,7 +330,10 @@ int opx_hfi_event_ack(struct _hfi_ctrl *ctrl, __u64 ackbits);
 int opx_hfi_poll_type(struct _hfi_ctrl *ctrl, uint16_t poll_type);
 
 /* reset halted send context, error if context is not halted. */
-int opx_hfi_reset_context(struct _hfi_ctrl *ctrl);
+int opx_hfi_reset_context(int fd);
+
+/* ack hfi events */
+int opx_hfi_ack_events(int fd, uint64_t ackbits);
 
 /*
 * Safe version of opx_hfi_[d/q]wordcpy that is guaranteed to only copy each byte once.
@@ -567,7 +571,7 @@ static __inline__ int32_t opx_hfi_update_tid(struct _hfi_ctrl *ctrl,
 #endif
 	FI_DBG(&fi_opx_provider, FI_LOG_MR,
 		"OPX_DEBUG_ENTRY update [%p - %p], length %u (pages %lu)\n",
-		(void*)vaddr, (void*) (vaddr + *length), *length, (*length) / PAGE_SIZE);
+		(void*)vaddr, (void*) (vaddr + *length), *length, (*length) / page_sizes[OFI_PAGE_SIZE]);
 
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
@@ -586,9 +590,9 @@ static __inline__ int32_t opx_hfi_update_tid(struct _hfi_ctrl *ctrl,
 			FI_WARN(&fi_opx_provider, FI_LOG_MR,
 				"PARTIAL UPDATE errno %d  \"%s\" INPUTS vaddr [%p - %p] length %u (pages %lu), OUTPUTS vaddr [%p - %p] length %u (pages %lu), tidcnt %u\n",
 				errno, strerror(errno), (void*)vaddr,
-				(void*)(vaddr + *length), *length, (*length) / PAGE_SIZE,
+				(void*)(vaddr + *length), *length, (*length) / page_sizes[OFI_PAGE_SIZE],
 				(void*)rettidinfo->vaddr,(void*)(rettidinfo->vaddr + rettidinfo->length),
-				rettidinfo->length, rettidinfo->length / PAGE_SIZE,
+				rettidinfo->length, rettidinfo->length / page_sizes[OFI_PAGE_SIZE],
 				rettidinfo->tidcnt);
 		}
 		/* Always update outputs, even on soft errors */
@@ -598,7 +602,7 @@ static __inline__ int32_t opx_hfi_update_tid(struct _hfi_ctrl *ctrl,
 		FI_DBG(&fi_opx_provider, FI_LOG_MR,
 			"TID UPDATE IOCTL returned %d errno %d  \"%s\" vaddr [%p - %p] length %u (pages %lu), tidcnt %u\n",
 			err, errno, strerror(errno), (void*)vaddr,
-			(void*)(vaddr + *length), *length, (*length) / PAGE_SIZE, *tidcnt);
+			(void*)(vaddr + *length), *length, (*length) / page_sizes[OFI_PAGE_SIZE], *tidcnt);
 
 		return 0;
 	}
@@ -606,13 +610,13 @@ static __inline__ int32_t opx_hfi_update_tid(struct _hfi_ctrl *ctrl,
 	if (errno == ENOSPC) {
 		FI_DBG(&fi_opx_provider, FI_LOG_MR,
 			"IOCTL FAILED : No TIDs available, requested range=%p-%p (%u bytes, %lu pages)\n",
-			(void*)vaddr, (void*) (vaddr + *length), *length, (*length) / PAGE_SIZE);
+			(void*)vaddr, (void*) (vaddr + *length), *length, (*length) / page_sizes[OFI_PAGE_SIZE]);
 		err = -FI_ENOSPC;
 	} else {
 		FI_WARN(&fi_opx_provider, FI_LOG_MR,
 			"IOCTL FAILED ERR %d errno %d \"%s\" requested range=%p-%p (%u bytes, %lu pages)\n",
 			err, errno, strerror(errno),
-			(void*)vaddr, (void*) (vaddr + *length), *length, (*length) / PAGE_SIZE);
+			(void*)vaddr, (void*) (vaddr + *length), *length, (*length) / page_sizes[OFI_PAGE_SIZE]);
 	}
 
 	/* Hard error, we can't trust these */

@@ -11,6 +11,7 @@
 #include "efa_rdm_rma.h"
 #include "efa_rdm_pke_cmd.h"
 #include "efa_cntr.h"
+#include "efa_rdm_tracepoint.h"
 
 int efa_rdm_rma_verified_copy_iov(struct efa_rdm_ep *ep, struct efa_rma_iov *rma,
 			      size_t count, uint32_t flags,
@@ -174,6 +175,9 @@ ssize_t efa_rdm_rma_readmsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uin
 	void **tmp_desc;
 	struct util_srx_ctx *srx_ctx;
 
+	efa_rdm_tracepoint(read_begin_msg_context,
+			   (size_t) msg->context, (size_t) msg->addr);
+
 	EFA_DBG(FI_LOG_EP_DATA,
 	       "read iov_len: %lu flags: %lx\n",
 	       ofi_total_iov_len(msg->msg_iov, msg->iov_count),
@@ -292,7 +296,7 @@ ssize_t efa_rdm_rma_read(struct fid_ep *ep, void *buf, size_t len, void *desc,
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
-	assert(len <= efa_rdm_ep->max_rma_size);
+	assert(len <= efa_rdm_ep->base_ep.max_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -399,10 +403,10 @@ ssize_t efa_rdm_rma_post_write(struct efa_rdm_ep *ep, struct efa_rdm_ope *txe)
 
 	iface = txe->desc[0] ? ((struct efa_mr*) txe->desc[0])->peer.iface : FI_HMEM_SYSTEM;
 
-	if (use_p2p && 
-		txe->total_len >= efa_rdm_ep_domain(ep)->hmem_info[iface].min_read_write_size &&
-		efa_rdm_interop_rdma_read(ep, txe->peer) &&
-		(txe->desc[0] || efa_is_cache_available(efa_rdm_ep_domain(ep)))) {
+	if (use_p2p &&
+	    txe->total_len >= g_efa_hmem_info[iface].min_read_write_size &&
+	    efa_rdm_interop_rdma_read(ep, txe->peer) &&
+	    (txe->desc[0] || efa_is_cache_available(efa_rdm_ep_domain(ep)))) {
 		err = efa_rdm_ope_post_send(txe, EFA_RDM_LONGREAD_RTW_PKT);
 		if (err != -FI_ENOMEM)
 			return err;
@@ -429,6 +433,9 @@ static inline ssize_t efa_rdm_generic_writemsg(struct efa_rdm_ep *efa_rdm_ep,
 	ssize_t err;
 	struct efa_rdm_ope *txe;
 	struct util_srx_ctx *srx_ctx;
+
+	efa_rdm_tracepoint(write_begin_msg_context,
+			   (size_t) msg->context, (size_t) msg->addr);
 
 	efa_perfset_start(efa_rdm_ep, perf_efa_tx);
 
@@ -560,7 +567,7 @@ ssize_t efa_rdm_rma_write(struct fid_ep *ep, const void *buf, size_t len, void *
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
-	assert(len <= efa_rdm_ep->max_rma_size);
+	assert(len <= efa_rdm_ep->base_ep.max_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -595,7 +602,7 @@ ssize_t efa_rdm_rma_writedata(struct fid_ep *ep, const void *buf, size_t len,
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
-	assert(len <= efa_rdm_ep->max_rma_size);
+	assert(len <= efa_rdm_ep->base_ep.max_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -642,7 +649,7 @@ ssize_t efa_rdm_rma_inject_write(struct fid_ep *ep, const void *buf, size_t len,
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
-	assert(len <= efa_rdm_ep->inject_rma_size);
+	assert(len <= efa_rdm_ep->base_ep.inject_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;
@@ -679,7 +686,7 @@ ssize_t efa_rdm_rma_inject_writedata(struct fid_ep *ep, const void *buf, size_t 
 	int err;
 
 	efa_rdm_ep = container_of(ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
-	assert(len <= efa_rdm_ep->inject_rma_size);
+	assert(len <= efa_rdm_ep->base_ep.inject_rma_size);
 	err = efa_rdm_ep_cap_check_rma(efa_rdm_ep);
 	if (err)
 		return err;

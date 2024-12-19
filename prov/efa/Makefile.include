@@ -47,10 +47,10 @@ _efa_files = \
 	prov/efa/src/efa_prov.c	\
 	prov/efa/src/efa_env.c	\
 	prov/efa/src/efa_cntr.c	\
+	prov/efa/src/efa_msg.c \
+	prov/efa/src/efa_rma.c \
 	prov/efa/src/dgram/efa_dgram_ep.c \
 	prov/efa/src/dgram/efa_dgram_cq.c \
-	prov/efa/src/dgram/efa_dgram_msg.c \
-	prov/efa/src/dgram/efa_dgram_rma.c \
 	prov/efa/src/rdm/efa_rdm_peer.c	\
 	prov/efa/src/rdm/efa_rdm_cq.c \
 	prov/efa/src/rdm/efa_rdm_ep_utils.c \
@@ -148,7 +148,9 @@ nodist_prov_efa_test_efa_unit_test_SOURCES = \
 	prov/efa/test/efa_unit_test_runt.c \
 	prov/efa/test/efa_unit_test_mr.c \
 	prov/efa/test/efa_unit_test_rdm_peer.c \
-	prov/efa/test/efa_unit_test_pke.c
+	prov/efa/test/efa_unit_test_pke.c \
+	prov/efa/test/efa_unit_test_msg.c \
+	prov/efa/test/efa_unit_test_rma.c
 
 
 efa_CPPFLAGS += -I$(top_srcdir)/include -I$(top_srcdir)/prov/efa/test $(cmocka_CPPFLAGS)
@@ -161,7 +163,8 @@ prov_efa_test_efa_unit_test_LDFLAGS = $(cmocka_rpath) $(efa_LDFLAGS) $(cmocka_LD
 					-Wl,--wrap=efadv_query_device \
 					-Wl,--wrap=ofi_cudaMalloc \
 					-Wl,--wrap=ofi_copy_from_hmem_iov \
-					-Wl,--wrap=efa_rdm_pke_read
+					-Wl,--wrap=efa_rdm_pke_read \
+					-Wl,--wrap=efa_device_support_unsolicited_write_recv
 
 if HAVE_EFADV_CQ_EX
 prov_efa_test_efa_unit_test_LDFLAGS += -Wl,--wrap=efadv_create_cq

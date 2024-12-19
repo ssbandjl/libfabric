@@ -60,6 +60,12 @@ void efa_unit_test_construct_tmsg(struct fi_msg_tagged *tmsg, struct iovec *iov,
 				  void **desc, uint64_t tag,
 				  uint64_t ignore);
 
+void efa_unit_test_construct_msg_rma(struct fi_msg_rma *msg, struct iovec *iov,
+				     void **desc, size_t iov_count,
+				     fi_addr_t addr, struct fi_rma_iov *rma_iov,
+				     size_t rma_iov_count, void *context,
+				     uint64_t data);
+
 void new_temp_file(char *template, size_t len);
 
 struct efa_unit_test_buff {
@@ -120,13 +126,16 @@ void test_efa_rdm_ep_setopt_shared_memory_permitted();
 void test_efa_rdm_ep_enable_qp_in_order_aligned_128_bytes_good();
 void test_efa_rdm_ep_enable_qp_in_order_aligned_128_bytes_bad();
 void test_efa_rdm_ep_user_zcpy_rx_disabled();
-void test_efa_rdm_ep_user_disable_p2p_zcpy_rx_happy();
+void test_efa_rdm_ep_user_disable_p2p_zcpy_rx_disabled();
 void test_efa_rdm_ep_user_zcpy_rx_unhappy_due_to_sas();
 void test_efa_rdm_ep_user_p2p_not_supported_zcpy_rx_happy();
 void test_efa_rdm_ep_user_zcpy_rx_unhappy_due_to_no_mr_local();
 void test_efa_rdm_ep_close_discard_posted_recv();
 void test_efa_rdm_ep_zcpy_recv_cancel();
+void test_efa_rdm_ep_zcpy_recv_eagain();
 void test_efa_rdm_ep_post_handshake_error_handling_pke_exhaustion();
+void test_efa_rdm_ep_rx_refill_threshold_smaller_than_rx_size();
+void test_efa_rdm_ep_rx_refill_threshold_larger_than_rx_size();
 void test_dgram_cq_read_empty_cq();
 void test_ibv_cq_ex_read_empty_cq();
 void test_ibv_cq_ex_read_failed_poll();
@@ -137,6 +146,8 @@ void test_rdm_cq_read_bad_send_status_unreachable_receiver();
 void test_rdm_cq_read_bad_send_status_invalid_qpn();
 void test_rdm_cq_read_bad_send_status_message_too_long();
 void test_ibv_cq_ex_read_bad_recv_status();
+void test_ibv_cq_ex_read_bad_recv_rdma_with_imm_status_use_unsolicited_recv();
+void test_ibv_cq_ex_read_bad_recv_rdma_with_imm_status_use_solicited_recv();
 void test_ibv_cq_ex_read_recover_forgotten_peer_ah();
 void test_rdm_fallback_to_ibv_create_cq_ex_cq_read_ignore_forgotton_peer();
 void test_ibv_cq_ex_read_ignore_removed_peer();
@@ -145,6 +156,9 @@ void test_info_tx_rx_msg_order_rdm_order_none();
 void test_info_tx_rx_msg_order_rdm_order_sas();
 void test_info_tx_rx_msg_order_dgram_order_none();
 void test_info_tx_rx_msg_order_dgram_order_sas();
+void test_info_max_order_size_dgram_with_atomic();
+void test_info_max_order_size_rdm_with_atomic_no_order();
+void test_info_max_order_size_rdm_with_atomic_order();
 void test_info_tx_rx_op_flags_rdm();
 void test_info_tx_rx_size_rdm();
 void test_info_check_shm_info_hmem();
@@ -214,6 +228,24 @@ void test_efa_rdm_peer_move_overflow_pke_to_recvwin();
 void test_efa_rdm_peer_keep_pke_in_overflow_list();
 void test_efa_rdm_peer_append_overflow_pke_to_recvwin();
 void test_efa_rdm_pke_handle_longcts_rtm_send_completion();
+void test_efa_msg_fi_recv();
+void test_efa_msg_fi_recvv();
+void test_efa_msg_fi_recvmsg();
+void test_efa_msg_fi_send();
+void test_efa_msg_fi_sendv();
+void test_efa_msg_fi_sendmsg();
+void test_efa_msg_fi_senddata();
+void test_efa_msg_fi_inject();
+void test_efa_msg_fi_injectdata();
+void test_efa_rma_read();
+void test_efa_rma_readv();
+void test_efa_rma_readmsg();
+void test_efa_rma_write();
+void test_efa_rma_writev();
+void test_efa_rma_writemsg();
+void test_efa_rma_writedata();
+void test_efa_rma_inject_write();
+void test_efa_rma_inject_writedata();
 
 static inline
 int efa_unit_test_get_dlist_length(struct dlist_entry *head)

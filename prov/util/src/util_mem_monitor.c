@@ -3,7 +3,7 @@
  * Copyright (c) 2017-2021 Intel Inc. All rights reserved.
  * Copyright (c) 2019-2021 Amazon.com, Inc. or its affiliates.
  *                         All rights reserved.
- * (C) Copyright 2020 Hewlett Packard Enterprise Development LP
+ * (C) Copyright 2020,2024 Hewlett Packard Enterprise Development LP
  * Copyright (C) 2024 Cornelis Networks. All rights reserved.
  *
  * This software is available to you under a choice of one of two
@@ -61,6 +61,8 @@ static struct ofi_uffd uffd = {
 	.monitor.start = ofi_uffd_start,
 	.monitor.stop = ofi_uffd_stop,
 	.monitor.name = "uffd",
+	.fd = -1,
+	.exit_pipe = { -1, -1 },
 };
 struct ofi_mem_monitor *uffd_monitor = &uffd.monitor;
 
@@ -194,6 +196,7 @@ static void initialize_monitor_list()
 		ze_monitor,
 		ze_ipc_monitor,
 		import_monitor,
+		kdreg2_monitor,
 	};
 
 	monitor_list_size = ARRAY_SIZE(monitors);
@@ -209,6 +212,37 @@ static void cleanup_monitor_list() {
 	free(monitor_list);
 	monitor_list = NULL;
 	monitor_list_size = 0;
+}
+
+static void set_default_monitor(const char *monitor)
+{
+	if (!monitor)
+		return;
+
+	if (!strcmp(monitor, "userfaultfd") || !strcmp(monitor, "uffd")) {
+#if HAVE_UFFD_MONITOR
+		default_monitor = uffd_monitor;
+#else
+		FI_WARN(&core_prov, FI_LOG_MR, "userfaultfd monitor not available\n");
+		default_monitor = NULL;
+#endif
+	} else if (!strcmp(monitor, "memhooks")) {
+#if HAVE_MEMHOOKS_MONITOR
+		default_monitor = memhooks_monitor;
+#else
+		FI_WARN(&core_prov, FI_LOG_MR, "memhooks monitor not available\n");
+		default_monitor = NULL;
+#endif
+	} else if (!strcmp(monitor, "kdreg2")) {
+#if HAVE_KDREG2_MONITOR
+		default_monitor = kdreg2_monitor;
+#else
+		FI_WARN(&core_prov, FI_LOG_MR, "kdreg2 monitor not available\n");
+		default_monitor = NULL;
+#endif
+	} else if (!strcmp(monitor, "disabled")) {
+		default_monitor = NULL;
+	}
 }
 
 /*
@@ -245,11 +279,17 @@ void ofi_monitors_init(void)
 			"Define a default memory registration monitor."
 			" The monitor checks for virtual to physical memory"
 			" address changes.  Options are: userfaultfd, memhooks"
-			" and disabled.  Userfaultfd is a Linux kernel feature."
-			" Memhooks operates by intercepting memory allocation"
-			" and free calls.  Userfaultfd is the default if"
-			" available on the system. 'disabled' option disables"
-			" memory caching.");
+			" kdreg2, and disabled.  Userfaultfd is a Linux kernel"
+			" feature. Memhooks operates by intercepting memory"
+			" allocation and free calls. kdreg2 is a supplied as a"
+			" loadable Linux kernel module."
+#if defined(HAVE_MR_CACHE_MONITOR_DEFAULT)
+			" " HAVE_MR_CACHE_MONITOR_DEFAULT
+#else
+			" Userfaultfd"
+#endif
+			" is the default if available on the system. 'disabled'"
+			" option disables memory caching.");
 	fi_param_define(NULL, "mr_cuda_cache_monitor_enabled", FI_PARAM_BOOL,
 			"Enable or disable the CUDA cache memory monitor."
 			"Enabled by default.");
@@ -278,34 +318,21 @@ void ofi_monitors_init(void)
 	 * do not override
 	 */
 	if (!default_monitor) {
-#if HAVE_MEMHOOKS_MONITOR
+#if defined(HAVE_MR_CACHE_MONITOR_DEFAULT)
+		set_default_monitor(HAVE_MR_CACHE_MONITOR_DEFAULT);
+#elif HAVE_MEMHOOKS_MONITOR
 		default_monitor = memhooks_monitor;
 #elif HAVE_UFFD_MONITOR
 		default_monitor = uffd_monitor;
+#elif HAVE_KDREG2_MONITOR
+		default_monitor = kdreg2_monitor;
 #else
 		default_monitor = NULL;
 #endif
 	}
 
-	if (cache_params.monitor != NULL) {
-		if (!strcmp(cache_params.monitor, "userfaultfd")) {
-#if HAVE_UFFD_MONITOR
-			default_monitor = uffd_monitor;
-#else
-			FI_WARN(&core_prov, FI_LOG_MR, "userfaultfd monitor not available\n");
-			default_monitor = NULL;
-#endif
-		} else if (!strcmp(cache_params.monitor, "memhooks")) {
-#if HAVE_MEMHOOKS_MONITOR
-			default_monitor = memhooks_monitor;
-#else
-			FI_WARN(&core_prov, FI_LOG_MR, "memhooks monitor not available\n");
-			default_monitor = NULL;
-#endif
-		} else if (!strcmp(cache_params.monitor, "disabled")) {
-			default_monitor = NULL;
-		}
-	}
+	if (cache_params.monitor != NULL)
+		set_default_monitor(cache_params.monitor);
 
 	FI_INFO(&core_prov, FI_LOG_MR,
 		"Default memory monitor is: %s\n",
@@ -555,6 +582,8 @@ void ofi_monitor_unsubscribe_no_op(struct ofi_mem_monitor *notifier,
 #include <sys/ioctl.h>
 #include <linux/userfaultfd.h>
 
+static void ofi_uffd_pagefault_handler(struct uffd_msg *msg);
+
 /* The userfault fd monitor requires for events that could
  * trigger it to be handled outside of the monitor functions
  * itself. When a fault occurs on a monitored region, the
@@ -567,14 +596,17 @@ void ofi_monitor_unsubscribe_no_op(struct ofi_mem_monitor *notifier,
 static void *ofi_uffd_handler(void *arg)
 {
 	struct uffd_msg msg;
-	struct pollfd fds;
+	struct pollfd fds[2];
 	int ret;
 
-	fds.fd = uffd.fd;
-	fds.events = POLLIN;
+	fds[0].fd     = uffd.fd;
+	fds[0].events = POLLIN;
+	fds[1].fd     = uffd.exit_pipe[0];
+	fds[1].events = POLLIN;
+
 	for (;;) {
-		ret = poll(&fds, 1, -1);
-		if (ret != 1)
+		ret = poll(fds, 2, -1);
+		if (ret < 0 || fds[1].revents)
 			break;
 
 		pthread_rwlock_rdlock(&mm_list_rwlock);
@@ -587,6 +619,8 @@ static void *ofi_uffd_handler(void *arg)
 				break;
 			continue;
 		}
+
+		FI_DBG(&core_prov, FI_LOG_MR, "Received UFFD event %d\n", msg.event);
 
 		switch (msg.event) {
 		case UFFD_EVENT_REMOVE:
@@ -606,6 +640,9 @@ static void *ofi_uffd_handler(void *arg)
 				(void *) (uintptr_t) msg.arg.remap.from,
 				(size_t) msg.arg.remap.len);
 			break;
+		case UFFD_EVENT_PAGEFAULT:
+			ofi_uffd_pagefault_handler(&msg);
+			break;
 		default:
 			FI_WARN(&core_prov, FI_LOG_MR,
 				"Unhandled uffd event %d\n", msg.event);
@@ -615,6 +652,114 @@ static void *ofi_uffd_handler(void *arg)
 		pthread_rwlock_unlock(&mm_list_rwlock);
 	}
 	return NULL;
+}
+
+static void ofi_uffd_pagefault_handler(struct uffd_msg *msg)
+{
+	struct uffdio_zeropage zp;
+	int i;
+	int ret;
+	void * const address = (void *) (uintptr_t) msg->arg.pagefault.address;
+	uint64_t const flags = (uint64_t) msg->arg.pagefault.flags;
+#if HAVE_UFFD_THREAD_ID
+	uint32_t const ptid = (uint32_t) msg->arg.pagefault.feat.ptid;
+#endif
+	/* ofi_uffd_register sets the mode to
+	 * UFFDIO_REGISTER_MODE_MISSING.  As a result, we can
+	 * get read, write or write-protect notifications via
+	 * UFFD_EVENT_PAGEFAULT.  The only ones we can sensibly
+	 * handle are writes to non-backed pages.
+	 * (Read and write-protect notifications are likely
+	 * application bugs.)
+	 */
+
+	if (flags != UFFD_PAGEFAULT_FLAG_WRITE) {
+#if HAVE_UFFD_THREAD_ID
+		FI_WARN(&core_prov, FI_LOG_MR,
+			"UFFD pagefault with unrecognized flags: %lu, address %p, thread %u\n",
+			flags, address, ptid);
+#else
+		FI_WARN(&core_prov, FI_LOG_MR,
+			"UFFD pagefault with unrecognized flags: %lu, address %p\n",
+			flags, address);
+#endif
+		/* The faulting thread is halted at this point. In
+		 * theory we could wake it up with UFFDIO_WAKE. In
+		 * practice that requires the address range of the
+		 * fault, information we don't have from the
+		 * pagefault event.
+		 */
+
+		return;
+	}
+
+	/* The event tells us the address of the fault
+	 * (which can be anywhere on the page). It does not
+	 * tell us the size of the page so we have to guess
+	 * from the list of known page_sizes.
+	 *
+	 * We employ the standard resolution: install a zeroed page.
+	 */
+
+	for (i = 0; i < num_page_sizes; ) {
+		/* setup a zeropage reqest for this pagesize */
+		zp.range.start = (uint64_t) (uintptr_t)
+			ofi_get_page_start(address, page_sizes[i]);
+		zp.range.len = (uint64_t) page_sizes[i];
+		zp.mode = 0;
+		zp.zeropage = 0;
+
+		ret = ioctl(uffd.fd, UFFDIO_ZEROPAGE, &zp);
+
+		if (ret == 0)		/* success */
+			return;
+
+		/* Note: the documentation (man ioctl_userfaultfd) says
+		 * that the ioctl() returns -1 on error and errno is set
+		 * to indicate the error. It also says that the zeropage
+		 * member of struct uffdio_zeropage is set to the negated
+		 * error.  The unit tests for uffd say
+		 *    real retval in uffdio_zeropage.zeropage
+		 * so that's what we use here.
+		 */
+
+		if (zp.zeropage == -EAGAIN)
+			/* This is a tough case.  If the memory map is
+			 * changing, the kernel returns EAGAIN before
+			 * installing the zeroed page.  So the page
+			 * fault has not been rectified.  If we don't try
+			 * again, the application will crash.  If we add
+			 * a maximum retry count we could still end up
+			 * with an unresolved page fault.
+			 *
+			 * It's likely a kernel bug or (something else
+			 * bad like OOM) if it returns EAGAIN forever.
+			 * So we retry until we get something besides
+			 * EAGAIN.
+			 */
+			continue;	/* retry this page size */
+
+		i++;			/* try next page size */
+
+		if (zp.zeropage == -EINVAL)     /* wrong page size */
+			continue;
+
+		/* If we get here we failed to install the zeroed
+		 * page for this page size and it wasn't a size error.
+		 * We could either stop trying or go on to the
+		 * next pagesize.  We choose to print a message and try
+		 * another page size.
+		 */
+
+		FI_DBG(&core_prov, FI_LOG_MR,
+			"Unable to install zeroed page of size %zu to handle page fault."
+			"  address = %p zeropage = %lld errno = %d\n",
+			page_sizes[i], address, zp.zeropage, errno);
+	}
+
+	FI_WARN(&core_prov, FI_LOG_MR,
+		"Unable to handle event UFFD_EVENT_PAGEFAULT for address %p.\n",
+		address);
 }
 
 static int ofi_uffd_register(const void *addr, size_t len, size_t page_size)
@@ -692,24 +837,45 @@ static bool ofi_uffd_valid(struct ofi_mem_monitor *monitor,
 	return true;
 }
 
+static void ofi_uffd_close_fd(struct ofi_uffd *monitor)
+{
+	close(monitor->fd);
+	monitor->fd = -1;
+}
+
+static void ofi_uffd_close_pipe(struct ofi_uffd *monitor)
+{
+	close(monitor->exit_pipe[0]);
+	close(monitor->exit_pipe[1]);
+	monitor->exit_pipe[0] = -1;
+	monitor->exit_pipe[1] = -1;
+}
+
 static int ofi_uffd_start(struct ofi_mem_monitor *monitor)
 {
 	struct uffdio_api api;
 	int ret;
 
-	uffd.monitor.subscribe = ofi_uffd_subscribe;
-	uffd.monitor.unsubscribe = ofi_uffd_unsubscribe;
-	uffd.monitor.valid = ofi_uffd_valid;
+	if (uffd.fd >= 0)
+		return 0;
 
 	if (!num_page_sizes)
 		return -FI_ENODATA;
+
+	ret = pipe(uffd.exit_pipe);
+	if (ret) {
+		FI_WARN(&core_prov, FI_LOG_MR,
+			"uffd/pipe: %s\n", strerror(errno));
+		return -errno;
+	}
 
 	uffd.fd = syscall(__NR_userfaultfd,
 			  O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
 	if (uffd.fd < 0) {
 		FI_WARN(&core_prov, FI_LOG_MR,
 			"syscall/userfaultfd %s\n", strerror(errno));
-		return -errno;
+		ret = -errno;
+		goto close_pipe;
 	}
 
 	api.api = UFFD_API;
@@ -720,13 +886,13 @@ static int ofi_uffd_start(struct ofi_mem_monitor *monitor)
 		FI_WARN(&core_prov, FI_LOG_MR,
 			"ioctl/uffdio: %s\n", strerror(errno));
 		ret = -errno;
-		goto closefd;
+		goto close_fd;
 	}
 
 	if (api.api != UFFD_API) {
 		FI_WARN(&core_prov, FI_LOG_MR, "uffd features not supported\n");
 		ret = -FI_ENOSYS;
-		goto closefd;
+		goto close_fd;
 	}
 
 	ret = pthread_create(&uffd.thread, NULL, ofi_uffd_handler, &uffd);
@@ -734,20 +900,56 @@ static int ofi_uffd_start(struct ofi_mem_monitor *monitor)
 		FI_WARN(&core_prov, FI_LOG_MR,
 			"failed to create handler thread %s\n", strerror(ret));
 		ret = -ret;
-		goto closefd;
+		goto close_fd;
 	}
+
+	uffd.monitor.subscribe = ofi_uffd_subscribe;
+	uffd.monitor.unsubscribe = ofi_uffd_unsubscribe;
+	uffd.monitor.valid = ofi_uffd_valid;
+
+	FI_INFO(&core_prov, FI_LOG_MR,
+		"Memory monitor uffd started.\n");
+
 	return 0;
 
-closefd:
-	close(uffd.fd);
+close_fd:
+
+	ofi_uffd_close_fd(&uffd);
+
+close_pipe:
+
+	ofi_uffd_close_pipe(&uffd);
+
+	FI_WARN(&core_prov, FI_LOG_MR,
+		"Memory monitor uffd failed to start: %s.\n",
+		strerror(-ret));
+
 	return ret;
 }
 
 static void ofi_uffd_stop(struct ofi_mem_monitor *monitor)
 {
-	pthread_cancel(uffd.thread);
+	ssize_t   num_written;
+
+	if (uffd.fd < 0)
+		return;
+
+	/* tell the thread to exit with the exit_pipe */
+
+	num_written = write(uffd.exit_pipe[1], "X", 1);
+	if (num_written != 1) {
+		FI_WARN(&core_prov, FI_LOG_MR,
+			"uffd/close: unable to write to exit pipe: %s",
+			strerror(errno));
+	}
+
 	pthread_join(uffd.thread, NULL);
-	close(uffd.fd);
+
+	ofi_uffd_close_fd(&uffd);
+	ofi_uffd_close_pipe(&uffd);
+
+	FI_INFO(&core_prov, FI_LOG_MR,
+		"Memory monitor uffd stopped.\n");
 }
 
 #else /* HAVE_UFFD_MONITOR */

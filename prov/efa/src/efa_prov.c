@@ -164,6 +164,15 @@ EFA_INI
 	if (err)
 		goto err_free;
 
+	err = efa_fork_support_enable_if_requested();
+	if (err) {
+		goto err_free;
+	}
+
+	err = efa_hmem_info_initialize();
+	if (err)
+		goto err_free;
+
 	dlist_init(&g_efa_domain_list);
 
 	return &efa_prov;

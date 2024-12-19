@@ -12,7 +12,11 @@
 #include "ofi_util.h"
 #include "rdm/efa_rdm_protocol.h"
 
-#define EFA_QP_DEFAULT_SERVICE_LEVEL 8
+#define EFA_QP_DEFAULT_SERVICE_LEVEL 0
+#define EFA_QP_LOW_LATENCY_SERVICE_LEVEL 8
+
+#define efa_rx_flags(efa_base_ep) ((efa_base_ep)->util_ep.rx_op_flags)
+#define efa_tx_flags(efa_base_ep) ((efa_base_ep)->util_ep.tx_op_flags)
 
 struct efa_qp {
 	struct ibv_qp *ibv_qp;
@@ -50,14 +54,17 @@ struct efa_base_ep {
 	bool efa_qp_enabled;
 	bool is_wr_started;
 
-	struct ibv_send_wr xmit_more_wr_head;
-	struct ibv_send_wr *xmit_more_wr_tail;
-	struct ibv_recv_wr recv_more_wr_head;
-	struct ibv_recv_wr *recv_more_wr_tail;
 	struct efa_recv_wr *efa_recv_wr_vec;
+	size_t recv_wr_index;
+
+	size_t max_msg_size;		/**< #FI_OPT_MAX_MSG_SIZE */
+	size_t max_rma_size;		/**< #FI_OPT_MAX_RMA_SIZE */
+	size_t inject_msg_size;		/**< #FI_OPT_INJECT_MSG_SIZE */
+	size_t inject_rma_size;		/**< #FI_OPT_INJECT_RMA_SIZE */
 
 	/* Only used by RDM ep type */
 	struct efa_qp *user_recv_qp; /* Separate qp to receive pkts posted by users */
+	struct efa_recv_wr *user_recv_wr_vec;
 };
 
 int efa_base_ep_bind_av(struct efa_base_ep *base_ep, struct efa_av *av);

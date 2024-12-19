@@ -475,7 +475,14 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 		pkt_entry = (void *)(uintptr_t)ibv_cq->ibv_cq_ex->wr_id;
 		qp = efa_domain->qp_table[ibv_wc_read_qp_num(ibv_cq->ibv_cq_ex) & efa_domain->qp_table_sz_m1];
 		ep = container_of(qp->base_ep, struct efa_rdm_ep, base_ep);
+#if HAVE_LTTNG
 		efa_rdm_tracepoint(poll_cq, (size_t) ibv_cq->ibv_cq_ex->wr_id);
+		if (pkt_entry && pkt_entry->ope)
+			efa_rdm_tracepoint(poll_cq_ope, pkt_entry->ope->msg_id,
+					   (size_t) pkt_entry->ope->cq_entry.op_context,
+					   pkt_entry->ope->total_len, pkt_entry->ope->cq_entry.tag,
+					   pkt_entry->ope->addr);
+#endif
 		opcode = ibv_wc_read_opcode(ibv_cq->ibv_cq_ex);
 		if (ibv_cq->ibv_cq_ex->status) {
 			prov_errno = efa_rdm_cq_get_prov_errno(ibv_cq->ibv_cq_ex);
@@ -487,6 +494,12 @@ void efa_rdm_cq_poll_ibv_cq(ssize_t cqe_to_process, struct efa_ibv_cq *ibv_cq)
 				break;
 			case IBV_WC_RECV: /* fall through */
 			case IBV_WC_RECV_RDMA_WITH_IMM:
+				if (efa_rdm_cq_wc_is_unsolicited(ibv_cq->ibv_cq_ex)) {
+					EFA_WARN(FI_LOG_CQ, "Receive error %s (%d) for unsolicited write recv",
+						efa_strerror(prov_errno), prov_errno);
+					efa_base_ep_write_eq_error(&ep->base_ep, to_fi_errno(prov_errno), prov_errno);
+					break;
+				}
 				efa_rdm_pke_handle_rx_error(pkt_entry, prov_errno);
 				break;
 			default:
@@ -628,13 +641,13 @@ static void efa_rdm_cq_progress(struct util_cq *cq)
 	 * some idle endpoints and never poll completions for them. Move these initial posts to
 	 * the first cq read call before having a long term fix.
 	 */
-	if (!efa_rdm_cq->initial_rx_to_all_eps_posted) {
+	if (efa_rdm_cq->need_to_scan_ep_list) {
 		dlist_foreach(&cq->ep_list, item) {
 			fid_entry = container_of(item, struct fid_list_entry, entry);
 			efa_rdm_ep = container_of(fid_entry->fid, struct efa_rdm_ep, base_ep.util_ep.ep_fid.fid);
 			efa_rdm_ep_post_internal_rx_pkts(efa_rdm_ep);
 		}
-		efa_rdm_cq->initial_rx_to_all_eps_posted = true;
+		efa_rdm_cq->need_to_scan_ep_list = false;
 	}
 
 	dlist_foreach(&efa_rdm_cq->ibv_cq_poll_list, item) {
@@ -680,7 +693,7 @@ int efa_rdm_cq_open(struct fid_domain *domain, struct fi_cq_attr *attr,
 	attr->size = MAX(efa_domain->rdm_cq_size, attr->size);
 
 	dlist_init(&cq->ibv_cq_poll_list);
-	cq->initial_rx_to_all_eps_posted = false;
+	cq->need_to_scan_ep_list = false;
 	ret = ofi_cq_init(&efa_prov, domain, attr, &cq->util_cq,
 			  &efa_rdm_cq_progress, context);
 

@@ -363,7 +363,7 @@ void test_efa_rdm_pke_get_available_copy_methods_align128(struct efa_resource **
 	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = 1;
 	
 	/* p2p is available */
-	efa_rdm_ep_domain(efa_rdm_ep)->hmem_info[FI_HMEM_CUDA].p2p_supported_by_device = true;
+	g_efa_hmem_info[FI_HMEM_CUDA].p2p_supported_by_device = true;
 	efa_rdm_ep->hmem_p2p_opt = FI_HMEM_P2P_ENABLED;
 
 	/* RDMA read is supported */
@@ -921,36 +921,35 @@ static void test_efa_rdm_ep_use_zcpy_rx_impl(struct efa_resource *resource,
                                              bool cuda_p2p_supported,
                                              bool expected_use_zcpy_rx)
 {
-	struct efa_domain *efa_domain;
 	struct efa_rdm_ep *ep;
 	size_t max_msg_size = 1000;
+	size_t inject_msg_size = 0;
 	size_t inject_rma_size = 0;
 	bool shm_permitted = false;
+	ofi_hmem_disable_p2p = cuda_p2p_disabled;
 
 	efa_unit_test_resource_construct_with_hints(resource, FI_EP_RDM, FI_VERSION(1, 14),
 	                                            resource->hints, false, true);
 
-	efa_domain = container_of(resource->domain, struct efa_domain,
-	                          util_domain.domain_fid.fid);
-
 	/* System memory P2P should always be enabled */
-	assert_true(efa_domain->hmem_info[FI_HMEM_SYSTEM].initialized);
-	assert_false(efa_domain->hmem_info[FI_HMEM_SYSTEM].p2p_disabled_by_user);
-	assert_true(efa_domain->hmem_info[FI_HMEM_SYSTEM].p2p_supported_by_device);
+	assert_true(g_efa_hmem_info[FI_HMEM_SYSTEM].initialized);
+	assert_true(g_efa_hmem_info[FI_HMEM_SYSTEM].p2p_supported_by_device);
 
 	/**
 	 * We want to be able to run this test on any platform:
 	 * 1. Fake CUDA support.
 	 * 2. Disable all other hmem ifaces.
 	 */
-	efa_domain->hmem_info[FI_HMEM_CUDA].initialized = true;
-	efa_domain->hmem_info[FI_HMEM_CUDA].p2p_disabled_by_user = cuda_p2p_disabled;
-	efa_domain->hmem_info[FI_HMEM_CUDA].p2p_supported_by_device = cuda_p2p_supported;
+	g_efa_hmem_info[FI_HMEM_CUDA].initialized = true;
+	g_efa_hmem_info[FI_HMEM_CUDA].p2p_supported_by_device = cuda_p2p_supported;
 
-	efa_domain->hmem_info[FI_HMEM_NEURON].initialized = false;
-	efa_domain->hmem_info[FI_HMEM_SYNAPSEAI].initialized = false;
+	g_efa_hmem_info[FI_HMEM_NEURON].initialized = false;
+	g_efa_hmem_info[FI_HMEM_SYNAPSEAI].initialized = false;
 
 	ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+
+	if (cuda_p2p_supported)
+		ep->hmem_p2p_opt = FI_HMEM_P2P_ENABLED;
 
 	/* Set sufficiently small max_msg_size */
 	assert_int_equal(fi_setopt(&resource->ep->fid, FI_OPT_ENDPOINT, FI_OPT_MAX_MSG_SIZE,
@@ -960,19 +959,30 @@ static void test_efa_rdm_ep_use_zcpy_rx_impl(struct efa_resource *resource,
 	assert_int_equal(fi_setopt(&resource->ep->fid, FI_OPT_ENDPOINT, FI_OPT_SHARED_MEMORY_PERMITTED,
 			&shm_permitted, sizeof shm_permitted), 0);
 
-	assert_true(ep->max_msg_size == max_msg_size);
+	assert_true(ep->base_ep.max_msg_size == max_msg_size);
 
 	/* Enable EP */
 	assert_int_equal(fi_enable(resource->ep), 0);
 
 	assert_true(ep->use_zcpy_rx == expected_use_zcpy_rx);
+
+	assert_int_equal(fi_getopt(&resource->ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_MSG_SIZE,
+			&inject_msg_size, &(size_t){sizeof inject_msg_size}), 0);
+	assert_int_equal(ep->base_ep.inject_msg_size, inject_msg_size);
+
 	assert_int_equal(fi_getopt(&resource->ep->fid, FI_OPT_ENDPOINT, FI_OPT_INJECT_RMA_SIZE,
 			&inject_rma_size, &(size_t){sizeof inject_rma_size}), 0);
-	assert_int_equal(ep->inject_rma_size, inject_rma_size);
-	if (expected_use_zcpy_rx)
+	assert_int_equal(ep->base_ep.inject_rma_size, inject_rma_size);
+
+	if (expected_use_zcpy_rx) {
+		assert_int_equal(inject_msg_size, efa_rdm_ep_domain(ep)->device->efa_attr.inline_buf_size);
 		assert_int_equal(inject_rma_size, efa_rdm_ep_domain(ep)->device->efa_attr.inline_buf_size);
-	else
+	} else {
+		assert_int_equal(inject_msg_size, resource->info->tx_attr->inject_size);
 		assert_int_equal(inject_rma_size, resource->info->tx_attr->inject_size);
+	}
+	/* restore global variable */
+	ofi_hmem_disable_p2p = 0;
 }
 
 /**
@@ -996,9 +1006,9 @@ void test_efa_rdm_ep_user_zcpy_rx_disabled(struct efa_resource **state)
 }
 
 /**
- * @brief Verify zcpy_rx is enabled if CUDA P2P is explictly disabled
+ * @brief Verify zcpy_rx is disabled if CUDA P2P is explictly disabled
  */
-void test_efa_rdm_ep_user_disable_p2p_zcpy_rx_happy(struct efa_resource **state)
+void test_efa_rdm_ep_user_disable_p2p_zcpy_rx_disabled(struct efa_resource **state)
 {
 	struct efa_resource *resource = *state;
 
@@ -1008,7 +1018,7 @@ void test_efa_rdm_ep_user_disable_p2p_zcpy_rx_happy(struct efa_resource **state)
 	resource->hints->mode = FI_MSG_PREFIX;
 	resource->hints->caps = FI_MSG;
 
-	test_efa_rdm_ep_use_zcpy_rx_impl(resource, true, false, true);
+	test_efa_rdm_ep_use_zcpy_rx_impl(resource, true, false, false);
 }
 
 /**
@@ -1110,6 +1120,46 @@ void test_efa_rdm_ep_zcpy_recv_cancel(struct efa_resource **state)
 }
 
 /**
+ * @brief When user posts more than rx size fi_recv, we should return eagain and make sure
+ * there is no rx entry leaked
+ */
+void test_efa_rdm_ep_zcpy_recv_eagain(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_unit_test_buff recv_buff;
+	int i;
+	struct efa_rdm_ep *efa_rdm_ep;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	assert_non_null(resource->hints);
+
+	resource->hints->caps = FI_MSG;
+
+	/* enable zero-copy recv mode in ep */
+	test_efa_rdm_ep_use_zcpy_rx_impl(resource, false, true, true);
+
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+
+	/* Construct a recv buffer with mr */
+	efa_unit_test_buff_construct(&recv_buff, resource, 16);
+
+	for (i = 0; i < efa_rdm_ep->base_ep.info->rx_attr->size; i++)
+		assert_int_equal(fi_recv(resource->ep, recv_buff.buff, recv_buff.size, fi_mr_desc(recv_buff.mr), FI_ADDR_UNSPEC, NULL), 0);
+
+	/* we should have rx number of rx entry before and after the extra recv post */
+	assert_true(efa_unit_test_get_dlist_length(&efa_rdm_ep->rxe_list) == efa_rdm_ep->base_ep.info->rx_attr->size);
+	assert_int_equal(fi_recv(resource->ep, recv_buff.buff, recv_buff.size, fi_mr_desc(recv_buff.mr), FI_ADDR_UNSPEC, NULL), -FI_EAGAIN);
+	assert_true(efa_unit_test_get_dlist_length(&efa_rdm_ep->rxe_list) == efa_rdm_ep->base_ep.info->rx_attr->size);
+
+	/**
+	 * the buf is still posted to rdma-core, so unregistering mr can
+	 * return non-zero. Currently ignore this failure.
+	 */
+	(void) fi_close(&recv_buff.mr->fid);
+	free(recv_buff.buff);
+}
+
+/**
  * @brief when efa_rdm_ep_post_handshake_error failed due to pkt pool exhaustion, 
  * make sure both txe is cleaned
  *
@@ -1168,4 +1218,84 @@ void test_efa_rdm_ep_post_handshake_error_handling_pke_exhaustion(struct efa_res
 		efa_rdm_pke_release_tx(pkt_entry_vec[i]);
 
 	free(pkt_entry_vec);
+}
+
+static
+void test_efa_rdm_ep_rx_refill_impl(struct efa_resource **state, int threshold, int rx_size)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ep *efa_rdm_ep;
+	struct efa_rdm_pke *pkt_entry;
+	int i;
+	size_t threshold_orig;
+
+	if (threshold < 4 || rx_size < 4) {
+		fprintf(stderr, "Too small threshold or rx_size for this test\n");
+		fail();
+	}
+
+	threshold_orig = efa_env.internal_rx_refill_threshold;
+
+	efa_env.internal_rx_refill_threshold = threshold;
+
+	resource->hints = efa_unit_test_alloc_hints(FI_EP_RDM);
+	assert_non_null(resource->hints);
+	resource->hints->rx_attr->size = rx_size;
+	efa_unit_test_resource_construct_with_hints(resource, FI_EP_RDM, FI_VERSION(1, 14),
+	                                            resource->hints, true, true);
+
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	assert_int_equal(efa_rdm_ep_get_rx_pool_size(efa_rdm_ep), rx_size);
+
+	/* Grow the rx pool and post rx pkts */
+	efa_rdm_ep_post_internal_rx_pkts(efa_rdm_ep);
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_posted, efa_rdm_ep_get_rx_pool_size(efa_rdm_ep));
+
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_to_post, 0);
+	for (i = 0; i < 4; i++) {
+		pkt_entry = ofi_bufpool_get_ibuf(efa_rdm_ep->efa_rx_pkt_pool, i);
+		assert_non_null(pkt_entry);
+		efa_rdm_pke_release_rx(pkt_entry);
+	}
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_to_post, 4);
+
+	efa_rdm_ep_bulk_post_internal_rx_pkts(efa_rdm_ep);
+
+	/**
+	 * efa_rx_pkts_to_post < FI_EFA_RX_REFILL_THRESHOLD
+	 * pkts should NOT be refilled
+	 */
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_to_post, 4);
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_posted, rx_size);
+
+	/* releasing more pkts to reach the threshold or rx_size*/
+	for (i = 4; i < MIN(rx_size, threshold); i++) {
+		pkt_entry = ofi_bufpool_get_ibuf(efa_rdm_ep->efa_rx_pkt_pool, i);
+		assert_non_null(pkt_entry);
+		efa_rdm_pke_release_rx(pkt_entry);
+	}
+
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_to_post, i);
+
+	efa_rdm_ep_bulk_post_internal_rx_pkts(efa_rdm_ep);
+
+	/**
+	 * efa_rx_pkts_to_post == min(FI_EFA_RX_REFILL_THRESHOLD, FI_EFA_RX_SIZE)
+	 * pkts should be refilled
+	 */
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_to_post, 0);
+	assert_int_equal(efa_rdm_ep->efa_rx_pkts_posted, rx_size + i);
+
+	/* recover the original value */
+	efa_env.internal_rx_refill_threshold = threshold_orig;
+}
+
+void test_efa_rdm_ep_rx_refill_threshold_smaller_than_rx_size(struct efa_resource **state)
+{
+	test_efa_rdm_ep_rx_refill_impl(state, 8, 64);
+}
+
+void test_efa_rdm_ep_rx_refill_threshold_larger_than_rx_size(struct efa_resource **state)
+{
+	test_efa_rdm_ep_rx_refill_impl(state, 128, 64);
 }

@@ -34,9 +34,9 @@ int cxip_cq_req_complete(struct cxip_req *req)
 		return FI_SUCCESS;
 	}
 
-	return ofi_cq_write(&req->cq->util_cq, (void *)req->context,
-			    req->flags, req->data_len, (void *)req->buf,
-			    req->data, req->tag);
+	return ofi_peer_cq_write(&req->cq->util_cq, (void *)req->context,
+				 req->flags, req->data_len, (void *)req->buf,
+				 req->data, req->tag, FI_ADDR_NOTAVAIL);
 }
 
 /*
@@ -50,9 +50,9 @@ int cxip_cq_req_complete_addr(struct cxip_req *req, fi_addr_t src)
 		return FI_SUCCESS;
 	}
 
-	return ofi_cq_write_src(&req->cq->util_cq, (void *)req->context,
-				req->flags, req->data_len, (void *)req->buf,
-				req->data, req->tag, src);
+	return ofi_peer_cq_write(&req->cq->util_cq, (void *)req->context,
+				 req->flags, req->data_len, (void *)req->buf,
+				 req->data, req->tag, src);
 }
 
 /*
@@ -94,7 +94,7 @@ int cxip_cq_req_error(struct cxip_req *req, size_t olen,
 	err_entry.buf = (void *)(uintptr_t)req->buf;
 	err_entry.src_addr = src_addr;
 
-	return ofi_cq_write_error(&req->cq->util_cq, &err_entry);
+	return ofi_peer_cq_write_error(&req->cq->util_cq, &err_entry);
 }
 
 /*
@@ -125,31 +125,63 @@ void cxip_util_cq_progress(struct util_cq *util_cq)
 	ofi_genlock_unlock(&cq->ep_list_lock);
 }
 
+/* common function for both eq and cq strerror function */
+const char *cxip_strerror(int prov_errno)
+{
+	/* both CXI driver error and collective errors share this function */
+	if (prov_errno < FI_CXI_ERRNO_RED_FIRST)
+		return cxi_rc_to_str(prov_errno);
+
+	switch (prov_errno) {
+	/* EQ JOIN error codes */
+	case FI_CXI_ERRNO_JOIN_MCAST_INUSE:
+		return "coll join multicast address in-use";
+	case FI_CXI_ERRNO_JOIN_HWROOT_INUSE:
+		return "coll join hwroot in-use";
+	case FI_CXI_ERRNO_JOIN_MCAST_INVALID:
+		return "coll join multicast address invalid";
+	case FI_CXI_ERRNO_JOIN_HWROOT_INVALID:
+		return "coll join hwroot invalid";
+	case FI_CXI_ERRNO_JOIN_CURL_FAILED:
+		return "coll join FM REST CURL failed";
+	case FI_CXI_ERRNO_JOIN_CURL_TIMEOUT:
+		return "coll join FM REST CURL timed out";
+	case FI_CXI_ERRNO_JOIN_FAIL_PTE:
+		return "coll join PTE setup failed";
+	case FI_CXI_ERRNO_JOIN_OTHER:
+		return "coll join unknown error";
+
+	/* CQ REDUCE error codes */
+	case FI_CXI_ERRNO_RED_FLT_OVERFLOW:
+		return "coll reduce FLT overflow";
+	case FI_CXI_ERRNO_RED_FLT_INVALID:
+		return "coll reduce FLT invalid";
+	case FI_CXI_ERRNO_RED_INT_OVERFLOW:
+		return "coll reduce INT overflow";
+	case FI_CXI_ERRNO_RED_CONTR_OVERFLOW:
+		return "coll reduce contribution overflow";
+	case FI_CXI_ERRNO_RED_OP_MISMATCH:
+		return "coll reduce opcode mismatch";
+	case FI_CXI_ERRNO_RED_MC_FAILURE:
+		return "coll reduce multicast timeout";
+
+	/* Unknown error */
+	default:
+		return "coll unspecified error";
+	}
+}
+
 /*
  * cxip_cq_strerror() - Converts provider specific error information into a
  * printable string.
  */
 static const char *cxip_cq_strerror(struct fid_cq *cq, int prov_errno,
-				    const void *err_data, char *buf,
-				    size_t len)
+				    const void *err_data, char *buf, size_t len)
 {
-	switch (prov_errno) {
-	case CXIP_PROV_ERRNO_OK:
-		return "CXIP_COLL_OK";
-	case CXIP_PROV_ERRNO_PTE:
-		return "CXIP_COLL_PTE_ERROR";
-	case CXIP_PROV_ERRNO_MCAST_INUSE:
-		return "CXIP_COLL_MCAST_IN_USE";
-	case CXIP_PROV_ERRNO_HWROOT_INUSE:
-		return "CXIP_COLL_HWROOT_IN_USE";
-	case CXIP_PROV_ERRNO_MCAST_INVALID:
-		return "CXIP_COLL_MCAST_INVALID";
-	case CXIP_PROV_ERRNO_HWROOT_INVALID:
-		return "CXIP_COLL_HWROOT_INVALID";
-	case CXIP_PROV_ERRNO_CURL:
-		return "CXIP_COLL_CURL_ERROR";
-	}
-	return cxi_rc_to_str(prov_errno);
+	const char *errmsg = cxip_strerror(prov_errno);
+	if (buf && len > 0)
+		strncpy(buf, errmsg, len);
+	return errmsg;
 }
 
 /*
