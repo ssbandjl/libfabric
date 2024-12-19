@@ -2,6 +2,7 @@ https://github.com/ssbandjl/libfabric.git
 git remote add upstream https://github.com/ofiwg/libfabric.git
 git fetch upstream
 git merge upstream/main
+git pull upstream main
 
 订阅: https://www.openfabrics.org/subscriptions-at-ofa/
 归档的历史讨论: https://lists.openfabrics.org/pipermail/ofiwg/
@@ -102,6 +103,16 @@ enum fi_ep_type {
     FI_EP_RDM,
     FI_EP_SOCK_STREAM,
     FI_EP_SOCK_DGRAM,
+};
+
+new:
+enum fi_ep_type {
+	FI_EP_UNSPEC,
+	FI_EP_MSG,
+	FI_EP_DGRAM,
+	FI_EP_RDM,
+	/* FI_EP_SOCK_STREAM, */
+	/* FI_EP_SOCK_DGRAM, */
 };
 
 
@@ -497,6 +508,7 @@ fi_endpoint
 static struct fi_ops vrb_ep_ops = {
     .size = sizeof(struct fi_ops),
     .close = vrb_ep_close,
+        vrb_flush_sq
     .bind = vrb_ep_bind,
     .control = vrb_ep_control,
     .ops_open = fi_no_ops_open,
@@ -820,6 +832,7 @@ init_buf
 init_ofi
 init_nic
     fi_domain
+        return fabric->ops->domain(fabric, info, domain, context) -> .domain
     fi_endpoint
     fi_cq_open
     if (ep_type == FI_EP_RDM) -> 可靠数据报不需要建连, 通过地址向量管理通信地址
@@ -1021,19 +1034,34 @@ vrb_msg_ep_sendmsg
     
 
 
-
-
+GDR:
+dmabuf, commit:https://github.com/ssbandjl/libfabric/commit/bc6258069f2e9975a69257e921708a980399626a
 fabtests\component\dmabuf-rdma\rdmabw-xe.c
 dmabuf_reg_open
 xe_init
+    EXIT_ON_ERROR(init_libze_ops())
+        libze_handle = dlopen("libze_loader.so.1", RTLD_NOW)
+        libze_ops.zeInit = dlsym(libze_handle, "zeInit")
+        ...
+    libze_ops.zeInit
+    libze_ops.zeContextCreate
+    init_gpu(num_gpus, dev_num, subdev_num)
 init_buf
 init_ib
     ibv_get_device_list
     init_nic
         ibv_open_device
         ibv_alloc_pd
-        ibv_reg_mr
-        or ibv_reg_dmabuf_mr
+        for (i = 0; i < num_gpus; i++)
+            reg_mr(pd, bufs[i].xe_buf.buf,
+				       bufs[i].xe_buf.size,
+				       bufs[i].xe_buf.base,
+				       bufs[i].xe_buf.location)
+                int odp_flag = use_odp ? IBV_ACCESS_ON_DEMAND : 0
+                if (where == MALLOC || use_dmabuf_reg)
+                    ibv_reg_mr(pd, buf, size, mr_access_flags | odp_flag)
+                else
+                    ibv_reg_dmabuf_mr(pd, (uint64_t)((char *)buf - (char *)base), size, (uint64_t)buf, /* iova */ xe_get_buf_fd(buf), mr_access_flags)
         ibv_create_cq
         qp_init_attr.qp_type = IBV_QPT_RC;
         ibv_create_qp
@@ -1278,4 +1306,97 @@ enum fi_hmem_iface {
 	FI_HMEM_NEURON, -> AWS
 	FI_HMEM_SYNAPSEAI,
 };
+
+
+
+include/rdma/fi_tagged.h
+
+
+
+
+
+vrb_poll_cq
+
+
+ucx:
+static struct fi_ops ucx_fabric_fi_ops = {
+	.size = sizeof(struct fi_ops),
+	.close = ucx_fabric_close,
+	.bind = fi_no_bind,
+	.control = fi_no_control,
+	.ops_open = fi_no_ops_open,
+};
+
+static struct fi_ops_fabric ucx_fabric_ops = {
+	.size = sizeof(struct fi_ops_fabric),
+	.domain = ucx_domain_open,
+		ofi_status = ofi_prov_check_info(&ucx_util_prov, fabric->api_version, info)
+		domain = calloc(1, sizeof(struct ucx_domain))
+		ofi_status = ofi_domain_init(fabric, info, &(domain->u_domain), context, 0)
+			ret = util_domain_init(domain, info, lock_type)
+			ret = ofi_mr_map_init(domain->prov, info->domain_attr->mr_mode, &domain->mr_map)
+				map->rbtree = ofi_rbmap_create(compare_mr_keys)
+					ofi_rbmap_init(map, compare)
+						map->compare = compare;
+						map->root = &map->sentinel;
+						map->sentinel.left = &map->sentinel;
+						map->sentinel.right = &map->sentinel;
+						map->sentinel.parent = NULL;
+						map->sentinel.color = BLACK;
+						map->sentinel.data = NULL;
+			dlist_insert_tail(&domain->list_entry, &fabric->domain_list)
+		*fid = &(domain->u_domain.domain_fid)
+	.passive_ep = fi_no_passive_ep,
+	.eq_open = ofi_eq_create,
+	.wait_open = ofi_wait_fd_open,
+	.trywait = fi_no_trywait,
+};
+
+struct fi_ops_domain ucx_domain_ops = {
+	.size = sizeof(struct fi_ops_domain),
+	.av_open = ucx_av_open,
+	.cq_open = ucx_cq_open,
+	.endpoint = ucx_ep_open,
+		ofi_status = ofi_endpoint_init(domain, &ucx_util_prov, info, &ep->ep, context, ucx_ep_progress)
+		status = ucp_worker_create(u_domain->context, &worker_params, &(ep->worker))
+
+	.scalable_ep = fi_no_scalable_ep,
+	.cntr_open = ucx_cntr_open,
+	.poll_open = fi_poll_create,
+	.stx_ctx = fi_no_stx_context,
+	.srx_ctx = fi_no_srx_context,
+	.query_atomic = fi_no_query_atomic,
+};
+
+
+struct fi_ops_rma ucx_rma_ops = {
+	.size = sizeof(struct fi_ops_rma),
+	.read = ucx_read,
+	.readv = ucx_readv,
+	.readmsg = ucx_readmsg,
+	.write = ucx_write,
+	.writev = ucx_writev,
+	.writemsg = ucx_writemsg,
+		status = ucp_put_nb(dst_ep, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len, msg->rma_iov[0].addr, rkey->rkey, ucx_rma_callback)
+	.inject = ucx_inject_write,
+	.writedata = fi_no_rma_writedata,
+	.injectdata = fi_no_rma_injectdata,
+};
+
+
+
+
+struct fi_ops_rma vrb_msg_ep_rma_ops = {
+	.size = sizeof(struct fi_ops_rma),
+	.read = vrb_msg_ep_rma_read,
+	.readv = vrb_msg_ep_rma_readv,
+	.readmsg = vrb_msg_ep_rma_readmsg,
+	.write = vrb_msg_ep_rma_write,
+	.writev = vrb_msg_ep_rma_writev,
+	.writemsg = vrb_msg_ep_rma_writemsg,
+	.inject = vrb_rma_write_fast,
+	.writedata = vrb_msg_ep_rma_writedata,
+	.injectdata = vrb_msg_ep_rma_inject_writedata_fast,
+};
+
 
