@@ -188,26 +188,6 @@ void cxip_ep_progress(struct fid *fid)
 }
 
 /*
- * cxip_ep_peek() - Peek at EP event queues
- *
- * Return whether the associated EP event queues are empty.
- */
-int cxip_ep_peek(struct fid *fid)
-{
-	struct cxip_ep *ep = container_of(fid, struct cxip_ep, ep.fid);
-	struct cxip_ep_obj *ep_obj = ep->ep_obj;
-
-	if (ep_obj->txc->tx_evtq.eq &&
-	    cxi_eq_peek_event(ep_obj->txc->tx_evtq.eq))
-		return -FI_EAGAIN;
-	if (ep_obj->rxc->rx_evtq.eq &&
-	    cxi_eq_peek_event(ep_obj->rxc->rx_evtq.eq))
-		return -FI_EAGAIN;
-
-	return FI_SUCCESS;
-}
-
-/*
  * fi_ep_get_unexpected_msgs() - Get unexpected message information, exposed
  * via domain open ops.
  */
@@ -477,11 +457,146 @@ ssize_t cxip_ep_cancel(fid_t fid, void *context)
 	if (!ofi_recv_allowed(ep->ep_obj->caps))
 		return -FI_ENOENT;
 
+	ofi_genlock_lock(&ep->ep_obj->lock);
+
 	ret = cxip_rxc_cancel(ep->ep_obj->rxc, context);
 	if (ret != -FI_ENOENT)
-		return ret;
+		goto out_unlock;
 
-	return cxip_txc_cancel(ep->ep_obj->txc, context);
+	ret = cxip_txc_cancel(ep->ep_obj->txc, context);
+
+out_unlock:
+	ofi_genlock_unlock(&ep->ep_obj->lock);
+
+	return ret;
+}
+
+/*
+ * cxip_ep_destroy_priv_wait - Free an internal wait channel for the EP.
+ */
+static void cxip_ep_destroy_priv_wait(struct cxip_ep_obj *ep_obj)
+{
+	assert(ep_obj->priv_wait);
+
+	if (ep_obj->txc->send_cq && ep_obj->txc->send_cq->attr.wait_obj)
+		cxip_cq_del_wait_fd(ep_obj->txc->send_cq, ep_obj->wait_fd);
+
+	if (ep_obj->rxc->recv_cq && ep_obj->rxc->recv_cq->attr.wait_obj &&
+	    ep_obj->rxc->recv_cq != ep_obj->txc->send_cq)
+		cxip_cq_del_wait_fd(ep_obj->rxc->recv_cq, ep_obj->wait_fd);
+
+	cxil_destroy_wait_obj(ep_obj->priv_wait);
+
+	ep_obj->priv_wait = NULL;
+	ep_obj->wait_fd = -1;
+}
+
+/*
+ * cxip_ep_alloc_priv_wait - Allocate an internal wait channel for the EP.
+ */
+static int cxip_ep_alloc_priv_wait(struct cxip_ep_obj *ep_obj)
+{
+	bool tx_cq_added = false;
+	int ret;
+
+	assert(ep_obj->priv_wait == NULL);
+
+	ret = cxil_alloc_wait_obj(ep_obj->domain->lni->lni, &ep_obj->priv_wait);
+	if (ret) {
+		CXIP_WARN("Alloc of EP internal wait object failed %d\n",
+			  ret);
+		return ret;
+	}
+
+	ep_obj->wait_fd = cxil_get_wait_obj_fd(ep_obj->priv_wait);
+	ret = fi_fd_nonblock(ep_obj->wait_fd);
+	if (ret) {
+		CXIP_WARN("Unable to set EP wait non-blocking mode: %d\n", ret);
+		goto destroy_wait;
+	}
+
+	if (ep_obj->txc->send_cq && ep_obj->txc->send_cq->attr.wait_obj) {
+		ret = cxip_cq_add_wait_fd(ep_obj->txc->send_cq, ep_obj->wait_fd,
+					  EPOLLPRI | POLLERR);
+		if (ret)
+			goto destroy_wait;
+
+		tx_cq_added = true;
+	}
+
+	if (ep_obj->rxc->recv_cq && ep_obj->rxc->recv_cq->attr.wait_obj &&
+	    ep_obj->rxc->recv_cq != ep_obj->txc->send_cq) {
+		ret = cxip_cq_add_wait_fd(ep_obj->rxc->recv_cq, ep_obj->wait_fd,
+					  EPOLLPRI | POLLERR);
+		if (ret) {
+			if (tx_cq_added)
+				cxip_cq_del_wait_fd(ep_obj->txc->send_cq,
+						    ep_obj->wait_fd);
+			goto destroy_wait;
+		}
+	}
+
+	CXIP_DBG("Add EP private wait object, EP intr FD: %d\n",
+		 ep_obj->wait_fd);
+
+	return FI_SUCCESS;
+
+destroy_wait:
+	cxil_destroy_wait_obj(ep_obj->priv_wait);
+	ep_obj->priv_wait = NULL;
+	ep_obj->wait_fd = -1;
+
+	return ret;
+}
+
+/*
+ * cxip_ep_trywait() - Determine if hardware events are waiting to be processed
+ * for EP based on CQ.
+ */
+int cxip_ep_trywait(struct cxip_ep_obj *ep_obj, struct cxip_cq *cq)
+{
+	assert(ep_obj->priv_wait);
+
+	ofi_genlock_lock(&ep_obj->lock);
+	cxil_clear_wait_obj(ep_obj->priv_wait);
+
+	/* Enable any currently disabled EQ interrupts, if events are
+	 * ready shortcut and return.
+	 */
+	if ((ep_obj->txc->send_cq == cq ||
+	     ep_obj->rxc->recv_cq == cq) && ep_obj->txc->tx_evtq.eq) {
+		cxi_eq_int_enable(ep_obj->txc->tx_evtq.eq);
+		ep_obj->txc->tx_evtq.unacked_events = 0;
+
+		if (cxi_eq_peek_event(ep_obj->txc->tx_evtq.eq))
+			goto ready;
+	}
+
+	if (ep_obj->rxc->recv_cq == cq && ep_obj->rxc->rx_evtq.eq) {
+		cxi_eq_int_enable(ep_obj->rxc->rx_evtq.eq);
+		ep_obj->rxc->rx_evtq.unacked_events = 0;
+
+		if (cxi_eq_peek_event(ep_obj->rxc->rx_evtq.eq))
+			goto ready;
+	}
+
+	/* Side band control messages can also require progress */
+	cxi_eq_int_enable(ep_obj->ctrl.tx_evtq);
+	if (cxi_eq_peek_event(ep_obj->ctrl.tx_evtq))
+		goto ready;
+
+	cxi_eq_int_enable(ep_obj->ctrl.tgt_evtq);
+	if (cxi_eq_peek_event(ep_obj->ctrl.tgt_evtq))
+		goto ready;
+
+	ofi_genlock_unlock(&ep_obj->lock);
+
+	return FI_SUCCESS;
+
+ready:
+	ofi_genlock_unlock(&ep_obj->lock);
+
+	return -FI_EAGAIN;
 }
 
 /*
@@ -497,10 +612,23 @@ static int cxip_ep_enable(struct fid_ep *fid_ep)
 	if (ep_obj->enabled)
 		goto unlock;
 
+	/* Allocate an EP internal wait object if a CQ is bound with a
+	 * wait object specified.
+	 */
+	if ((ep_obj->txc->send_cq && ep_obj->txc->send_cq->attr.wait_obj) ||
+	    (ep_obj->rxc->recv_cq && ep_obj->rxc->recv_cq->attr.wait_obj)) {
+		ret = cxip_ep_alloc_priv_wait(ep_obj);
+		if (ret) {
+			CXIP_WARN("EP internal wait alloc failed %s\n",
+				  fi_strerror(-ret));
+			goto unlock;
+		}
+	}
+
 	if (!ep_obj->av) {
 		CXIP_WARN("Endpoint must be bound to an AV\n");
 		ret = -FI_ENOAV;
-		goto unlock;
+		goto free_wait;
 	}
 
 	assert(ep_obj->domain->enabled);
@@ -510,7 +638,7 @@ static int cxip_ep_enable(struct fid_ep *fid_ep)
 		ret = cxip_av_auth_key_get_vnis(ep_obj->av, &ep_obj->vnis,
 						&ep_obj->vni_count);
 		if (ret)
-			goto unlock;
+			goto free_wait;
 
 		ret = cxip_portals_table_alloc(ep_obj->domain->lni,
 					       ep_obj->vnis, ep_obj->vni_count,
@@ -534,7 +662,7 @@ static int cxip_ep_enable(struct fid_ep *fid_ep)
 		if (ret != FI_SUCCESS) {
 			CXIP_WARN("Failed to allocate portals table: %d\n",
 				  ret);
-			goto unlock;
+			goto free_wait;
 		}
 	}
 
@@ -618,6 +746,10 @@ free_vnis:
 					  ep_obj->vni_count);
 		ep_obj->vnis = NULL;
 	}
+free_wait:
+	if (ep_obj->priv_wait)
+		cxip_ep_destroy_priv_wait(ep_obj);
+
 unlock:
 	ofi_genlock_unlock(&ep_obj->lock);
 
@@ -681,6 +813,8 @@ int cxip_free_endpoint(struct cxip_ep *ep)
 	cxip_txc_close(ep);
 	cxip_rxc_close(ep);
 	cxip_ep_disable(ep_obj);
+	if (ep_obj->priv_wait)
+		cxip_ep_destroy_priv_wait(ep_obj);
 	ofi_genlock_unlock(&ep_obj->lock);
 
 	ofi_atomic_dec32(&ep_obj->domain->ref);
@@ -688,6 +822,7 @@ int cxip_free_endpoint(struct cxip_ep *ep)
 
 	cxip_txc_free(ep_obj->txc);
 	cxip_rxc_free(ep_obj->rxc);
+
 	free(ep_obj);
 	ep->ep_obj = NULL;
 
@@ -918,6 +1053,10 @@ int cxip_ep_bind(struct fid *fid, struct fid *bfid, uint64_t flags)
 
 		break;
 
+	case FI_CLASS_SRX_CTX:
+		ep->ep_obj->owner_srx = ep->ep_obj->domain->owner_srx;
+		break;
+
 	default:
 		return -FI_EINVAL;
 	}
@@ -963,7 +1102,7 @@ static inline int cxip_ep_set_val(struct cxip_ep *cxi_ep,
 	uint64_t *req_order;
 	uint64_t *req_rnr_max_time;
 	uint32_t *req_tclass;
-	uint32_t new_tclass;
+	uint32_t new_tclass = FI_TC_UNSPEC;
 
 	if (!val->val)
 		return -FI_EINVAL;
@@ -1107,6 +1246,15 @@ int cxip_ep_getopt_priv(struct cxip_ep *ep, int level, int optname,
 		*optlen = sizeof(size_t);
 		break;
 
+	case FI_OPT_CUDA_API_PERMITTED:
+		if (!optval || !optlen)
+			return -FI_EINVAL;
+		if (*optlen < sizeof(bool))
+			return -FI_ETOOSMALL;
+
+		*(bool *)optval =
+			!ep->ep_obj->require_dev_reg_copy[FI_HMEM_CUDA];
+		break;
 	default:
 		return -FI_ENOPROTOOPT;
 	}
@@ -1129,6 +1277,7 @@ int cxip_ep_setopt_priv(struct cxip_ep *ep, int level, int optname,
 			const void *optval, size_t optlen)
 {
 	size_t min_multi_recv;
+	bool cuda_api_permitted;
 
 	if (level != FI_OPT_ENDPOINT)
 		return -FI_ENOPROTOOPT;
@@ -1146,6 +1295,30 @@ int cxip_ep_setopt_priv(struct cxip_ep *ep, int level, int optname,
 			return -FI_EINVAL;
 		}
 		ep->ep_obj->rxc->min_multi_recv = min_multi_recv;
+		break;
+	/*
+	 * If GDRCopy is required by the application (ie. it has set
+	 * FI_OPT_CUDA_API_PERMITTED), and is not available, return not
+	 * supported.
+	 */
+	case FI_OPT_CUDA_API_PERMITTED:
+		if (optlen != sizeof(bool))
+			return -FI_EINVAL;
+
+		if (!hmem_ops[FI_HMEM_CUDA].initialized) {
+			CXIP_WARN("FI_OPT_CUDA_API_PERMITTED cannot be set when CUDA library or CUDA device is not available\n");
+			return -FI_EOPNOTSUPP;
+		}
+
+		cuda_api_permitted = *(bool *)optval;
+
+		if (!cuda_api_permitted && !cuda_is_gdrcopy_enabled())
+			return -FI_EOPNOTSUPP;
+
+		if (!cxip_env.force_dev_reg_copy) {
+			ep->ep_obj->require_dev_reg_copy[FI_HMEM_CUDA] =
+				!cuda_api_permitted;
+		}
 		break;
 
 	default:
@@ -1185,7 +1358,7 @@ int cxip_alloc_endpoint(struct cxip_domain *cxip_dom, struct fi_info *hints,
 {
 	int ret;
 	struct cxip_ep_obj *ep_obj;
-	uint32_t txc_tclass;
+	uint32_t txc_tclass = FI_TC_UNSPEC;
 	uint32_t nic;
 	uint32_t pid;
 	int i;
@@ -1232,6 +1405,7 @@ int cxip_alloc_endpoint(struct cxip_domain *cxip_dom, struct fi_info *hints,
 	ep_obj->tgq_size = hints->rx_attr->size;
 	ep_obj->tx_attr = *hints->tx_attr;
 	ep_obj->rx_attr = *hints->rx_attr;
+	ep_obj->wait_fd = -1;
 
 	ep_obj->asic_ver = cxip_dom->iface->info->cassini_version;
 
@@ -1248,6 +1422,12 @@ int cxip_alloc_endpoint(struct cxip_domain *cxip_dom, struct fi_info *hints,
 	ep_obj->src_addr.nic = nic;
 	ep_obj->src_addr.pid = pid;
 	ep_obj->fi_addr = FI_ADDR_NOTAVAIL;
+
+	/* Default to allowing non-dev reg copy APIs unless the caller
+	 * disables it.
+	 */
+	for (i = 0; i < OFI_HMEM_MAX; i++)
+		ep_obj->require_dev_reg_copy[i] = cxip_env.force_dev_reg_copy;
 
 	ofi_atomic_initialize32(&ep_obj->txq_ref, 0);
 	ofi_atomic_initialize32(&ep_obj->tgq_ref, 0);
@@ -1319,6 +1499,26 @@ err:
 	free(ep_obj);
 
 	return ret;
+}
+
+int cxip_ep_obj_map(struct cxip_ep_obj *ep, const void *buf, unsigned long len,
+		    uint64_t flags, struct cxip_md **md)
+{
+	struct cxip_domain *dom = ep->domain;
+	int ret;
+
+	ret = cxip_map(dom, buf, len, flags, md);
+	if (ret != FI_SUCCESS)
+		return ret;
+
+	if (ep->require_dev_reg_copy[(*md)->info.iface] &&
+	    !((*md)->handle_valid)) {
+		CXIP_WARN("Required dev registration copy failed\n");
+		cxip_unmap(*md);
+		return -FI_EOPNOTSUPP;
+	}
+
+	return FI_SUCCESS;
 }
 
 /*

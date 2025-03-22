@@ -127,7 +127,8 @@ static int rxc_msg_init(struct cxip_rxc *rxc)
 
 	/* Base message initialization */
 	num_events = cxip_rxc_get_num_events(rxc);
-	ret = cxip_evtq_init(&rxc->rx_evtq, rxc->recv_cq, num_events, 1);
+	ret = cxip_evtq_init(&rxc->rx_evtq, rxc->recv_cq, num_events, 1,
+			     rxc->ep_obj->priv_wait);
 	if (ret) {
 		CXIP_WARN("Failed to initialize RXC event queue: %d, %s\n",
 			  ret, fi_strerror(-ret));
@@ -227,7 +228,7 @@ void cxip_rxc_recv_req_cleanup(struct cxip_rxc *rxc)
 	uint64_t start;
 	int canceled = 0;
 
-	if (!ofi_atomic_get32(&rxc->orx_reqs))
+	if (!cxip_rxc_orx_reqs_get(rxc))
 		return;
 
 	cxip_evtq_req_discard(&rxc->rx_evtq, rxc);
@@ -242,7 +243,7 @@ void cxip_rxc_recv_req_cleanup(struct cxip_rxc *rxc)
 		CXIP_DBG("Canceled %d Receives: %p\n", canceled, rxc);
 
 	start = ofi_gettime_ms();
-	while (ofi_atomic_get32(&rxc->orx_reqs)) {
+	while (cxip_rxc_orx_reqs_get(rxc)) {
 		sched_yield();
 		cxip_evtq_progress(&rxc->rx_evtq);
 
@@ -402,6 +403,13 @@ struct cxip_rxc *cxip_rxc_calloc(struct cxip_ep_obj *ep_obj, void *context)
 {
 	struct cxip_rxc *rxc = NULL;
 
+	/* 
+	 * It's possible the owner provider decides to turn off
+	 * hardware offload in cxi. If that happens we need to update the
+	 * rx_match_mode.
+	 */
+	cxip_set_env_rx_match_mode();
+
 	switch (ep_obj->protocol) {
 	case FI_PROTO_CXI:
 		rxc = calloc(1, sizeof(struct cxip_rxc_hpc));
@@ -436,7 +444,7 @@ struct cxip_rxc *cxip_rxc_calloc(struct cxip_ep_obj *ep_obj, void *context)
 	rxc->attr = ep_obj->rx_attr;
 	rxc->hmem = !!(rxc->attr.caps & FI_HMEM);
 	rxc->pid_bits = ep_obj->domain->iface->dev->info.pid_bits;
-	ofi_atomic_initialize32(&rxc->orx_reqs, 0);
+	cxip_rxc_orx_reqs_init(rxc);
 
 	rxc->sw_ep_only = cxip_env.rx_match_mode ==
 					CXIP_PTLTE_SOFTWARE_MODE;

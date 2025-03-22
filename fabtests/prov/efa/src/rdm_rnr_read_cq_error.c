@@ -36,6 +36,7 @@
 #include <getopt.h>
 
 #include <shared.h>
+#include "efa_shared.h"
 #include "efa_rnr_shared.h"
 
 
@@ -43,17 +44,22 @@ static int rnr_read_cq_error(void)
 {
 	int total_send, expected_rnr_error;
 	int ret, i, cnt, rnr_flag;
-	const char *prov_errmsg;
 
 	expected_rnr_error = fi->rx_attr->size;
 	rnr_flag = 0;
 	/*
 	 * In order for the sender to get RNR error, we need to first consume
-	 * all pre-posted receive buffer (in efa provider, fi->rx_attr->size
-	 * receiving buffer are pre-posted) on the receiver side, the subsequent
-	 * sends (expected_rnr_error) will then get RNR errors.
+	 * all pre-posted receive buffer.
+	 * For efa-rdm, it pre-posted fi->rx_attr->size receive buffers during 1st cq read
+	 * For efa-direct, it posted whatever application posts. ft_enable_ep_recv already
+	 * posts 1.
 	 */
-	total_send = fi->rx_attr->size + expected_rnr_error;
+	if (EFA_INFO_TYPE_IS_RDM(fi)) {
+		total_send = fi->rx_attr->size + expected_rnr_error;
+	} else {
+		assert(EFA_INFO_TYPE_IS_DIRECT(fi));
+		total_send = expected_rnr_error + 1;
+	}
 
 	for (i = 0; i < total_send; i++) {
 		do {
@@ -89,16 +95,6 @@ static int rnr_read_cq_error(void)
 					rnr_flag = 1;
 					printf("Got RNR error CQ entry as expected: %d, %s\n",
 						comp_err.err, fi_strerror(comp_err.err));
-					prov_errmsg = fi_cq_strerror(txcq, comp_err.prov_errno,
-								     comp_err.err_data,
-								     comp_err.buf,
-								     comp_err.len);
-					if (strstr(prov_errmsg, "Receiver not ready") == NULL) {
-						printf("Got unexpected provider error message.\n");
-						printf("    Expected error message to have \"Receiver not ready\" in it\n");
-						printf("    Got: %s\n", prov_errmsg);
-						return -FI_EINVAL;
-					}
 				} else {
 					printf("Got non-RNR error CQ entry: %d, %s\n",
 						comp_err.err, fi_strerror(comp_err.err));
@@ -187,7 +183,7 @@ int main(int argc, char **argv)
 
 	hints->ep_attr->type = FI_EP_RDM;
 	hints->caps = FI_MSG;
-	hints->mode |= FI_CONTEXT;
+	hints->mode |= FI_CONTEXT | FI_CONTEXT2;
 	hints->domain_attr->mr_mode = opts.mr_mode;
 
 	/* FI_RM_DISABLED is required to get RNR error CQ entry */

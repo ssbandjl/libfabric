@@ -68,7 +68,7 @@ def num_cuda_devices(ip):
 @functools.lru_cache(10)
 @retry(retry_on_exception=is_ssh_connection_error, stop_max_attempt_number=3, wait_fixed=5000)
 def num_neuron_devices(ip):
-    proc = run("ssh {} neuron-ls -j".format(ip), shell=True,
+    proc = run("ssh {} /opt/aws/neuron/bin/neuron-ls -j".format(ip), shell=True,
                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                timeout=60, encoding="utf-8")
 
@@ -84,7 +84,7 @@ def num_neuron_devices(ip):
 @functools.lru_cache(10)
 @retry(retry_on_exception=is_ssh_connection_error, stop_max_attempt_number=3, wait_fixed=5000)
 def num_neuron_cores_on_device(ip, device_id):
-    proc = run("ssh {} neuron-ls -j".format(ip), shell=True,
+    proc = run("ssh {} /opt/aws/neuron/bin/neuron-ls -j".format(ip), shell=True,
                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                timeout=60, encoding="utf-8")
 
@@ -97,7 +97,7 @@ def num_neuron_cores_on_device(ip, device_id):
 
 @retry(retry_on_exception=is_ssh_connection_error, stop_max_attempt_number=3, wait_fixed=5000)
 def is_neuron_device_available(ip, device_id):
-    proc = run("ssh {} neuron-ls -j".format(ip), shell=True,
+    proc = run("ssh {} /opt/aws/neuron/bin/neuron-ls -j".format(ip), shell=True,
                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                timeout=60, encoding="utf-8")
 
@@ -226,6 +226,49 @@ def check_returncode_list(returncode_list, strict):
         pytest.skip(reason)
 
 
+class WaitableProcess:
+    def __init__(self, process, timeout, output_file):
+        self.process = process
+        self._returncode = None
+        self.timeout = timeout
+        self.output_file = output_file
+        self._complete = False
+        self._output = ""
+
+    def wait(self, timeout=None):
+        if self._complete:
+            return
+
+        exception = None
+        try:
+            self._output, _ = self.process.communicate(timeout=timeout or self.timeout)
+        except Exception as e:
+            exception = e
+            self.process.terminate()
+
+        if (self.output_file):
+            self.output_file.close()
+
+        self._returncode = self.process.returncode
+        self._complete = True
+
+        if exception:
+            raise exception
+
+    @property
+    def output(self):
+        if self.output_file:
+            with open(self.output_file.name, "r") as f:
+                self._output = f.read()
+
+        return self._output
+
+    @property
+    def returncode(self):
+        if not self._complete:
+            self.wait()
+        return self._returncode
+
 class UnitTest:
 
     def __init__(self, cmdline_args, base_command, is_negative=False, failing_warn_msgs=None):
@@ -299,7 +342,8 @@ class ClientServerTest:
                  memory_type="host_to_host",
                  timeout=None,
                  warmup_iteration_type=None,
-                 completion_type="queue"):
+                 completion_type="queue",
+                 fabric=None):
 
         self._cmdline_args = cmdline_args
         self._timeout = timeout or cmdline_args.timeout
@@ -307,12 +351,12 @@ class ClientServerTest:
                                                               completion_semantic, prefix_type,
                                                               datacheck_type, message_size,
                                                               memory_type, warmup_iteration_type,
-                                                              completion_type)
+                                                              completion_type, fabric)
         self._client_base_command, client_additonal_environment = self.prepare_base_command("client", executable, iteration_type,
                                                               completion_semantic, prefix_type,
                                                               datacheck_type, message_size,
                                                               memory_type, warmup_iteration_type,
-                                                              completion_type)
+                                                              completion_type, fabric)
 
 
         self._server_command = self._cmdline_args.populate_command(self._server_base_command, "server", self._timeout, server_additonal_environment)
@@ -326,7 +370,8 @@ class ClientServerTest:
                              message_size=None,
                              memory_type="host_to_host",
                              warmup_iteration_type=None,
-                             completion_type="queue"):
+                             completion_type="queue",
+                             fabric=None):
         if executable == "fi_ubertest":
             return "fi_ubertest", None
 
@@ -338,6 +383,7 @@ class ClientServerTest:
                 -v: data verification (no data verification if not specified)
                 -S: message size
                 -w: number of warmup iterations
+                -f: fabric name to test
             this function will construct a command with these options
         '''
 
@@ -360,6 +406,9 @@ class ClientServerTest:
             command += " -U"
         else:
             assert completion_semantic == "transmit_complete"
+
+        if fabric:
+            command += f" -f {fabric}"
 
         # Most fabtests actually run as -t queue by default.
         # However, not all fabtests binaries support -t option.
@@ -412,62 +461,78 @@ class ClientServerTest:
         if "PYTEST_XDIST_WORKER" in os.environ:
             worker_id = int(os.environ["PYTEST_XDIST_WORKER"].replace("gw", ""))
             hmem_device_id = worker_id % num_hmem
-            if host_memory_type == "cuda":
-                command += " -i {}".format(hmem_device_id)
-            else:
-                assert host_memory_type == "neuron"
-                num_cores = num_neuron_cores_on_device(host_ip, hmem_device_id)
+        else:
+            hmem_device_id = 0
+
+        if host_memory_type == "cuda":
+            command += " -i {}".format(hmem_device_id)
+        else:
+            assert host_memory_type == "neuron"
+            num_cores = num_neuron_cores_on_device(host_ip, hmem_device_id)
+            if command_type == "server":
                 additional_environment = "NEURON_RT_VISIBLE_CORES={}".format(
                     hmem_device_id * num_cores)
-                wait_until_neuron_device_available(host_ip, hmem_device_id)
+            else:
+                additional_environment = "NEURON_RT_VISIBLE_CORES={}".format(
+                    hmem_device_id * num_cores + 1)
+            wait_until_neuron_device_available(host_ip, hmem_device_id)
 
-            if self._cmdline_args.provider == "efa":
-                import efa.efa_common
-                efa_device = efa.efa_common.get_efa_device_name_for_cuda_device(host_ip, hmem_device_id, num_hmem)
-                command += " -d {}-rdm".format(efa_device)
+        if self._cmdline_args.provider == "efa":
+            import efa.efa_common
+            efa_device = efa.efa_common.get_efa_device_name_for_cuda_device(host_ip, hmem_device_id, num_hmem)
+            command += " -d {}-rdm".format(efa_device)
 
         return command, additional_environment
 
-    def _run_client_command(self, server_process, client_command, client_output_file=None,
+    def _run_client_command(self, server_process, client_command, output_filename=None,
                             run_client_asynchronously=False):
 
+        if not output_filename:
+            output_file = open(NamedTemporaryFile(prefix="client.out.").name, "w")
+        else:
+            output_file = open(output_filename, "w")
+
         if server_process.poll():
-            if client_output_file:
-                with open(client_output_file, "w") as f:
-                    f.write("")
+            output_file.write("")
+            output_file.close()
             raise RuntimeError("Server has terminated")
 
         print("")
         print("client_command: " + client_command)
 
-        process = Popen(client_command, stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, shell=True, universal_newlines=True)
+        result = WaitableProcess(
+            Popen(
+                client_command,
+                stdout=output_file,
+                stderr=output_file,
+                shell=True,
+                universal_newlines=True,
+            ),
+            self._timeout + SERVER_RESTART_DELAY_MS/1000,
+            output_file,
+        )
+
         if run_client_asynchronously:
-            return process
+            return result
 
         client_timed_out = False
-        output = ""
         try:
-            output, _ = process.communicate(timeout=self._timeout)
-            if client_output_file:
-                with open(client_output_file, "w") as f:
-                    f.write(output)
+            result.wait()
         except TimeoutExpired:
             client_timed_out = True
-            process.terminate()
 
-        if has_ssh_connection_err_msg(output):
+        if has_ssh_connection_err_msg(result.output):
             print("client encountered ssh connection issue!")
             raise SshConnectionError()
 
         print("client_stdout:")
-        print(output)
-        print(f"client returncode: {process.returncode}")
+        print(result.output)
+        print(f"client returncode: {result.returncode}")
 
         if client_timed_out:
             raise RuntimeError("Client timed out")
 
-        return process
+        return result
 
     @retry(retry_on_exception=is_ssh_connection_error, stop_max_attempt_number=3, wait_fixed=SERVER_RESTART_DELAY_MS)
     def run(self):
@@ -502,7 +567,7 @@ class ClientServerTest:
         server_timed_out = False
         try:
             server_output, _ = server_process.communicate(
-                timeout=self._timeout)
+                timeout=self._timeout + SERVER_RESTART_DELAY_MS/1000)
         except TimeoutExpired:
             server_process.terminate()
             server_timed_out = True
@@ -591,11 +656,8 @@ class MultinodeTest(ClientServerTest):
         if self._run_client_asynchronously:
             for i in range(self.numclient):
                 try:
-                    output, _ = client_process_list[i].communicate(timeout=self._timeout)
-                    with open(client_outfile_list[i], "w") as f:
-                        f.write(output)
+                    client_process_list[i].wait()
                 except TimeoutExpired:
-                    client_process_list[i].terminate()
                     client_timed_out = True
 
         print("")
@@ -607,7 +669,7 @@ class MultinodeTest(ClientServerTest):
         for i in range(self.numclient):
             print("client_{}_command: ".format(i) + self._client_base_command_list[i])
             print("client_{}_stdout:".format(i))
-            print(open(client_outfile_list[i]).read())
+            print(client_process_list[i].output)
             os.unlink(client_outfile_list[i])
 
         if server_timed_out:

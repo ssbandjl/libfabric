@@ -6,6 +6,7 @@ SHM_DEFAULT_MAX_INJECT_SIZE = 4096
 SHM_DEFAULT_RX_SIZE = 1024
 
 
+# This test skips efa-direct because it does not have unexpected message
 @pytest.mark.functional
 @pytest.mark.parametrize("msg_size", [1, 512, 9000, 1048576]) # cover various switch points of shm/efa protocols
 @pytest.mark.parametrize("msg_count", [1, 1024, 2048]) # below and above shm's default rx size
@@ -20,6 +21,12 @@ def test_unexpected_msg(cmdline_args, msg_size, msg_count, memory_type, completi
     neuron_maximal_buffer_size = 2**32
     if "neuron" in memory_type and allocated_memory >= neuron_maximal_buffer_size:
         pytest.skip("Cannot hit neuron allocation limit")
+
+     # The EFA limit for single MR that enables remote write is 1M pages aka 4GB for regular pages
+    maximal_mr_size = 2**32
+    if allocated_memory >= maximal_mr_size:
+        pytest.skip("Cannot hit EFA MR limit")
+
     efa_run_client_server_test(cmdline_args, f"fi_unexpected_msg -e rdm -M {msg_count}", iteration_type="short",
                                completion_semantic=completion_semantic, memory_type=memory_type,
-                               message_size=msg_size, completion_type="queue", timeout=1800)
+                               message_size=msg_size, completion_type="queue", timeout=1800, fabric="efa")

@@ -50,9 +50,6 @@ features of libfabric.
 *fi_dgram*
 : A basic datagram endpoint example.
 
-*fi_dgram_waitset*
-: Transfers datagrams using waitsets for completion notification.
-
 *fi_inj_complete*
 : Sends messages using the FI_INJECT_COMPLETE operation flag.
 
@@ -79,10 +76,6 @@ features of libfabric.
 : Issues RMA write operations to multiple memory regions, using
   completion counters of inbound writes as the notification
   mechanism.
-
-*fi_poll*
-: Exchanges data over RDM endpoints using poll sets to drive
-  completion notifications.
 
 *fi_rdm*
 : A basic RDM endpoint example.
@@ -147,10 +140,13 @@ features of libfabric.
   buffer tries to remain the same.  This test is used to validate the
   correct behavior of memory registration caches.
 
-*fi_bw*
-: Performs a one-sided bandwidth test with an option for data verification.
-  A sleep time on the receiving side can be enabled in order to allow
-  the sender to get ahead of the receiver.
+*fi_flood*
+: The test performs a one-sided transfer by utilizing Bulk Memory Region (MR)
+  registration and flooding the receiver with unexpected messages. This is
+  followed by sequential MR registration transfers, which force the MR cache
+  to evict the least recently used MRs before making new transfers. An optional
+  sleep time can be enabled on the receiving side to allow the sender to get
+  ahead of the receiver.
 
 *fi_rdm_multi_client*
 : Tests a persistent server communicating with multiple clients, one at a
@@ -343,7 +339,7 @@ The following keys and respective key values may be used in the config file.
   FI_WRITE, FI_REMOTE_READ, FI_REMOTE_WRITE, FI_TAGGED, FI_DIRECTED_RECV
 
 *mode - values OR'ed together*
-: FI_CONTEXT, FI_RX_CQ_DATA
+: FI_CONTEXT, FI_CONTEXT2, FI_RX_CQ_DATA
 
 *ep_type*
 : FI_EP_MSG, FI_EP_DGRAM, FI_EP_RDM
@@ -364,8 +360,7 @@ The following keys and respective key values may be used in the config file.
 : FI_WAIT_NONE, FI_WAIT_UNSPEC, FI_WAIT_FD, FI_WAIT_MUTEX_COND
 
 *threading*
-: FI_THREAD_UNSPEC, FI_THREAD_SAFE, FI_THREAD_FID, FI_THREAD_DOMAIN,
-  FI_THREAD_COMPLETION, FI_THREAD_ENDPOINT
+: FI_THREAD_UNSPEC, FI_THREAD_SAFE, FI_THREAD_DOMAIN, FI_THREAD_COMPLETION
 
 *progress*
 : FI_PROGRESS_MANUAL, FI_PROGRESS_AUTO, FI_PROGRESS_UNSPEC
@@ -438,7 +433,7 @@ the list available for that test.
 
 *-D <device_name>*
 : Allocate data buffers on the specified device, rather than in host
-  memory.  Valid options are ze and cuda.
+  memory.  Valid options are ze, cuda and synapseai.
 
 *-a <address vector name>*
 : The name of a shared address vector.  This option only applies to tests

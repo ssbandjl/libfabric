@@ -12,6 +12,33 @@
 #include "ofi_util.h"
 #include "rdm/efa_rdm_protocol.h"
 
+#define EFA_QP_DEFAULT_SERVICE_LEVEL 0
+#define EFA_QP_LOW_LATENCY_SERVICE_LEVEL 8
+#define EFA_ERROR_MSG_BUFFER_LENGTH 1024
+
+/* Default rnr_retry for efa-rdm ep.
+ * If first attempt to send a packet failed,
+ * this value controls how many times firmware
+ * retries the send before it report an RNR error
+ * (via rdma-core error cq entry).
+ * The valid number is from
+ *      0 (no retry)
+ * to
+ *      EFA_RNR_INFINITY_RETRY (retry infinitely)
+ */
+#define EFA_RDM_DEFAULT_RNR_RETRY	(3)
+/**
+ * Infinite retry.
+ * NOTICE: this is the default rnr_retry
+ * mode for SRD qp. So modifying qp_attr.rnr_retry
+ * to this value has the same behavior as
+ * not modifying qp's rnr_retry attribute
+ */
+#define EFA_RNR_INFINITE_RETRY		(7)
+
+#define efa_rx_flags(efa_base_ep) ((efa_base_ep)->util_ep.rx_op_flags)
+#define efa_tx_flags(efa_base_ep) ((efa_base_ep)->util_ep.tx_op_flags)
+
 struct efa_qp {
 	struct ibv_qp *ibv_qp;
 	struct ibv_qp_ex *ibv_qp_ex;
@@ -19,6 +46,18 @@ struct efa_qp {
 	uint32_t qp_num;
 	uint32_t qkey;
 };
+
+#define EFA_GID_LEN	16
+
+struct efa_ep_addr {
+	uint8_t			raw[EFA_GID_LEN];
+	uint16_t		qpn;
+	uint16_t		pad;
+	uint32_t		qkey;
+	struct efa_ep_addr	*next;
+};
+
+#define EFA_EP_ADDR_LEN sizeof(struct efa_ep_addr)
 
 struct efa_av;
 
@@ -46,12 +85,19 @@ struct efa_base_ep {
 
 	bool util_ep_initialized;
 	bool efa_qp_enabled;
+	bool is_wr_started;
 
-	struct ibv_send_wr xmit_more_wr_head;
-	struct ibv_send_wr *xmit_more_wr_tail;
-	struct ibv_recv_wr recv_more_wr_head;
-	struct ibv_recv_wr *recv_more_wr_tail;
 	struct efa_recv_wr *efa_recv_wr_vec;
+	size_t recv_wr_index;
+
+	size_t max_msg_size;		/**< #FI_OPT_MAX_MSG_SIZE */
+	size_t max_rma_size;		/**< #FI_OPT_MAX_RMA_SIZE */
+	size_t inject_msg_size;		/**< #FI_OPT_INJECT_MSG_SIZE */
+	size_t inject_rma_size;		/**< #FI_OPT_INJECT_RMA_SIZE */
+
+	/* Only used by RDM ep type */
+	struct efa_qp *user_recv_qp; /* Separate qp to receive pkts posted by users */
+	struct efa_recv_wr *user_recv_wr_vec;
 };
 
 int efa_base_ep_bind_av(struct efa_base_ep *base_ep, struct efa_av *av);
@@ -68,7 +114,12 @@ int efa_base_ep_construct(struct efa_base_ep *base_ep,
 
 int efa_base_ep_getname(fid_t fid, void *addr, size_t *addrlen);
 
-int efa_qp_create(struct efa_qp **qp, struct ibv_qp_init_attr_ex *init_attr_ex);
+int efa_ep_open(struct fid_domain *domain_fid, struct fi_info *user_info,
+		struct fid_ep **ep_fid, void *context);
+
+int efa_qp_create(struct efa_qp **qp, struct ibv_qp_init_attr_ex *init_attr_ex, uint32_t tclass);
+
+void efa_qp_destruct(struct efa_qp *qp);
 
 int efa_base_ep_create_qp(struct efa_base_ep *base_ep,
 			  struct ibv_qp_init_attr_ex *init_attr_ex);
@@ -83,5 +134,28 @@ bool efa_qp_support_op_in_order_aligned_128_bytes(struct efa_qp *qp,
 void efa_base_ep_write_eq_error(struct efa_base_ep *ep,
 				ssize_t err,
 				ssize_t prov_errno);
+
+const char *efa_base_ep_raw_addr_str(struct efa_base_ep *base_ep, char *buf,
+				     size_t *buflen);
+
+struct efa_ep_addr *efa_base_ep_get_peer_raw_addr(struct efa_base_ep *base_ep,
+						  fi_addr_t addr);
+
+const char *efa_base_ep_get_peer_raw_addr_str(struct efa_base_ep *base_ep,
+					      fi_addr_t addr, char *buf,
+					      size_t *buflen);
+
+struct efa_cq *efa_base_ep_get_tx_cq(struct efa_base_ep *ep);
+
+struct efa_cq *efa_base_ep_get_rx_cq(struct efa_base_ep *ep);
+
+int efa_base_ep_check_qp_in_order_aligned_128_bytes(struct efa_base_ep *base_ep,
+						   enum ibv_wr_opcode op_code);
+
+int efa_base_ep_insert_cntr_ibv_cq_poll_list(struct efa_base_ep *ep);
+
+void efa_base_ep_remove_cntr_ibv_cq_poll_list(struct efa_base_ep *ep);
+
+int efa_base_ep_create_and_enable_qp(struct efa_base_ep *ep, bool create_user_recv_qp);
 
 #endif

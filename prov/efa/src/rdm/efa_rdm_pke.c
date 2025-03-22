@@ -19,6 +19,7 @@
 #include "efa_rdm_pke_rtm.h"
 #include "efa_rdm_pke_nonreq.h"
 #include "efa_rdm_pke_req.h"
+#include "efa_rdm_tracepoint.h"
 
 /**
  * @brief allocate a packet entry
@@ -43,7 +44,7 @@ struct efa_rdm_pke *efa_rdm_pke_alloc(struct efa_rdm_ep *ep,
 		return NULL;
 
 #ifdef ENABLE_EFA_POISONING
-	efa_rdm_poison_mem_region(pkt_entry, sizeof(struct efa_rdm_pke) + ep->mtu_size);
+	efa_rdm_poison_mem_region(pkt_entry, pkt_pool->attr.size);
 #endif
 	dlist_init(&pkt_entry->entry);
 
@@ -62,7 +63,6 @@ struct efa_rdm_pke *efa_rdm_pke_alloc(struct efa_rdm_ep *ep,
 	 * should be adjusted according to the actual data size.
 	 */
 	pkt_entry->pkt_size = pkt_pool->attr.size - sizeof(struct efa_rdm_pke);
-	assert(pkt_entry->pkt_size == ep->mtu_size);
 	pkt_entry->alloc_type = alloc_type;
 	pkt_entry->flags = EFA_RDM_PKE_IN_USE;
 	pkt_entry->next = NULL;
@@ -83,7 +83,7 @@ struct efa_rdm_pke *efa_rdm_pke_alloc(struct efa_rdm_ep *ep,
 void efa_rdm_pke_release(struct efa_rdm_pke *pkt_entry)
 {
 #ifdef ENABLE_EFA_POISONING
-	efa_rdm_poison_mem_region(pkt_entry, sizeof(struct efa_rdm_pke) + pkt_entry->ep->mtu_size);
+	efa_rdm_poison_mem_region(pkt_entry, ofi_buf_pool(pkt_entry)->attr.size);
 #endif
 	pkt_entry->flags = 0;
 	ofi_buf_free(pkt_entry);
@@ -151,8 +151,6 @@ void efa_rdm_pke_release_rx(struct efa_rdm_pke *pkt_entry)
 	assert(pkt_entry->next == NULL);
 	ep = pkt_entry->ep;
 	assert(ep);
-	if (ep->use_zcpy_rx && pkt_entry->alloc_type == EFA_RDM_PKE_FROM_USER_BUFFER)
-		return;
 
 	if (pkt_entry->alloc_type == EFA_RDM_PKE_FROM_EFA_RX_POOL) {
 		ep->efa_rx_pkts_to_post++;
@@ -165,6 +163,27 @@ void efa_rdm_pke_release_rx(struct efa_rdm_pke *pkt_entry)
 	dlist_remove(&pkt_entry->dbg_entry);
 #endif
 	efa_rdm_pke_release(pkt_entry);
+}
+
+/**
+ * @brief Release all rx packet entries that are linked
+ * This can happen when medium / runting protocol is used.
+ * This function will unlink the pkt entries in the list before
+ * releasing each pkt entry as it is required by efa_rdm_pke_release_rx
+ * (see above).
+ * @param pkt_entry the head of the pkt entry linked list
+ */
+void efa_rdm_pke_release_rx_list(struct efa_rdm_pke *pkt_entry)
+{
+	struct efa_rdm_pke *curr, *next;
+
+	curr = pkt_entry;
+	while (curr) {
+		next = curr->next;
+		curr->next = NULL;
+		efa_rdm_pke_release_rx(curr);
+		curr = next;
+	}
 }
 
 void efa_rdm_pke_copy(struct efa_rdm_pke *dest,
@@ -212,7 +231,6 @@ void efa_rdm_pke_copy(struct efa_rdm_pke *dest,
 	dest->addr = src->addr;
 	dest->flags = EFA_RDM_PKE_IN_USE;
 	dest->next = NULL;
-	assert(dest->pkt_size > 0);
 	memcpy(dest->wiredata, src->wiredata + src_pkt_offset, dest->pkt_size);
 }
 
@@ -350,11 +368,13 @@ void efa_rdm_pke_append(struct efa_rdm_pke *dst,
  *
  * @param[in] pkt_entry_vec	an array of packet entries to be sent
  * @param[in] pkt_entry_cnt	number of packet entries to be sent
+ * @param[in] flags		flags, currently only accept 0 or FI_MORE. When FI_MORE
+ * is passed, it doesn't ring the doorbell (ibv_wr_complete).
  * @return		0 on success
  * 			On error, a negative value corresponding to fabric errno
  */
 ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
-			  int pkt_entry_cnt)
+			  int pkt_entry_cnt, uint64_t flags)
 {
 	struct efa_qp *qp;
 	struct efa_conn *conn;
@@ -363,7 +383,7 @@ ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
 	struct efa_rdm_peer *peer;
 	struct ibv_sge sg_list[2];  /* efa device support up to 2 iov */
 	struct ibv_data_buf inline_data_list[2];
-	int ret, pkt_idx, iov_cnt;
+	int ret = 0, pkt_idx, iov_cnt;
 
 	assert(pkt_entry_cnt);
 	ep = pkt_entry_vec[0]->ep;
@@ -379,14 +399,23 @@ ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
 	assert(conn && conn->ep_addr);
 
 	qp = ep->base_ep.qp;
-	ibv_wr_start(qp->ibv_qp_ex);
+	if (!ep->base_ep.is_wr_started) {
+		ibv_wr_start(qp->ibv_qp_ex);
+		ep->base_ep.is_wr_started = true;
+	}
 	for (pkt_idx = 0; pkt_idx < pkt_entry_cnt; ++pkt_idx) {
 		pkt_entry = pkt_entry_vec[pkt_idx];
-		assert(pkt_entry->pkt_size);
 		assert(efa_rdm_ep_get_peer(ep, pkt_entry->addr) == peer);
 
 		qp->ibv_qp_ex->wr_id = (uintptr_t)pkt_entry;
-		ibv_wr_send(qp->ibv_qp_ex);
+		if ((pkt_entry->ope->fi_flags & FI_REMOTE_CQ_DATA) &&
+		    (pkt_entry->flags & EFA_RDM_PKE_SEND_TO_USER_RECV_QP)) {
+			/* Currently this is only expected for eager pkts */
+			assert(pkt_entry_cnt == 1);
+			ibv_wr_send_imm(qp->ibv_qp_ex, pkt_entry->ope->cq_entry.data);
+		} else {
+			ibv_wr_send(qp->ibv_qp_ex);
+		}
 		if (pkt_entry->pkt_size <= efa_rdm_ep_domain(ep)->device->efa_attr.inline_buf_size &&
 	            !efa_mr_is_hmem((struct efa_mr *)pkt_entry->payload_mr)) {
 			iov_cnt = 1;
@@ -414,8 +443,14 @@ ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
 			ibv_wr_set_sge_list(ep->base_ep.qp->ibv_qp_ex, iov_cnt, sg_list);
 		}
 
-		ibv_wr_set_ud_addr(qp->ibv_qp_ex, conn->ah->ibv_ah,
+		if (pkt_entry->flags & EFA_RDM_PKE_SEND_TO_USER_RECV_QP) {
+			assert(peer->extra_info[0] & EFA_RDM_EXTRA_FEATURE_REQUEST_USER_RECV_QP);
+			ibv_wr_set_ud_addr(qp->ibv_qp_ex, conn->ah->ibv_ah,
+				   peer->user_recv_qp.qpn, peer->user_recv_qp.qkey);
+		} else {
+			ibv_wr_set_ud_addr(qp->ibv_qp_ex, conn->ah->ibv_ah,
 				   conn->ep_addr->qpn, conn->ep_addr->qkey);
+		}
 
 #if ENABLE_DEBUG
 		dlist_insert_tail(&pkt_entry->dbg_entry, &ep->tx_pkt_list);
@@ -425,13 +460,17 @@ ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
 #endif
 
 #if HAVE_LTTNG
-		efa_tracepoint_wr_id_post_send((void *)pkt_entry);
+		efa_rdm_tracepoint_wr_id_post_send((void *)pkt_entry);
 #endif
 	}
 
-	ret = ibv_wr_complete(qp->ibv_qp_ex);
+	if (!(flags & FI_MORE)) {
+		ret = ibv_wr_complete(qp->ibv_qp_ex);
+		ep->base_ep.is_wr_started = false;
+	}
+
 	if (OFI_UNLIKELY(ret)) {
-		return ret;
+		return (ret == ENOMEM) ? -FI_EAGAIN : -ret;
 	}
 
 	for (pkt_idx = 0; pkt_idx < pkt_entry_cnt; ++pkt_idx)
@@ -491,10 +530,14 @@ int efa_rdm_pke_read(struct efa_rdm_pke *pkt_entry,
 				   conn->ep_addr->qpn, conn->ep_addr->qkey);
 	}
 
+#if HAVE_LTTNG
+	efa_rdm_tracepoint_wr_id_post_read((void *)pkt_entry);
+#endif
+
 	err = ibv_wr_complete(qp->ibv_qp_ex);
 
 	if (OFI_UNLIKELY(err))
-		return err;
+		return (err == ENOMEM) ? -FI_EAGAIN : -err;
 
 	efa_rdm_ep_record_tx_op_submitted(ep, pkt_entry);
 	return 0;
@@ -506,6 +549,8 @@ int efa_rdm_pke_read(struct efa_rdm_pke *pkt_entry,
  * This function posts one write request.
  *
  * @param[in]	pkt_entry	write_entry that has information of the write request.
+ * @param[in]	flags		flags, currently only accept 0 or FI_MORE. When FI_MORE
+ * is passed, it doesn't ring the doorbell (ibv_wr_complete).
  * @return	On success, return 0
  * 		On failure, return a negative error code.
  */
@@ -543,7 +588,10 @@ int efa_rdm_pke_write(struct efa_rdm_pke *pkt_entry)
 		pkt_entry->flags |= EFA_RDM_PKE_LOCAL_WRITE;
 
 	qp = ep->base_ep.qp;
-	ibv_wr_start(qp->ibv_qp_ex);
+	if (!ep->base_ep.is_wr_started) {
+		ibv_wr_start(qp->ibv_qp_ex);
+		ep->base_ep.is_wr_started = true;
+	}
 	qp->ibv_qp_ex->wr_id = (uintptr_t)pkt_entry;
 
 	if (txe->fi_flags & FI_REMOTE_CQ_DATA) {
@@ -574,10 +622,17 @@ int efa_rdm_pke_write(struct efa_rdm_pke *pkt_entry)
 				   conn->ep_addr->qpn, conn->ep_addr->qkey);
 	}
 
-	err = ibv_wr_complete(qp->ibv_qp_ex);
+#if HAVE_LTTNG
+	efa_rdm_tracepoint_wr_id_post_write((void *)pkt_entry);
+#endif
+
+	if (!(txe->fi_flags & FI_MORE)) {
+		err = ibv_wr_complete(qp->ibv_qp_ex);
+		ep->base_ep.is_wr_started = false;
+	}
 
 	if (OFI_UNLIKELY(err))
-		return err;
+		return (err == ENOMEM) ? -FI_EAGAIN : -err;
 
 	efa_rdm_ep_record_tx_op_submitted(ep, pkt_entry);
 	return 0;
@@ -596,6 +651,7 @@ ssize_t efa_rdm_pke_recvv(struct efa_rdm_pke **pke_vec,
 {
 	struct efa_rdm_ep *ep;
 	struct ibv_recv_wr *bad_wr;
+	struct efa_recv_wr *recv_wr;
 	int i, err;
 
 	assert(pke_cnt);
@@ -604,32 +660,83 @@ ssize_t efa_rdm_pke_recvv(struct efa_rdm_pke **pke_vec,
 	assert(ep);
 
 	for (i = 0; i < pke_cnt; ++i) {
-		ep->base_ep.efa_recv_wr_vec[i].wr.wr_id = (uintptr_t)pke_vec[i];
-		ep->base_ep.efa_recv_wr_vec[i].wr.num_sge = 1;
-		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list = ep->base_ep.efa_recv_wr_vec[i].sge;
-		assert(pke_vec[i]->pkt_size > 0);
-		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[0].length = pke_vec[i]->pkt_size - pke_vec[i]->payload_size;
-		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[0].lkey = ((struct efa_mr *) pke_vec[i]->mr)->ibv_mr->lkey;
-		ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[0].addr = (uintptr_t)pke_vec[i]->wiredata;
-		ep->base_ep.efa_recv_wr_vec[i].wr.next = NULL;
-
-		if (pke_vec[i]->payload) {
-			ep->base_ep.efa_recv_wr_vec[i].wr.num_sge = 2;
-			ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[1].addr = (uintptr_t) pke_vec[i]->payload;
-			ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[1].length = pke_vec[i]->payload_size;
-			ep->base_ep.efa_recv_wr_vec[i].wr.sg_list[1].lkey = ((struct efa_mr *) pke_vec[i]->payload_mr)->ibv_mr->lkey;
-		}
+		recv_wr = &ep->base_ep.efa_recv_wr_vec[i];
+		recv_wr->wr.wr_id = (uintptr_t)pke_vec[i];
+		recv_wr->wr.num_sge = 1;
+		recv_wr->wr.sg_list = recv_wr->sge;
+		recv_wr->wr.sg_list[0].length = pke_vec[i]->pkt_size;
+		recv_wr->wr.sg_list[0].lkey = ((struct efa_mr *) pke_vec[i]->mr)->ibv_mr->lkey;
+		recv_wr->wr.sg_list[0].addr = (uintptr_t)pke_vec[i]->wiredata;
+		recv_wr->wr.next = NULL;
 		if (i > 0)
-			ep->base_ep.efa_recv_wr_vec[i-1].wr.next = &ep->base_ep.efa_recv_wr_vec[i].wr;
+			ep->base_ep.efa_recv_wr_vec[i-1].wr.next = &recv_wr->wr;
 #if HAVE_LTTNG
-		efa_tracepoint_wr_id_post_recv(pke_vec[i]);
+		efa_rdm_tracepoint_wr_id_post_recv(pke_vec[i]);
 #endif
 	}
 
 	err = ibv_post_recv(ep->base_ep.qp->ibv_qp, &ep->base_ep.efa_recv_wr_vec[0].wr, &bad_wr);
-	if (OFI_UNLIKELY(err)) {
+	if (OFI_UNLIKELY(err))
 		err = (err == ENOMEM) ? -FI_EAGAIN : -err;
+
+	return err;
+}
+
+/**
+ * @brief Post user receive requests to EFA device through user_recv_qp
+ *
+ * @param[in] pke_vec	packet entries that contains information of receive buffer
+ * @param[in] pke_cnt	Number of packet entries to post receive requests for
+ * @param[in] flags  	user supplied flags passed to fi_recv, support FI_MORE
+ * @return		0 on success
+ * 			On error, a negative value corresponding to fabric errno
+ */
+ssize_t efa_rdm_pke_user_recvv(struct efa_rdm_pke **pke_vec,
+			  int pke_cnt, uint64_t flags)
+{
+	struct efa_rdm_ep *ep;
+	struct ibv_recv_wr *bad_wr;
+	struct efa_recv_wr *recv_wr;
+	int i, err;
+	size_t wr_index;
+
+	assert(pke_cnt);
+
+	ep = pke_vec[0]->ep;
+	assert(ep);
+
+	wr_index = ep->base_ep.recv_wr_index;
+	assert(wr_index < ep->base_ep.info->rx_attr->size);
+
+	for (i = 0; i < pke_cnt; ++i) {
+		recv_wr = &ep->base_ep.user_recv_wr_vec[wr_index];
+		recv_wr->wr.wr_id = (uintptr_t) pke_vec[i];
+		recv_wr->wr.num_sge = 1;
+		recv_wr->wr.sg_list = recv_wr->sge;
+		recv_wr->wr.sg_list[0].addr = (uintptr_t) pke_vec[i]->payload;
+		recv_wr->wr.sg_list[0].length = pke_vec[i]->payload_size;
+		recv_wr->wr.sg_list[0].lkey = ((struct efa_mr *) pke_vec[i]->payload_mr)->ibv_mr->lkey;
+		recv_wr->wr.next = NULL;
+		if (wr_index > 0)
+			ep->base_ep.user_recv_wr_vec[wr_index - 1].wr.next = &recv_wr->wr;
+#if HAVE_LTTNG
+		efa_rdm_tracepoint_wr_id_post_recv(pke_vec[i]);
+#endif
+		wr_index++;
 	}
+
+	ep->base_ep.recv_wr_index = wr_index;
+
+	if (flags & FI_MORE)
+		return 0;
+
+	assert(ep->base_ep.user_recv_qp);
+	err = ibv_post_recv(ep->base_ep.user_recv_qp->ibv_qp, &ep->base_ep.user_recv_wr_vec[0].wr, &bad_wr);
+
+	if (OFI_UNLIKELY(err))
+		err = (err == ENOMEM) ? -FI_EAGAIN : -err;
+
+	ep->base_ep.recv_wr_index = 0;
 
 	return err;
 }

@@ -35,7 +35,7 @@ _Static_assert(CXIP_AMO_MAX_IOV == 1, "Unexpected max IOV #");
 /**
  * Data type codes for all of the supported fi_datatype values.
  */
-static enum c_atomic_type _cxip_amo_type_code[FI_DATATYPE_LAST] = {
+static enum c_atomic_type _cxip_amo_type_code[] = {
 	[FI_INT8]	  = C_AMO_TYPE_INT8_T,
 	[FI_UINT8]	  = C_AMO_TYPE_UINT8_T,
 	[FI_INT16]	  = C_AMO_TYPE_INT16_T,
@@ -48,8 +48,10 @@ static enum c_atomic_type _cxip_amo_type_code[FI_DATATYPE_LAST] = {
 	[FI_DOUBLE]	  = C_AMO_TYPE_DOUBLE_T,
 	[FI_FLOAT_COMPLEX]	  = C_AMO_TYPE_FLOAT_COMPLEX_T,
 	[FI_DOUBLE_COMPLEX]	  = C_AMO_TYPE_DOUBLE_COMPLEX_T,
+        /* Only 128-bit op suppported is FI_CSWAP, so FI_INT128 should work. */
+	[FI_INT128]	  = C_AMO_TYPE_UINT128_T,
+	[FI_UINT128]	  = C_AMO_TYPE_UINT128_T,
 };
-//TODO: C_AMO_TYPE_UINT128_T
 
 /**
  * AMO operation codes for all of the fi_op values.
@@ -126,7 +128,7 @@ static uint16_t _cxip_amo_valid[CXIP_RQ_AMO_LAST][FI_ATOMIC_OP_LAST] = {
 	},
 
 	[CXIP_RQ_AMO_SWAP] = {
-		[FI_CSWAP]	  = 0x0fff,
+		[FI_CSWAP]	  = 0xcfff,
 		[FI_CSWAP_NE]	  = 0x0fff,
 		[FI_CSWAP_LE]	  = 0x03ff,
 		[FI_CSWAP_LT]	  = 0x03ff,
@@ -175,7 +177,7 @@ int _cxip_atomic_opcode(enum cxip_amo_req_type req_type, enum fi_datatype dt,
 	int opcode;
 	int dtcode;
 
-	if (dt < 0 || dt >= FI_DATATYPE_LAST ||
+	if (dt < 0 || dt >= ARRAY_SIZE(_cxip_amo_type_code) ||
 	    op < 0 || op >= FI_ATOMIC_OP_LAST)
 		return -FI_EINVAL;
 
@@ -448,7 +450,7 @@ static int _cxip_amo_cb(struct cxip_req *req, const union c_event *event)
 			TXC_WARN_RET(txc, ret, "Failed to report error\n");
 	}
 
-	ofi_atomic_dec32(&req->amo.txc->otx_reqs);
+	cxip_txc_otx_reqs_dec(req->amo.txc);
 	cxip_evtq_req_free(req);
 
 	return FI_SUCCESS;
@@ -610,8 +612,9 @@ static int cxip_amo_emit_idc(struct cxip_txc *txc,
 			if (result_mr) {
 				result_md = result_mr->md;
 			} else {
-				ret = cxip_map(dom, result, atomic_type_len, 0,
-					       &req->amo.result_md);
+				ret = cxip_ep_obj_map(txc->ep_obj, result,
+						      atomic_type_len, 0,
+						      &req->amo.result_md);
 				if (ret) {
 					TXC_WARN_RET(txc, ret,
 						     "Failed to map result buffer\n");
@@ -928,8 +931,9 @@ static int cxip_amo_emit_dma(struct cxip_txc *txc,
 		/* Optionally register result MR. */
 		if (result) {
 			if (!result_mr) {
-				ret = cxip_map(dom, result, atomic_type_len, 0,
-					       &req->amo.result_md);
+				ret = cxip_ep_obj_map(txc->ep_obj, result,
+						      atomic_type_len, 0,
+						      &req->amo.result_md);
 				if (ret) {
 					TXC_WARN(txc,
 						 "Failed to map result buffer: %d:%s\n",
@@ -1015,8 +1019,9 @@ static int cxip_amo_emit_dma(struct cxip_txc *txc,
 			buf_md = buf_mr->md;
 		} else {
 			/* Map user operand buffer for DMA command. */
-			ret = cxip_map(dom, buf, atomic_type_len, 0,
-				       &req->amo.oper1_md);
+			ret = cxip_ep_obj_map(txc->ep_obj, buf,
+					      atomic_type_len, 0,
+					      &req->amo.oper1_md);
 			if (ret) {
 				TXC_WARN(txc,
 					 "Failed to map operand buffer: %d:%s\n",

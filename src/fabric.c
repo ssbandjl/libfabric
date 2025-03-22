@@ -262,6 +262,11 @@ static int ofi_is_hook_prov(const struct fi_provider *provider)
 	return ofi_prov_ctx(provider)->type == OFI_PROV_HOOK;
 }
 
+static int ofi_is_lnx_prov(const struct fi_provider *provider)
+{
+	return ofi_prov_ctx(provider)->type == OFI_PROV_LNX;
+}
+
 int ofi_apply_filter(struct ofi_filter *filter, const char *name)
 {
 	if (!filter->names)
@@ -500,6 +505,8 @@ static void ofi_set_prov_type(struct fi_provider *provider)
 		ofi_prov_ctx(provider)->type = OFI_PROV_UTIL;
 	else if (ofi_has_offload_prefix(provider->name))
 		ofi_prov_ctx(provider)->type = OFI_PROV_OFFLOAD;
+	else if (ofi_is_lnx(provider->name))
+		ofi_prov_ctx(provider)->type = OFI_PROV_LNX;
 	else
 		ofi_prov_ctx(provider)->type = OFI_PROV_CORE;
 }
@@ -988,6 +995,7 @@ void fi_ini(void)
 	ofi_register_provider(SOCKETS_INIT, NULL);
 	ofi_register_provider(TCP_INIT, NULL);
 
+	ofi_register_provider(LNX_INIT, NULL);
 	ofi_register_provider(HOOK_PERF_INIT, NULL);
 	ofi_register_provider(HOOK_TRACE_INIT, NULL);
 	ofi_register_provider(HOOK_PROFILE_INIT, NULL);
@@ -1022,9 +1030,9 @@ FI_DESTRUCTOR(fi_fini(void))
 	}
 
 	ofi_free_filter(&prov_filter);
+	ofi_shm_p2p_cleanup();
 	ofi_monitors_cleanup();
 	ofi_hmem_cleanup();
-	ofi_shm_p2p_cleanup();
 	ofi_hook_fini();
 	ofi_mem_fini();
 	fi_log_fini();
@@ -1070,7 +1078,7 @@ void DEFAULT_SYMVER_PRE(fi_freeinfo)(struct fi_info *info)
 		free(info);
 	}
 }
-CURRENT_SYMVER(fi_freeinfo_, fi_freeinfo);
+DEFAULT_SYMVER(fi_freeinfo_, fi_freeinfo, FABRIC_1.8);
 
 static bool
 ofi_info_match_prov(struct fi_info *info, struct ofi_info_match *match)
@@ -1207,8 +1215,12 @@ static void ofi_set_prov_attr(struct fi_fabric_attr *attr,
 
 	core_name = attr->prov_name;
 	if (core_name) {
-		assert(ofi_is_util_prov(prov));
-		attr->prov_name = ofi_strdup_append(core_name, prov->name);
+		if (ofi_is_lnx_prov(prov)) {
+			attr->prov_name = ofi_strdup_link_append(core_name, prov->name);
+		} else {
+			assert(ofi_is_util_prov(prov));
+			attr->prov_name = ofi_strdup_append(core_name, prov->name);
+		}
 		free(core_name);
 	} else {
 		attr->prov_name = strdup(prov->name);
@@ -1408,7 +1420,7 @@ int DEFAULT_SYMVER_PRE(fi_getinfo)(uint32_t version, const char *node,
 
 	return *info ? 0 : -FI_ENODATA;
 }
-CURRENT_SYMVER(fi_getinfo_, fi_getinfo);
+DEFAULT_SYMVER(fi_getinfo_, fi_getinfo, FABRIC_1.8);
 
 struct fi_info *ofi_allocinfo_internal(void)
 {
@@ -1539,7 +1551,7 @@ fail:
 	fi_freeinfo(dup);
 	return NULL;
 }
-CURRENT_SYMVER(fi_dupinfo_, fi_dupinfo);
+DEFAULT_SYMVER(fi_dupinfo_, fi_dupinfo, FABRIC_1.8);
 
 __attribute__((visibility ("default"),EXTERNALLY_VISIBLE))
 int DEFAULT_SYMVER_PRE(fi_fabric)(struct fi_fabric_attr *attr,
@@ -1557,7 +1569,9 @@ int DEFAULT_SYMVER_PRE(fi_fabric)(struct fi_fabric_attr *attr,
 
 	fi_ini();
 
-	top_name = strrchr(attr->prov_name, OFI_NAME_DELIM);
+	ret = ofi_is_linked(attr->prov_name);
+	top_name = strrchr(attr->prov_name,
+			   ret ? OFI_NAME_LNX_DELIM : OFI_NAME_DELIM);
 	if (top_name)
 		top_name++;
 	else
@@ -1593,6 +1607,17 @@ int DEFAULT_SYMVER_PRE(fi_fabric)(struct fi_fabric_attr *attr,
 	return ret;
 }
 DEFAULT_SYMVER(fi_fabric_, fi_fabric, FABRIC_1.1);
+
+__attribute__((visibility ("default"),EXTERNALLY_VISIBLE))
+int DEFAULT_SYMVER_PRE(fi_fabric2)(struct fi_info *info,
+		struct fid_fabric **fabric, uint64_t flags, void *context)
+{
+	if (flags || !info)
+		return -FI_EINVAL;
+
+	return fi_fabric(info->fabric_attr, fabric, context);
+}
+DEFAULT_SYMVER(fi_fabric2_, fi_fabric2, FABRIC_1.8);
 
 __attribute__((visibility ("default"),EXTERNALLY_VISIBLE))
 uint32_t DEFAULT_SYMVER_PRE(fi_version)(void)

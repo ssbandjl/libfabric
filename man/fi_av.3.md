@@ -13,7 +13,8 @@ fi_av_open / fi_close
 : Open or close an address vector
 
 fi_av_bind
-: Associate an address vector with an event queue.
+: Associate an address vector with an event queue. This function
+  is deprecated and should not be used.
 
 fi_av_insert / fi_av_insertsvc / fi_av_remove
 : Insert/remove an address into/from the address vector.
@@ -64,6 +65,8 @@ int fi_av_lookup(struct fid_av *av, fi_addr_t fi_addr,
 
 fi_addr_t fi_rx_addr(fi_addr_t fi_addr, int rx_index,
 	  int rx_ctx_bits);
+
+fi_addr_t fi_group_addr(fi_addr_t fi_addr, uint32_t group_id);
 
 const char * fi_av_straddr(struct fid_av *av, const void *addr,
       char *buf, size_t *len);
@@ -138,18 +141,18 @@ endpoint communicates using a proprietary network protocol.  The
 purpose of the AV is to associate a higher-level address with
 a simpler, more efficient value that can be used by the libfabric API in a
 fabric agnostic way.  The mapped address is of type fi_addr_t and is
-returned through an AV insertion call.  The fi_addr_t is designed such
-that it may be a simple index into an array, a pointer to a structure,
-or a compact network address that may be placed directly into protocol
-headers.
+returned through an AV insertion call.
 
 The process of mapping an address is fabric and provider specific,
 but may involve lengthy address resolution and fabric management
-protocols.  AV operations are synchronous by default, but may be set
-to operate asynchronously by specifying the FI_EVENT flag to
-`fi_av_open`.  When requesting asynchronous operation, the application
-must first bind an event queue to the AV before inserting addresses.  See
+protocols.  AV operations are synchronous by default (the asynchrouous
+option has been deprecated, see below). See
 the NOTES section for AV restrictions on duplicate addresses.
+
+**Deprecated**: AV operations may be set to operate asynchronously
+by specifying the FI_EVENT flag to `fi_av_open`.  When requesting
+asynchronous operation, the application must first bind an event queue
+to the AV before inserting addresses.
 
 ## fi_av_open
 
@@ -173,7 +176,7 @@ struct fi_av_attr {
   vector.  The type specifies how an application views data stored in
   the AV, including how it may be accessed.  Valid values are:
 
-- *FI_AV_MAP*
+- *FI_AV_MAP* (deprecated)
 : Addresses which are inserted into an AV are mapped to a native
   fabric address for use by the application.  The use of FI_AV_MAP
   requires that an application store the returned fi_addr_t value
@@ -185,7 +188,9 @@ struct fi_av_attr {
   The disadvantage of FI_AV_MAP is the increase in memory usage
   needed to store the returned addresses.  Addresses are stored in
   the AV using a provider specific mechanism, including, but not
-  limited to a tree, hash table, or maintained on the heap.
+  limited to a tree, hash table, or maintained on the heap. This
+  option is deprecated, and providers are encouraged to align the
+  behavior of FI_AV_MAP with FI_AV_TABLE.
 
 - *FI_AV_TABLE*
 : Addresses which are inserted into an AV of type FI_AV_TABLE are
@@ -197,6 +202,11 @@ struct fi_av_attr {
   of the first address inserted into an FI_AV_TABLE will be 0, and
   successive insertions will be given sequential indices.  Sequential
   indices will be assigned across insertion calls on the same AV.
+  Because the fi_addr_t values returned from an insertion call are
+  deterministic, applications may not need to provide the fi_addr_t
+  output parameters to insertion calls.  The exception is when
+  the fi_addr_t parameters are also used as input for supplying
+  authentication keys or user defined IDs.
 
 - *FI_AV_UNSPEC*
 : Provider will choose its preferred AV type. The AV type used will
@@ -254,7 +264,7 @@ struct fi_av_attr {
 *flags*
 : The following flags may be used when opening an AV.
 
-- *FI_EVENT*
+- *FI_EVENT* (deprecated)
 : When the flag FI_EVENT is specified, all insert operations on this
   AV will occur asynchronously.  There will be one EQ error entry
   generated for each failed address insertion, followed by one
@@ -313,7 +323,7 @@ When closing the address vector, there must be no opened endpoints associated
 with the AV.  If resources are still associated with the AV when attempting to
 close, the call will return -FI_EBUSY.
 
-## fi_av_bind
+## fi_av_bind (deprecated)
 
 Associates an event queue with the AV.  If an AV has been opened with
 `FI_EVENT`, then an event queue must be bound to the AV before any
@@ -331,10 +341,10 @@ as specified in the addr_format field of the fi_info struct provided when
 opening the corresponding domain. When using the `FI_ADDR_STR` format,
 the `addr` parameter should reference an array of strings (char \*\*).
 
-For AV's of type FI_AV_MAP, once inserted addresses have been mapped,
-the mapped values are written into the buffer referenced by fi_addr.
-The fi_addr buffer must remain valid until the AV insertion has
-completed and an event has been generated to an associated event
+**Deprecated**: For AV's of type FI_AV_MAP, once inserted addresses
+have been mapped, the mapped values are written into the buffer referenced
+by fi_addr.  The fi_addr buffer must remain valid until the AV insertion
+has completed and an event has been generated to an associated event
 queue.  The value of the returned fi_addr should be considered opaque
 by the application for AVs of type FI_AV_MAP.  The returned value may
 point to an internal structure or a provider specific encoding of
@@ -360,10 +370,7 @@ insertion operation completes.  Note that if fi_addr is NULL and
 synchronous operation is requested without using FI_SYNC_ERR flag, individual
 insertion failures cannot be reported and the application must use
 other calls, such as `fi_av_lookup` to learn which specific addresses
-failed to insert.  Since fi_av_remove is provider-specific, it is recommended
-that calls to fi_av_insert following a call to fi_av_remove always reference a
-valid buffer in the fi_addr parameter.  Otherwise it may be difficult to
-determine what the next assigned index will be.
+failed to insert.
 
 If the address vector is configured with authorization keys, the fi_addr
 parameter may be used as input to define the authorization keys associated
@@ -377,8 +384,9 @@ Upon successful insert with FI_AUTH_KEY flag, the returned fi_addr_t's will map 
 endpoint address against the specified authorization keys. These fi_addr_t's can be
 used as the target for local data transfer operations.
 
-If the endpoint supports `FI_DIRECTED_RECV`, these fi_addr_t's can be used to
-restrict receive buffers to a specific endpoint address and authorization key.
+If the endpoint supports `FI_DIRECTED_RECV` or `FI_TAGGED_DIRECTED_RECV`, these
+fi_addr_t's can be used to restrict receive buffers to a specific endpoint address
+and authorization key.
 
 For address vectors configured with FI_AV_USER_ID, all subsequent target events
 corresponding to the address being inserted will return FI_ADDR_NOTAVAIL until
@@ -471,20 +479,14 @@ Supported flags are the same as for fi_av_insert.
 
 ## fi_av_remove
 
-fi_av_remove removes a set of addresses from an address vector.  All
-resources associated with the indicated addresses are released.
-The removed address - either the mapped address (in the case of FI_AV_MAP)
-or index (FI_AV_TABLE) - is invalid until it is returned again by a
-new fi_av_insert.
+fi_av_remove removes a set of addresses from an address vector.
+The corresponding fi_addr_t values are invalidated and may not
+be used in data transfer calls.  The behavior of operations in
+progress that reference the removed addresses is undefined.
 
-The behavior of operations in progress that reference the removed addresses
-is undefined.
-
-The use of fi_av_remove is an optimization that applications may use
-to free memory allocated with addresses that will no longer be
-accessed.  Inserted addresses are not required to be removed.
-fi_av_close will automatically cleanup any resources associated with
-addresses remaining in the AV when it is invoked.
+Note that removing an address may not disable receiving data from the
+peer endpoint.  fi_av_close will automatically cleanup any associated
+resource.
 
 If the address being removed came from `fi_av_insert_auth_key`, the address
 will only be removed if all endpoints, which have been enabled against the
@@ -512,9 +514,7 @@ address, which may be larger than the input value.
 
 This function is used to convert an endpoint address, returned by
 fi_av_insert, into an address that specifies a target receive context.
-The specified fi_addr parameter must either be a value returned from
-fi_av_insert, in the case of FI_AV_MAP, or an index, in the case of
-FI_AV_TABLE.  The value for rx_ctx_bits must match that specified in
+The value for rx_ctx_bits must match that specified in
 the AV attributes for the given address.
 
 Connected endpoints that support multiple receive contexts, but are
@@ -620,12 +620,6 @@ into a given AV in order to avoid duplicate entries.  However, providers are
 required to support the removal, followed by the re-insertion of an
 address.  Only duplicate insertions are restricted.
 
-Providers may implement AV's using a variety of mechanisms.
-Specifically, a provider may begin resolving inserted addresses as
-soon as they have been added to an AV, even if asynchronous operation
-has been specified.  Similarly, a provider may lazily release
-resources from removed entries.
-
 # USER IDENTIFIERS FOR ADDRESSES
 
 As described above, endpoint addresses authorization keys that are
@@ -666,6 +660,33 @@ transfer operations.
 For address vectors opened with FI_AV_USER_ID, fi_av_set_user_id is used
 to defined the user-specified fi_addr_t.
 
+# PEER GROUPS
+
+Peer groups provide a direct mapping to HPC and AI communicator constructs.
+
+The addresses in an AV represent the full set of peers that a local process
+may communicate with.  A peer group conceptually represents a subset of
+those peers.  A peer group may be used to identify peers working on a common
+task, which need their communication logically separated from other traffic.
+Peer groups are not a security mechanism, but instead help separate data.
+A given peer may belong to 0 or more peer groups,
+with no limit placed on how many peers can belong to a single peer group.
+
+Peer groups are identified using an integer value, known as a group id.
+Group id's are selected by the user and conveyed as part of an fi_addr_t
+value.  The management of a group id and it's relationship to addresses
+inserted into an AV is directly controlled by the user.  When enabled,
+sent messages are marked as belonging to a specific peer group, and posted
+receive buffers must have a matching group id to receive the data.
+
+Users are responsible for selecting a valid peer group id, subject to the
+limitation negotiated using the domain attribute max_group_id.  The group
+id of an fi_addr_t may be set using the fi_group_addr() function.
+
+## fi_group_addr
+
+This function is used to set the group ID portion of an fi_addr_t.
+
 # RETURN VALUES
 
 Insertion calls, excluding `fi_av_insert_auth_key`, for an AV opened for
@@ -673,7 +694,8 @@ synchronous operation will return the number of addresses that were
 successfully inserted.  In the case of failure, the return value will be
 less than the number of addresses that was specified.
 
-Insertion calls, excluding `fi_av_insert_auth_key`, for an AV opened for
+**Deprecated**: Insertion calls, excluding `fi_av_insert_auth_key`,
+for an AV opened for
 asynchronous operation (with FI_EVENT flag specified) will return FI_SUCCESS
 if the operation was successfully initiated. In the case of failure, a
 negative fabric errno will be returned.  Providers are allowed to abort
@@ -685,7 +707,7 @@ buffer associated with a failed or aborted insertion will be set to
 FI_ADDR_NOTAVAIL.
 
 All other calls return FI_SUCCESS on success, or a negative value corresponding
-to fabric errno on error. Fabric errno values are defined in `rdma/fi_errno.h`.
+to fabric errno on error.  Fabric errno values are defined in `rdma/fi_errno.h`.
 
 # SEE ALSO
 

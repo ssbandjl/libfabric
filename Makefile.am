@@ -3,6 +3,7 @@
 # Copyright (c) 2017-2018 Intel Corporation, Inc. All right reserved.
 # Copyright (c) 2018 Amazon.com, Inc. or its affiliates. All rights reserved.
 # (C) Copyright 2020-2023 Hewlett Packard Enterprise Development LP
+# Copyright (c) 2018-2024 GigaIO, Inc.  All right reserved.
 #
 # Makefile.am for libfabric
 
@@ -88,7 +89,11 @@ common_srcs =				\
 	prov/util/src/ze_mem_monitor.c \
 	prov/util/src/cuda_ipc_monitor.c \
 	prov/util/src/rocr_ipc_monitor.c \
+	prov/util/src/ze_ipc_monitor.c	\
 	prov/util/src/xpmem_monitor.c	\
+        prov/util/src/kdreg2_mem_monitor.c \
+	prov/util/src/uffd_mem_monitor.c \
+	prov/util/src/import_mem_monitor.c \
 	prov/util/src/util_profile.c \
 	prov/coll/src/coll_attr.c	\
 	prov/coll/src/coll_av.c		\
@@ -220,7 +225,7 @@ src_libfabric_la_LIBADD =
 src_libfabric_la_DEPENDENCIES = libfabric.map
 
 if !EMBEDDED
-src_libfabric_la_LDFLAGS += -version-info 25:0:24
+src_libfabric_la_LDFLAGS += -version-info 28:0:27
 endif
 src_libfabric_la_LDFLAGS += -export-dynamic \
 			   $(libfabric_version_script)
@@ -355,6 +360,7 @@ dummy_man_pages = \
         man/man3/fi_eq_sread.3 \
         man/man3/fi_eq_strerror.3 \
         man/man3/fi_eq_write.3 \
+        man/man3/fi_fabric2.3 \
         man/man3/fi_fetch_atomic.3 \
         man/man3/fi_fetch_atomic_valid.3 \
         man/man3/fi_fetch_atomicmsg.3 \
@@ -425,6 +431,15 @@ dummy_man_pages = \
         man/man3/fi_writemsg.3 \
         man/man3/fi_writev.3
 
+windows_files = \
+	Libfabric.Build.Default.props \
+	libfabric.def \
+	libfabric.vcxproj \
+	include/windows \
+	src/windows \
+	prov/verbs/include/windows \
+	prov/verbs/src/windows
+
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = libfabric.pc
 
@@ -468,6 +483,8 @@ include prov/shm/Makefile.include
 include prov/sm2/Makefile.include
 include prov/tcp/Makefile.include
 include prov/ucx/Makefile.include
+include prov/lpp/Makefile.include
+include prov/lnx/Makefile.include
 include prov/hook/Makefile.include
 include prov/hook/perf/Makefile.include
 include prov/hook/trace/Makefile.include
@@ -484,6 +501,7 @@ EXTRA_DIST += \
         libfabric.spec.in \
         config/distscript.pl \
         $(real_man_pages) $(prov_dist_man_pages) $(dummy_man_pages) \
+	$(windows_files) \
         $(prov_extra_dist)
 
 # a workaround for http://debbugs.gnu.org/cgi/bugreport.cgi?bug=18744, this

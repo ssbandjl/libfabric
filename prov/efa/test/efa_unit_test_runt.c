@@ -27,12 +27,10 @@ void test_efa_rdm_peer_get_runt_size_impl(
 	struct efa_mr mock_mr;
 	struct efa_rdm_ope mock_txe;
 	size_t runt_size;
-	struct efa_domain *efa_domain;
 	int ret;
 
 	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
-	efa_domain = efa_rdm_ep_domain(efa_rdm_ep);
-	efa_domain->hmem_info[iface].runt_size = total_runt_size;
+	g_efa_hmem_info[iface].runt_size = total_runt_size;
 
 	/* insert a fake peer */
 	ret = fi_getname(&resource->ep->fid, &raw_addr, &raw_addr_len);
@@ -63,7 +61,7 @@ void test_efa_rdm_peer_get_runt_size_no_enough_runt(struct efa_resource **state)
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 1001;
@@ -81,7 +79,7 @@ void test_efa_rdm_peer_get_runt_size_cuda_memory_smaller_than_alignment(struct e
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 1000;
@@ -99,7 +97,7 @@ void test_efa_rdm_peer_get_runt_size_cuda_memory_exceeding_total_len(struct efa_
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 0;
@@ -117,13 +115,102 @@ void test_efa_rdm_peer_get_runt_size_cuda_memory_normal(struct efa_resource **st
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 10000;
 	total_runt_size = 16384;
 	/* 16384 - 10000 is smaller than 12000 (total_len), runt size must be (16384 - 10000) // 64 * 64 = 6336 */
 	expected_runt_size = 6336;
+	test_efa_rdm_peer_get_runt_size_impl(resource, FI_HMEM_CUDA, peer_num_runt_bytes_in_flight, total_runt_size, msg_length, expected_runt_size);
+}
+
+/* When using LL128 protocol, the segmented size of runting read must be 128 multiple. */
+void test_efa_rdm_peer_get_runt_size_cuda_memory_128_multiple_alignment(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ep *efa_rdm_ep;
+	size_t msg_length;
+	size_t expected_runt_size;
+	size_t peer_num_runt_bytes_in_flight;
+	size_t total_runt_size;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = 1;
+
+	msg_length = 12000;
+	peer_num_runt_bytes_in_flight = 10240;
+	total_runt_size = 16384;
+	/* 16384 - 10240 is smaller than 12000 (total_len), 
+	 * runt size must be (16384 - 10240) // 128 * 128 = 6144 
+	 */
+	expected_runt_size = 6144;
+	test_efa_rdm_peer_get_runt_size_impl(resource, FI_HMEM_CUDA, peer_num_runt_bytes_in_flight, total_runt_size, msg_length, expected_runt_size);
+}
+
+void test_efa_rdm_peer_get_runt_size_cuda_memory_non_128_multiple_alignment(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ep *efa_rdm_ep;
+	size_t msg_length;
+	size_t expected_runt_size;
+	size_t peer_num_runt_bytes_in_flight;
+	size_t total_runt_size;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = 1;
+
+	msg_length = 12000;
+	peer_num_runt_bytes_in_flight = 512;
+	total_runt_size = 1004;
+	/* 1004 - 512 is smaller than 12000 (total_len), 
+	 * runt size must be (1004 - 512) // 128 * 128 = 384 
+	 */
+	expected_runt_size = 384;
+	test_efa_rdm_peer_get_runt_size_impl(resource, FI_HMEM_CUDA, peer_num_runt_bytes_in_flight, total_runt_size, msg_length, expected_runt_size);
+}
+
+void test_efa_rdm_peer_get_runt_size_cuda_memory_smaller_than_128_alignment(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ep *efa_rdm_ep;
+	size_t msg_length;
+	size_t expected_runt_size;
+	size_t peer_num_runt_bytes_in_flight;
+	size_t total_runt_size;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = 1;
+
+	msg_length = 12000;
+	peer_num_runt_bytes_in_flight = 1000;
+	total_runt_size = 1048;
+	/* 1048 - 1000 is smaller than 128 memory alignment, runt size must be 0 */
+	expected_runt_size = 0;
+	test_efa_rdm_peer_get_runt_size_impl(resource, FI_HMEM_CUDA, peer_num_runt_bytes_in_flight, total_runt_size, msg_length, expected_runt_size);
+}
+
+void test_efa_rdm_peer_get_runt_size_cuda_memory_exceeding_total_len_128_alignment(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ep *efa_rdm_ep;
+	size_t msg_length;
+	size_t expected_runt_size;
+	size_t peer_num_runt_bytes_in_flight;
+	size_t total_runt_size;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = 1;
+
+	msg_length = 12000;
+	peer_num_runt_bytes_in_flight = 0;
+	total_runt_size = 16384;
+	/* 16384 - 0 is exceeding 12000 (total_len), runt size must be 12000 // 128 * 128 = 11904 */
+	expected_runt_size = 11904;
 	test_efa_rdm_peer_get_runt_size_impl(resource, FI_HMEM_CUDA, peer_num_runt_bytes_in_flight, total_runt_size, msg_length, expected_runt_size);
 }
 
@@ -135,7 +222,7 @@ void test_efa_rdm_peer_get_runt_size_host_memory_smaller_than_alignment(struct e
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 1000;
@@ -153,7 +240,7 @@ void test_efa_rdm_peer_get_runt_size_host_memory_exceeding_total_len(struct efa_
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 1111;
 	peer_num_runt_bytes_in_flight = 0;
@@ -171,7 +258,7 @@ void test_efa_rdm_peer_get_runt_size_host_memory_normal(struct efa_resource **st
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 10000;
@@ -207,13 +294,11 @@ void test_efa_rdm_peer_select_readbase_rtm_impl(
 	fi_addr_t addr;
 	struct efa_mr mock_mr;
 	struct efa_rdm_ope mock_txe;
-	struct efa_domain *efa_domain;
 	int readbase_rtm;
 	int ret;
 
 	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
-	efa_domain = efa_rdm_ep_domain(efa_rdm_ep);
-	efa_domain->hmem_info[iface].runt_size = total_runt_size;
+	g_efa_hmem_info[iface].runt_size = total_runt_size;
 
 	/* insert a fake peer */
 	ret = fi_getname(&resource->ep->fid, &raw_addr, &raw_addr_len);
@@ -245,7 +330,7 @@ void test_efa_rdm_peer_select_readbase_rtm_no_runt(struct efa_resource **state)
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 1000;
@@ -262,7 +347,7 @@ void test_efa_rdm_peer_select_readbase_rtm_do_runt(struct efa_resource **state)
 	size_t peer_num_runt_bytes_in_flight;
 	size_t total_runt_size;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	msg_length = 12000;
 	peer_num_runt_bytes_in_flight = 1000;

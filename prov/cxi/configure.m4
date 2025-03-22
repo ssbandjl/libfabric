@@ -35,8 +35,10 @@ AC_DEFUN([FI_CXI_CONFIGURE],[
 		[CPPFLAGS="-I$with_cxi_uapi_headers/include $CPPFLAGS"])
 
 	# Support non-standard install path for curl. This is needed by CXI provider.
+	# Add #define of the path to the curl library for use in the code
 	AC_ARG_WITH([curl],
-		[AS_HELP_STRING([--with-curl=DIR], [Install directory for curl])])
+		[AS_HELP_STRING([--with-curl=DIR], [Install directory for curl])],
+		[AC_DEFINE_UNQUOTED([FI_CXI_CURL_LIB_PATH], ["$with_curl"], [Path to the curl install root])])
 
 	# Support non-standard install path for json-c. This is needed by CXI provider.
 	AC_ARG_WITH([json-c],
@@ -97,8 +99,8 @@ AC_DEFUN([FI_CXI_CONFIGURE],[
 			cxi_LIBS="$cxi_LIBS $libcurl_LIBS"
 
 			# Add on json if installed in non-default location.
-			if test "$with_json" != "" && test "$with_json" != "no"; then
-				FI_CHECK_PREFIX_DIR([$with_json], [json])
+			if test "$with_json_c" != "" && test "$with_json_c" != "no"; then
+				FI_CHECK_PREFIX_DIR([$with_json_c], [json])
 			else
 				json_PREFIX=""
 				json_LIBDIR=""

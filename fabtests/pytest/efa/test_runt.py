@@ -5,6 +5,7 @@ import pytest
 
 
 # this test must be run in serial mode because it check hw counter
+# efa-direct does not have runt read so skip this test
 @pytest.mark.serial
 @pytest.mark.functional
 @pytest.mark.parametrize("memory_type,copy_method", [
@@ -45,7 +46,8 @@ def test_runt_read_functional(cmdline_args, memory_type, copy_method):
                                completion_semantic="transmit_complete",
                                memory_type=memory_type,
                                message_size="262144",
-                               warmup_iteration_type="0")
+                               warmup_iteration_type="0",
+                               fabric="efa")
 
     server_read_wrs_after_test = efa_retrieve_hw_counter_value(cmdline_args.server_id, "rdma_read_wrs")
     server_read_bytes_after_test =efa_retrieve_hw_counter_value(cmdline_args.server_id, "rdma_read_bytes")
@@ -74,16 +76,15 @@ def test_runt_read_functional(cmdline_args, memory_type, copy_method):
     if copy_method == "localread":
         # when local read copy is used, server issue RDMA requests to copy received data
         #
-        # so in this case, total read wr is 11, which is
+        # so in this case, total read wr is at least 9, which is
         #    1 remote read of 192k
         #    8 local read for the 64k data transfer by send
-        #    2 local read for 2 fabtests control messages
+        #    More local reads for fabtests control messages
         #
-        # and total read_bytes will be 262149, which is:
-        #        256k message + 2 fabtests control messages (1 byte and 4 byte each)
+        # and total read_bytes will be >= 256K including the control messages
         #
-        assert server_read_wrs == 11
-        assert server_read_bytes == 262149
+        assert server_read_wrs >= 9
+        assert server_read_bytes >= 262144
     else:
         # The other 192 KB is transfer by RDMA read
         # for which the server (receiver) will issue 1 read request.

@@ -110,8 +110,7 @@
 #define PSM_CRC_SIZE_IN_BYTES 8
 
 /*
- * version of protocol header (known to chip also).
- * This value for OPA is defined in spec.
+ * version of protocol header
  */
 #define IPS_PROTO_VERSION 0x1
 
@@ -142,7 +141,7 @@
 #define IPS_SEND_FLAG_PKTCKSUM          0x02	/* Has packet checksum */
 #define IPS_SEND_FLAG_AMISTINY		0x04	/* AM is tiny, exclusive */
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 /* This flag is used to indicate to the reciever when
  * the send is issued on a device buffer. This helps in
  * selecting TID path on the recieve side regardless of
@@ -160,7 +159,7 @@
 #define IPS_SEND_FLAG_PERSISTENT	0x0200
 #define IPS_SEND_FLAG_NO_LMC		0x0400
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 /* This flag is used to indicate if the send is on
  * a GPU buffer. This helps PIO/SDMA paths to detect
  * if payload is GPU buffer without having to call
@@ -199,7 +198,7 @@
 /* Path selection policies:
  *
  * (a) Adaptive - Dynamically determine the least loaded paths using various
- * feedback mechanism - Completion time via ACKs, NAKs, CCA using BECNs.
+ * feedback mechanism - Completion time via ACKs, NAKs, etc.
  *
  * (b) Static schemes  -
  *     (i) static_src  - Use path keyed off source context
@@ -220,7 +219,7 @@
 #define IPS_PROTO_FLAG_PPOLICY_STATIC 0x1c00
 
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 /* Use RNDV (TID) for all message sizes */
 //#define IPS_PROTO_FLAG_ALWAYS_RNDV		0x10000	// unused
 /* Use GPUDirect RDMA for SDMA */
@@ -247,6 +246,7 @@
 #define IPS_PROTOEXP_FLAG_RDMA_KERNEL        0x01    /* kernel RV module RDMA */
 #define IPS_PROTOEXP_FLAG_RDMA_USER          0x02    /* user RC QP for RDMA only */
 #define IPS_PROTOEXP_FLAG_RDMA_USER_RC       0x03    /* user RC QP eager & RDMA */
+#define IPS_PROTOEXP_FLAG_RDMA_QP(flag)      ((flag)&IPS_PROTOEXP_FLAG_RDMA_MASK)    /* QP RDMA mode */
 #define IPS_PROTOEXP_FLAG_USER_RC_QP(flag) ((flag)&0x02) /* either RC QP mode */
 #define IPS_PROTOEXP_FLAG_KERNEL_QP(flag) \
 		(((flag)&IPS_PROTOEXP_FLAG_RDMA_MASK) == IPS_PROTOEXP_FLAG_RDMA_KERNEL)

@@ -22,11 +22,8 @@ struct efa_ah {
 struct efa_conn {
 	struct efa_ah		*ah;
 	struct efa_ep_addr	*ep_addr;
-	/* for FI_AV_TABLE, fi_addr is same as util_av_fi_addr,
-	 * for FI_AV_MAP, fi_addr is pointer to efa_conn; */
 	fi_addr_t		fi_addr;
-	fi_addr_t		util_av_fi_addr;
-	struct efa_rdm_peer	rdm_peer;
+	struct efa_rdm_peer	*rdm_peer;
 };
 
 struct efa_av_entry {
@@ -72,7 +69,7 @@ struct efa_av {
 	struct efa_prv_reverse_av *prv_reverse_av;
 	struct efa_ah *ah_map;
 	struct util_av util_av;
-	enum fi_ep_type ep_type;
+	struct ofi_bufpool *rdm_peer_pool;
 };
 
 int efa_av_open(struct fid_domain *domain_fid, struct fi_av_attr *attr,
@@ -86,6 +83,6 @@ struct efa_conn *efa_av_addr_to_conn(struct efa_av *av, fi_addr_t fi_addr);
 
 fi_addr_t efa_av_reverse_lookup_rdm(struct efa_av *av, uint16_t ahn, uint16_t qpn, struct efa_rdm_pke *pkt_entry);
 
-fi_addr_t efa_av_reverse_lookup_dgram(struct efa_av *av, uint16_t ahn, uint16_t qpn);
+fi_addr_t efa_av_reverse_lookup(struct efa_av *av, uint16_t ahn, uint16_t qpn);
 
 #endif

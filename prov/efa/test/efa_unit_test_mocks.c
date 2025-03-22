@@ -88,6 +88,12 @@ void efa_mock_ibv_wr_send_verify_handshake_pkt_local_host_id_and_save_wr(struct 
 	return efa_mock_ibv_wr_send_save_wr(qp);
 }
 
+void efa_mock_ibv_wr_send_imm_save_wr(struct ibv_qp_ex *qp, __be32 imm_data)
+{
+	g_ibv_submitted_wr_id_vec[g_ibv_submitted_wr_id_cnt] = (void *)qp->wr_id;
+	g_ibv_submitted_wr_id_cnt++;
+}
+
 void efa_mock_ibv_wr_set_inline_data_list_no_op(struct ibv_qp_ex *qp,
 						size_t num_buf,
 						const struct ibv_data_buf *buf_list)
@@ -172,6 +178,26 @@ uint32_t efa_mock_ibv_read_vendor_err_return_mock(struct ibv_cq_ex *current)
 	return mock();
 }
 
+uint32_t efa_mock_ibv_read_qp_num_return_mock(struct ibv_cq_ex *current)
+{
+	return mock();
+}
+
+uint32_t efa_mock_ibv_read_wc_flags_return_mock(struct ibv_cq_ex *current)
+{
+	return mock();
+}
+
+uint32_t efa_mock_ibv_wc_read_imm_data_return_mock(struct ibv_cq_ex *current)
+{
+	return mock();
+}
+
+bool efa_mock_efadv_wc_is_unsolicited(struct efadv_cq *efadv_cq)
+{
+	return mock();
+}
+
 int g_ofi_copy_from_hmem_iov_call_counter;
 ssize_t efa_mock_ofi_copy_from_hmem_iov_inc_counter(void *dest, size_t size,
 						    enum fi_hmem_iface hmem_iface, uint64_t device,
@@ -180,6 +206,47 @@ ssize_t efa_mock_ofi_copy_from_hmem_iov_inc_counter(void *dest, size_t size,
 {
 	g_ofi_copy_from_hmem_iov_call_counter += 1;
 	return __real_ofi_copy_from_hmem_iov(dest, size, hmem_iface, device, hmem_iov, hmem_iov_count, hmem_iov_offset);
+}
+
+int efa_mock_efa_rdm_pke_read_return_mock(struct efa_rdm_ope *ope)
+{
+	return mock();
+}
+
+ssize_t efa_mock_efa_rdm_ope_post_send_return_mock(struct efa_rdm_ope *ope, int pkt_type)
+{
+	return mock();
+}
+
+ssize_t efa_mock_efa_rdm_pke_proc_matched_rtm_no_op(struct efa_rdm_pke *pkt_entry)
+{
+	return FI_SUCCESS;
+}
+
+bool efa_mock_efa_device_support_unsolicited_write_recv()
+{
+	return mock();
+}
+
+int efa_mock_ibv_post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr,
+				struct ibv_recv_wr **bad_wr)
+{
+	return mock();
+}
+
+void efa_mock_ibv_wr_rdma_read_save_wr(struct ibv_qp_ex *qp, uint32_t rkey,
+				       uint64_t remote_addr)
+{
+	g_ibv_submitted_wr_id_vec[g_ibv_submitted_wr_id_cnt] = (void *)qp->wr_id;
+	g_ibv_submitted_wr_id_cnt++;
+}
+
+void efa_mock_ibv_wr_rdma_write_imm_save_wr(struct ibv_qp_ex *qp, uint32_t rkey,
+					    uint64_t remote_addr,
+					    __be32 imm_data)
+{
+	g_ibv_submitted_wr_id_vec[g_ibv_submitted_wr_id_cnt] = (void *) qp->wr_id;
+	g_ibv_submitted_wr_id_cnt++;
 }
 
 struct efa_unit_test_mocks g_efa_unit_test_mocks = {
@@ -193,7 +260,14 @@ struct efa_unit_test_mocks g_efa_unit_test_mocks = {
 #if HAVE_NEURON
 	.neuron_alloc = __real_neuron_alloc,
 #endif
+#if HAVE_CUDA
+	.ofi_cudaMalloc = __real_ofi_cudaMalloc,
+#endif
 	.ofi_copy_from_hmem_iov = __real_ofi_copy_from_hmem_iov,
+	.efa_rdm_pke_read = __real_efa_rdm_pke_read,
+	.efa_rdm_pke_proc_matched_rtm = __real_efa_rdm_pke_proc_matched_rtm,
+	.efa_rdm_ope_post_send = __real_efa_rdm_ope_post_send,
+	.efa_device_support_unsolicited_write_recv = __real_efa_device_support_unsolicited_write_recv,
 	.ibv_is_fork_initialized = __real_ibv_is_fork_initialized,
 #if HAVE_EFADV_QUERY_MR
 	.efadv_query_mr = __real_efadv_query_mr,
@@ -294,6 +368,25 @@ void *efa_mock_neuron_alloc_return_null(void **handle, size_t size)
 {
 	return NULL;
 }
+
+void *efa_mock_neuron_alloc_return_mock(void **handle, size_t size)
+{
+	/* Not mocking return value so this function will fail when it is called */
+	return (void *) mock();
+}
+#endif
+
+#if HAVE_CUDA
+cudaError_t __wrap_ofi_cudaMalloc(void **ptr, size_t size)
+{
+	return g_efa_unit_test_mocks.ofi_cudaMalloc(ptr, size);
+}
+
+cudaError_t efa_mock_ofi_cudaMalloc_return_mock(void **ptr, size_t size)
+{
+	/* Not mocking return value so this function will fail when it is called */
+	return (cudaError_t) mock();
+}
 #endif
 
 ssize_t __wrap_ofi_copy_from_hmem_iov(void *dest, size_t size,
@@ -302,6 +395,26 @@ ssize_t __wrap_ofi_copy_from_hmem_iov(void *dest, size_t size,
 				      size_t hmem_iov_count, uint64_t hmem_iov_offset)
 {
 	return g_efa_unit_test_mocks.ofi_copy_from_hmem_iov(dest, size, hmem_iface, device, hmem_iov, hmem_iov_count, hmem_iov_offset);
+}
+
+int __wrap_efa_rdm_pke_read(struct efa_rdm_ope *ope)
+{
+	return g_efa_unit_test_mocks.efa_rdm_pke_read(ope);
+}
+
+int __wrap_efa_rdm_pke_proc_matched_rtm(struct efa_rdm_pke *pkt_entry)
+{
+	return g_efa_unit_test_mocks.efa_rdm_pke_proc_matched_rtm(pkt_entry);
+}
+
+int __wrap_efa_rdm_ope_post_send(struct efa_rdm_ope *ope, int pkt_type)
+{
+	return g_efa_unit_test_mocks.efa_rdm_ope_post_send(ope, pkt_type);
+}
+
+bool __wrap_efa_device_support_unsolicited_write_recv(void)
+{
+	return g_efa_unit_test_mocks.efa_device_support_unsolicited_write_recv();
 }
 
 enum ibv_fork_status __wrap_ibv_is_fork_initialized(void)

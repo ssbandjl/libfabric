@@ -401,7 +401,7 @@ static int ft_sync_test(int value)
 	if (ret)
 		return ret;
 
-	return ft_sock_sync(value);
+	return ft_sock_sync(sock, value);
 }
 
 static int ft_sync_manual()
@@ -444,7 +444,7 @@ static int ft_sync_progress(int value)
 {
 	if (test_info.progress == FI_PROGRESS_MANUAL)
 		return ft_sync_manual();
-	return ft_sock_sync(value);
+	return ft_sock_sync(sock, value);
 }
 
 static int ft_sync_msg_needed(void)
@@ -870,9 +870,9 @@ static int ft_unit_atomic(void)
 
 	ft_atom_ctrl.count = ft_tx_ctrl.rma_msg_size / ft_atom_ctrl.datatype_size;
 	if (ret == -FI_ENOSYS || ret == -FI_EOPNOTSUPP ||
-	    ft_atom_ctrl.count > count || ft_atom_ctrl.count == 0) {
+	    ft_atom_ctrl.count > count || ft_atom_ctrl.count == 0)
 		return 0;
-	}
+
 	if (ret)
 		return ret;
 
@@ -1018,7 +1018,7 @@ void ft_cleanup(void)
 	FT_CLOSE_FID(ft_atom_ctrl.comp_mr);
 	ft_cleanup_xcontrol(&ft_rx_ctrl);
 	ft_cleanup_xcontrol(&ft_tx_ctrl);
-	ft_free_host_tx_buf();
+	ft_free_host_bufs();
 	ft_cleanup_mr_control(&ft_mr_ctrl);
 	ft_cleanup_atomic_control(&ft_atom_ctrl);
 	ft_cleanup_random();
@@ -1134,7 +1134,7 @@ int ft_init_test()
 {
 	int ret;
 
-	ft_sock_sync(0);
+	ft_sock_sync(sock, 0);
 
 	ret = ft_enable_comm();
 	if (ret) {

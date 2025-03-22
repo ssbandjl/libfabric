@@ -4,6 +4,8 @@
 #include <sys/time.h>
 #include "efa.h"
 #include "efa_av.h"
+#include "efa_cq.h"
+#include "efa_cntr.h"
 #include "rdm/efa_rdm_protocol.h"
 
 int efa_base_ep_bind_av(struct efa_base_ep *base_ep, struct efa_av *av)
@@ -38,17 +40,20 @@ int efa_base_ep_destruct_qp(struct efa_base_ep *base_ep)
 {
 	struct efa_domain *domain;
 	struct efa_qp *qp = base_ep->qp;
-	int err;
+	struct efa_qp *user_recv_qp = base_ep->user_recv_qp;
 
 	if (qp) {
 		domain = qp->base_ep->domain;
 		domain->qp_table[qp->qp_num & domain->qp_table_sz_m1] = NULL;
-		err = -ibv_destroy_qp(qp->ibv_qp);
-		if (err)
-			EFA_INFO(FI_LOG_CORE, "destroy qp[%u] failed!\n", qp->qp_num);
-
-		free(qp);
+		efa_qp_destruct(qp);
 		base_ep->qp = NULL;
+	}
+
+	if (user_recv_qp) {
+		domain = user_recv_qp->base_ep->domain;
+		domain->qp_table[user_recv_qp->qp_num & domain->qp_table_sz_m1] = NULL;
+		efa_qp_destruct(user_recv_qp);
+		base_ep->user_recv_qp = NULL;
 	}
 
 	return 0;
@@ -83,6 +88,9 @@ int efa_base_ep_destruct(struct efa_base_ep *base_ep)
 
 	if (base_ep->efa_recv_wr_vec)
 		free(base_ep->efa_recv_wr_vec);
+	
+	if (base_ep->user_recv_wr_vec)
+		free(base_ep->user_recv_wr_vec);
 
 	return err;
 }
@@ -164,7 +172,7 @@ static int efa_base_ep_modify_qp_rst2rts(struct efa_base_ep *base_ep,
  * @param init_attr_ex ibv_qp_init_attr_ex
  * @return int 0 on success, negative integer on failure
  */
-int efa_qp_create(struct efa_qp **qp, struct ibv_qp_init_attr_ex *init_attr_ex)
+int efa_qp_create(struct efa_qp **qp, struct ibv_qp_init_attr_ex *init_attr_ex, uint32_t tclass)
 {
 	struct efadv_qp_init_attr efa_attr = { 0 };
 
@@ -172,16 +180,44 @@ int efa_qp_create(struct efa_qp **qp, struct ibv_qp_init_attr_ex *init_attr_ex)
 	if (!*qp)
 		return -FI_ENOMEM;
 
+	init_attr_ex->comp_mask = IBV_QP_INIT_ATTR_PD | IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
+	init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_SEND | IBV_QP_EX_WITH_SEND_WITH_IMM;
+
 	if (init_attr_ex->qp_type == IBV_QPT_UD) {
 		(*qp)->ibv_qp = ibv_create_qp_ex(init_attr_ex->pd->context,
 					      init_attr_ex);
 	} else {
 		assert(init_attr_ex->qp_type == IBV_QPT_DRIVER);
+		if (efa_device_support_rdma_read())
+			init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_READ;
+		if (efa_device_support_rdma_write()) {
+			init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE;
+			init_attr_ex->send_ops_flags |= IBV_QP_EX_WITH_RDMA_WRITE_WITH_IMM;
+		}
+#if HAVE_CAPS_UNSOLICITED_WRITE_RECV
+		if (efa_use_unsolicited_write_recv())
+			efa_attr.flags |= EFADV_QP_FLAGS_UNSOLICITED_WRITE_RECV;
+#endif
 		efa_attr.driver_qp_type = EFADV_QP_DRIVER_TYPE_SRD;
+#if HAVE_EFADV_SL
+		efa_attr.sl = EFA_QP_DEFAULT_SERVICE_LEVEL;
+		if (tclass == FI_TC_LOW_LATENCY)
+			efa_attr.sl = EFA_QP_LOW_LATENCY_SERVICE_LEVEL;
+#endif
 		(*qp)->ibv_qp = efadv_create_qp_ex(
 			init_attr_ex->pd->context, init_attr_ex, &efa_attr,
 			sizeof(struct efadv_qp_init_attr));
 	}
+
+#if HAVE_EFADV_SL
+	if (!(*qp)->ibv_qp && tclass == FI_TC_LOW_LATENCY) {
+		EFA_INFO(FI_LOG_EP_CTRL, "ibv_create_qp failed with sl %u, errno: %d. Retrying with default sl.\n", efa_attr.sl, errno);
+		efa_attr.sl = EFA_QP_DEFAULT_SERVICE_LEVEL;
+		(*qp)->ibv_qp = efadv_create_qp_ex(
+			init_attr_ex->pd->context, init_attr_ex, &efa_attr,
+			sizeof(struct efadv_qp_init_attr));
+	}
+#endif
 
 	if (!(*qp)->ibv_qp) {
 		EFA_WARN(FI_LOG_EP_CTRL, "ibv_create_qp failed. errno: %d\n", errno);
@@ -199,7 +235,7 @@ int efa_base_ep_create_qp(struct efa_base_ep *base_ep,
 {
 	int ret;
 
-	ret = efa_qp_create(&base_ep->qp, init_attr_ex);
+	ret = efa_qp_create(&base_ep->qp, init_attr_ex, base_ep->info->tx_attr->tclass);
 	if (ret)
 		return ret;
 
@@ -208,20 +244,16 @@ int efa_base_ep_create_qp(struct efa_base_ep *base_ep,
 }
 
 static
-int efa_base_ep_enable_qp(struct efa_base_ep *base_ep)
+int efa_base_ep_enable_qp(struct efa_base_ep *base_ep, struct efa_qp *qp)
 {
-	struct efa_qp *qp;
 	int err;
 
-	qp = base_ep->qp;
 	qp->qkey = (base_ep->util_ep.type == FI_EP_DGRAM) ?
 			   EFA_DGRAM_CONNID :
 			   efa_generate_rdm_connid();
 	err = efa_base_ep_modify_qp_rst2rts(base_ep, qp);
 	if (err)
 		return err;
-
-	base_ep->efa_qp_enabled = true;
 
 	qp->qp_num = qp->ibv_qp->qp_num;
 	base_ep->domain->qp_table[qp->qp_num & base_ep->domain->qp_table_sz_m1] = qp;
@@ -248,13 +280,35 @@ int efa_base_ep_create_self_ah(struct efa_base_ep *base_ep, struct ibv_pd *ibv_p
 	return base_ep->self_ah ? 0 : -FI_EINVAL;
 }
 
+void efa_qp_destruct(struct efa_qp *qp)
+{
+	int err;
+
+	err = -ibv_destroy_qp(qp->ibv_qp);
+	if (err)
+		EFA_INFO(FI_LOG_CORE, "destroy qp[%u] failed, err: %s\n", qp->qp_num, fi_strerror(-err));
+	free(qp);
+}
+
 int efa_base_ep_enable(struct efa_base_ep *base_ep)
 {
 	int err;
 
-	err = efa_base_ep_enable_qp(base_ep);
-	if (err)
+	err = efa_base_ep_enable_qp(base_ep, base_ep->qp);
+	if (err) {
+		efa_base_ep_destruct_qp(base_ep);
 		return err;
+	}
+
+	base_ep->efa_qp_enabled = true;
+
+	if (base_ep->user_recv_qp) {
+		err = efa_base_ep_enable_qp(base_ep, base_ep->user_recv_qp);
+		if (err) {
+			efa_base_ep_destruct_qp(base_ep);
+			return err;
+		}
+	}
 
 	memcpy(base_ep->src_addr.raw, base_ep->domain->device->ibv_gid.raw, EFA_GID_LEN);
 	base_ep->src_addr.qpn = base_ep->qp->qp_num;
@@ -296,16 +350,31 @@ int efa_base_ep_construct(struct efa_base_ep *base_ep,
 		return -FI_ENOMEM;
 	}
 
-	base_ep->rnr_retry = efa_env.rnr_retry;
+	/* This is SRD qp's default behavior */
+	base_ep->rnr_retry = EFA_RNR_INFINITE_RETRY;
 
-	base_ep->xmit_more_wr_tail = &base_ep->xmit_more_wr_head;
-	base_ep->recv_more_wr_tail = &base_ep->recv_more_wr_head;
 	base_ep->efa_recv_wr_vec = calloc(sizeof(struct efa_recv_wr), EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV);
 	if (!base_ep->efa_recv_wr_vec) {
 		EFA_WARN(FI_LOG_EP_CTRL, "cannot alloc memory for base_ep->efa_recv_wr_vec!\n");
 		return -FI_ENOMEM;
 	}
+	base_ep->user_recv_wr_vec = calloc(sizeof(struct efa_recv_wr), EFA_RDM_EP_MAX_WR_PER_IBV_POST_RECV);
+	if (!base_ep->user_recv_wr_vec) {
+		EFA_WARN(FI_LOG_EP_CTRL, "cannot alloc memory for base_ep->user_recv_wr_vec!\n");
+		return -FI_ENOMEM;
+	}
+	base_ep->recv_wr_index = 0;
 	base_ep->efa_qp_enabled = false;
+	base_ep->qp = NULL;
+	base_ep->user_recv_qp = NULL;
+
+	/* Use device's native limit as the default value of base ep*/
+	base_ep->max_msg_size = (size_t) base_ep->domain->device->ibv_port_attr.max_msg_sz;
+	base_ep->max_rma_size = (size_t) base_ep->domain->device->max_rdma_size;
+	base_ep->inject_msg_size = (size_t) base_ep->domain->device->efa_attr.inline_buf_size;
+	/* TODO: update inject_rma_size to inline size after firmware
+	 * supports inline rdma write */
+	base_ep->inject_rma_size = 0;
 	return 0;
 }
 
@@ -416,4 +485,262 @@ void efa_base_ep_write_eq_error(struct efa_base_ep *ep, ssize_t err, ssize_t pro
 		err, fi_strerror(err),
 		prov_errno, efa_strerror(prov_errno));
 	abort();
+}
+
+const char *efa_base_ep_raw_addr_str(struct efa_base_ep *base_ep, char *buf, size_t *buflen)
+{
+	return ofi_straddr(buf, buflen, FI_ADDR_EFA, &base_ep->src_addr);
+}
+
+/**
+ * @brief return peer's raw address in #efa_ep_addr
+ *
+ * @param[in] ep		end point
+ * @param[in] addr 		libfabric address
+ * @returns
+ * If peer exists, return peer's raw addrress as pointer to #efa_ep_addr;
+ * Otherwise, return NULL
+ */
+struct efa_ep_addr *efa_base_ep_get_peer_raw_addr(struct efa_base_ep *base_ep, fi_addr_t addr)
+{
+	struct efa_av *efa_av;
+	struct efa_conn *efa_conn;
+
+	efa_av = base_ep->av;
+	efa_conn = efa_av_addr_to_conn(efa_av, addr);
+	return efa_conn ? efa_conn->ep_addr : NULL;
+}
+
+/**
+ * @brief return peer's raw address in a readable string
+ *
+ * @param[in] base_ep   end point
+ * @param[in] addr 		libfabric address
+ * @param[out] buf		a buffer to be used to store string
+ * @param[in,out] buflen	length of `buf` as input. length of the string as output.
+ * @return a string with peer's raw address
+ */
+const char *efa_base_ep_get_peer_raw_addr_str(struct efa_base_ep *base_ep, fi_addr_t addr, char *buf, size_t *buflen)
+{
+	return ofi_straddr(buf, buflen, FI_ADDR_EFA, efa_base_ep_get_peer_raw_addr(base_ep, addr));
+}
+
+struct efa_cq *efa_base_ep_get_tx_cq(struct efa_base_ep *ep)
+{
+	return ep->util_ep.tx_cq ? container_of(ep->util_ep.tx_cq, struct efa_cq, util_cq) : NULL;
+}
+
+struct efa_cq *efa_base_ep_get_rx_cq(struct efa_base_ep *ep)
+{
+	return ep->util_ep.rx_cq ? container_of(ep->util_ep.rx_cq, struct efa_cq, util_cq) : NULL;
+}
+
+/**
+ * @brief Construct the ibv qp init attr for given ep and cq
+ *
+ * @param ep a ptr to the efa_base_ep
+ * @param attr_ex the constructed qp attr
+ * @param tx_cq tx cq
+ * @param rx_cq rx cq
+ */
+static inline
+void efa_base_ep_construct_ibv_qp_init_attr_ex(struct efa_base_ep *ep,
+					struct ibv_qp_init_attr_ex *attr_ex,
+					struct ibv_cq_ex *tx_cq,
+					struct ibv_cq_ex *rx_cq)
+{
+	struct fi_info *info;
+
+	if (ep->info->ep_attr->type == FI_EP_RDM) {
+		attr_ex->qp_type = IBV_QPT_DRIVER;
+		info = ep->domain->device->rdm_info;
+	} else {
+		assert(ep->info->ep_attr->type == FI_EP_DGRAM);
+		attr_ex->qp_type = IBV_QPT_UD;
+		info = ep->domain->device->dgram_info;
+	}
+	attr_ex->cap.max_send_wr = info->tx_attr->size;
+	attr_ex->cap.max_send_sge = info->tx_attr->iov_limit;
+	attr_ex->cap.max_recv_wr = info->rx_attr->size;
+	attr_ex->cap.max_recv_sge = info->rx_attr->iov_limit;
+	attr_ex->cap.max_inline_data = ep->domain->device->efa_attr.inline_buf_size;
+	attr_ex->pd = ep->domain->ibv_pd;
+	attr_ex->qp_context = ep;
+	attr_ex->sq_sig_all = 1;
+
+	attr_ex->send_cq = ibv_cq_ex_to_cq(tx_cq);
+	attr_ex->recv_cq = ibv_cq_ex_to_cq(rx_cq);
+}
+
+/**
+ * @brief check the in order aligned 128 bytes support for a given ibv_wr_op code
+ *
+ * @param ep efa_base_ep
+ * @param op_code ibv wr op code
+ * @return int 0 if in order aligned 128 bytes is supported, -FI_EOPNOTSUPP if
+ * it is not supported. Other negative integer for other errors.
+ */
+int efa_base_ep_check_qp_in_order_aligned_128_bytes(struct efa_base_ep *ep,
+						     enum ibv_wr_opcode op_code)
+{
+	struct efa_qp *qp = NULL;
+	struct ibv_qp_init_attr_ex attr_ex = {0};
+	int ret, retv;
+	struct ibv_cq_ex *ibv_cq_ex = NULL;
+	enum ibv_cq_ex_type ibv_cq_ex_type;
+	struct fi_cq_attr cq_attr = {0};
+
+	ret = efa_cq_ibv_cq_ex_open(&cq_attr, ep->domain->device->ibv_ctx, &ibv_cq_ex, &ibv_cq_ex_type);
+	if (ret) {
+		EFA_WARN(FI_LOG_CQ, "Unable to create extended CQ: %d\n", ret);
+		ret = -FI_EINVAL;
+		goto out;
+	}
+
+	/* Create a dummy qp for query only */
+	efa_base_ep_construct_ibv_qp_init_attr_ex(ep, &attr_ex, ibv_cq_ex, ibv_cq_ex);
+
+	ret = efa_qp_create(&qp, &attr_ex, FI_TC_UNSPEC);
+	if (ret)
+		goto out;
+
+	if (!efa_qp_support_op_in_order_aligned_128_bytes(qp, op_code))
+		ret = -FI_EOPNOTSUPP;
+
+out:
+	if (qp)
+		efa_qp_destruct(qp);
+
+	if (ibv_cq_ex) {
+		retv = -ibv_destroy_cq(ibv_cq_ex_to_cq(ibv_cq_ex));
+		if (retv)
+			EFA_WARN(FI_LOG_EP_CTRL, "Unable to close ibv cq: %s\n",
+				fi_strerror(-retv));
+	}
+	return ret;
+}
+
+/**
+ * @brief Insert tx/rx cq into the cntrs the ep is bind to
+ *
+ * @param ep efa_base_ep
+ * @return int 0 on success, negative integer on failure
+ */
+int efa_base_ep_insert_cntr_ibv_cq_poll_list(struct efa_base_ep *ep)
+{
+	int i, ret;
+	struct efa_cntr *efa_cntr;
+	struct util_cntr *util_cntr;
+	struct efa_cq *tx_cq, *rx_cq;
+
+	tx_cq = efa_base_ep_get_tx_cq(ep);
+	rx_cq = efa_base_ep_get_rx_cq(ep);
+
+	for (i = 0; i < CNTR_CNT; i++) {
+		util_cntr = ep->util_ep.cntrs[i];
+		if (util_cntr) {
+			efa_cntr = container_of(util_cntr, struct efa_cntr, util_cntr);
+			if (tx_cq) {
+				ret = efa_ibv_cq_poll_list_insert(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &tx_cq->ibv_cq);
+				if (ret)
+					return ret;
+			}
+			if (rx_cq) {
+				ret = efa_ibv_cq_poll_list_insert(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &rx_cq->ibv_cq);
+				if (ret)
+					return ret;
+			}
+			ofi_genlock_lock(&efa_cntr->util_cntr.ep_list_lock);
+			efa_cntr->need_to_scan_ep_list = true;
+			ofi_genlock_unlock(&efa_cntr->util_cntr.ep_list_lock);
+		}
+	}
+
+	return FI_SUCCESS;
+}
+
+/**
+ * @brief Remove tx/rx cq from the cntr that ep is bind to
+ *
+ * @param ep efa_base_ep
+ */
+void efa_base_ep_remove_cntr_ibv_cq_poll_list(struct efa_base_ep *ep)
+{
+	int i;
+	struct efa_cntr *efa_cntr;
+	struct util_cntr *util_cntr;
+	struct efa_cq *tx_cq, *rx_cq;
+
+	tx_cq = efa_base_ep_get_tx_cq(ep);
+	rx_cq = efa_base_ep_get_rx_cq(ep);
+
+	for (i = 0; i< CNTR_CNT; i++) {
+		util_cntr = ep->util_ep.cntrs[i];
+		if (util_cntr) {
+			efa_cntr = container_of(util_cntr, struct efa_cntr, util_cntr);
+			if (tx_cq && !ofi_atomic_get32(&tx_cq->util_cq.ref))
+				efa_ibv_cq_poll_list_remove(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &tx_cq->ibv_cq);
+
+			if (rx_cq && !ofi_atomic_get32(&rx_cq->util_cq.ref))
+				efa_ibv_cq_poll_list_remove(&efa_cntr->ibv_cq_poll_list, &efa_cntr->util_cntr.ep_list_lock, &rx_cq->ibv_cq);
+		}
+	}
+}
+
+/**
+ * @brief Create and enable the IBV QP that backs the EP
+ *
+ * @param ep efa_base_ep
+ * @param create_user_recv_qp whether to create the user_recv_qp. This boolean
+ * is only true for the zero copy recv mode in the efa-rdm endpoint
+ *
+ * @return int 0 on success, negative integer on failure
+ */
+int efa_base_ep_create_and_enable_qp(struct efa_base_ep *ep, bool create_user_recv_qp)
+{
+	struct ibv_qp_init_attr_ex attr_ex = { 0 };
+	struct efa_cq *scq, *rcq;
+	struct ibv_cq_ex *tx_ibv_cq, *rx_ibv_cq;
+	int err;
+
+	scq = efa_base_ep_get_tx_cq(ep);
+	rcq = efa_base_ep_get_rx_cq(ep);
+
+	if (!scq && !rcq) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			"Endpoint is not bound to a send or receive completion queue\n");
+		return -FI_ENOCQ;
+	}
+
+	if (!scq && ofi_needs_tx(ep->info->caps)) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			"Endpoint is not bound to a send completion queue when it has transmit capabilities enabled (FI_SEND).\n");
+		return -FI_ENOCQ;
+	}
+
+	if (!rcq && ofi_needs_rx(ep->info->caps)) {
+		EFA_WARN(FI_LOG_EP_CTRL,
+			"Endpoint is not bound to a receive completion queue when it has receive capabilities enabled. (FI_RECV)\n");
+		return -FI_ENOCQ;
+	}
+
+	tx_ibv_cq = scq ? scq->ibv_cq.ibv_cq_ex : rcq->ibv_cq.ibv_cq_ex;
+	rx_ibv_cq = rcq ? rcq->ibv_cq.ibv_cq_ex : scq->ibv_cq.ibv_cq_ex;
+
+	efa_base_ep_construct_ibv_qp_init_attr_ex(ep, &attr_ex, tx_ibv_cq, rx_ibv_cq);
+
+	err = efa_base_ep_create_qp(ep, &attr_ex);
+	if (err)
+		return err;
+
+	if (create_user_recv_qp) {
+		err = efa_qp_create(&ep->user_recv_qp, &attr_ex, ep->info->tx_attr->tclass);
+		if (err) {
+			efa_base_ep_destruct_qp(ep);
+			return err;
+		}
+		ep->user_recv_qp->base_ep = ep;
+	}
+
+	return efa_base_ep_enable(ep);
 }

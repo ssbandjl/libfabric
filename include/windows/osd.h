@@ -930,11 +930,6 @@ static inline char *strcasestr(const char *haystack, const char *needle)
 	return pos;
 }
 
-static inline char *strtok_r(char *str, const char *delimiters, char **saveptr)
-{
-	return strtok_s(str, delimiters, saveptr);
-}
-
 #ifndef _SC_PAGESIZE
 #define _SC_PAGESIZE	0
 #endif
@@ -1008,6 +1003,7 @@ size_t ofi_ifaddr_get_speed(struct ifaddrs *ifa);
 
 #define file2unix_time	10000000i64
 #define win2unix_epoch	116444736000000000i64
+#define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
 
 /* Own implementation of clock_gettime*/
@@ -1053,12 +1049,16 @@ static inline ofi_complex_## type ofi_complex_prod_## type	\
 	res.imag = a.real * b.imag + a.imag * b.real;		\
 	return res;						\
 }								\
+static bool ofi_complex_is_true_## type (ofi_complex_ ## type a)\
+{								\
+	return a.real != 0 || a.imag != 0;			\
+}								\
 static inline ofi_complex_## type ofi_complex_land_## type	\
 	(ofi_complex_## type a, ofi_complex_## type b)		\
 {								\
 	ofi_complex_## type res;				\
-	res.real = (type)(((a.real != 0) || (a.imag != 0)) &&	\
-		((b.real != 0) || (b.imag != 0)));		\
+	res.real = (type)(ofi_complex_is_true_## type (a) &&	\
+			  ofi_complex_is_true_## type (b));	\
 	res.imag = 0;						\
 	return res;						\
 }								\
@@ -1066,8 +1066,8 @@ static inline ofi_complex_## type ofi_complex_lor_## type	\
 	(ofi_complex_## type a, ofi_complex_## type b)		\
 {								\
 	ofi_complex_## type res;				\
-	res.real = (type)(((a.real != 0) || (a.imag != 0)) &&	\
-		((b.real != 0) || (b.imag != 0)));		\
+	res.real = (type)(ofi_complex_is_true_## type (a) ||	\
+			  ofi_complex_is_true_## type (b));	\
 	res.imag = 0;						\
 	return res;						\
 }								\
@@ -1075,10 +1075,10 @@ static inline ofi_complex_## type ofi_complex_lxor_## type	\
 	(ofi_complex_## type a, ofi_complex_## type b)		\
 {								\
 	ofi_complex_## type res;				\
-	res.real = (type)((((a.real != 0) || (a.imag != 0)) &&	\
-		    !((b.real != 0) || (b.imag != 0))) ||	\
-		   (!((a.real != 0) || (a.imag != 0)) &&	\
-		    ((b.real != 0) || (b.imag != 0))));		\
+	res.real = (type)((ofi_complex_is_true_## type (a) &&	\
+			   !ofi_complex_is_true_## type (b))) || \
+			  (!ofi_complex_is_true_## type (a) &&	\
+			   ofi_complex_is_true_## type (b));	\
 	res.imag = 0;						\
 	return res;						\
 }
@@ -1141,6 +1141,23 @@ ofi_cpuid(unsigned func, unsigned subfunc, unsigned cpuinfo[4])
 
 #endif /* defined(_M_X64) || defined(_M_AMD64) */
 
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 202311L)
+    // C23 and above: use thread_local directly
+    #define OFI_THREAD_LOCAL thread_local
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201102L) && defined(_Thread_local)
+    // C11: use _Thread_local
+    #define OFI_THREAD_LOCAL _Thread_local
+#elif defined(__GNUC__) || defined(__INTEL_COMPILER) || defined(__SUNPRO_CC) || defined(__IBMCPP__) || defined(__clang__)
+    // GCC/Clang/Intel/SunPro/IBM compilers
+    #define OFI_THREAD_LOCAL __thread
+#elif defined(_MSC_VER)
+    // Microsoft Visual C++ compiler
+    #define OFI_THREAD_LOCAL __declspec(thread)
+#else
+    // Unsupported compiler
+    #warning "Thread-local storage is not supported on this platform"
+	#define OFI_THREAD_LOCAL
+#endif
 
 #ifdef __cplusplus
 }

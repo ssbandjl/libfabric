@@ -166,7 +166,7 @@ static struct key_t keys[] = {
 		.str = "op",
 		.offset = offsetof(struct ft_set, op),
 		.val_type = VAL_NUM,
-		.val_size = sizeof(((struct ft_set *)0)->op) / FI_ATOMIC_OP_LAST,
+		.val_size = sizeof(((struct ft_set *)0)->op) / OFI_ATOMIC_OP_CNT,
 	},
 	{
 		.str = "datatype",
@@ -373,10 +373,8 @@ static int ft_parse_num(char *str, int len, struct key_t *key, void *buf)
 	} else if (!strncmp(key->str, "threading", strlen("threading"))) {
 		TEST_ENUM_SET_N_RETURN(str, len, FI_THREAD_UNSPEC, int, buf);
 		TEST_ENUM_SET_N_RETURN(str, len, FI_THREAD_SAFE, int, buf);
-		TEST_ENUM_SET_N_RETURN(str, len, FI_THREAD_FID, int, buf);
 		TEST_ENUM_SET_N_RETURN(str, len, FI_THREAD_DOMAIN, int, buf);
 		TEST_ENUM_SET_N_RETURN(str, len, FI_THREAD_COMPLETION, int, buf);
-		TEST_ENUM_SET_N_RETURN(str, len, FI_THREAD_ENDPOINT, int, buf);
 		FT_ERR("Unknown threading level");
 	} else if (!strncmp(key->str, "constant_caps", strlen("constant_caps"))) {
 		TEST_ENUM_SET_N_RETURN(str, len, FI_RMA, uint64_t, buf);
@@ -714,7 +712,7 @@ int fts_info_is_valid(void)
 			return 0;
 	}
 	if (test_info.test_class & (FI_MSG | FI_TAGGED) &&
-	    !ft_check_rx_completion(test_info) &&
+	    !ft_check_rx_completion() &&
 	    !ft_use_comp_cntr(test_info.comp_type))
 		return 0;
 	if (test_info.test_type == FT_TEST_UNIT &&

@@ -610,8 +610,8 @@ int main(int argc, char **argv)
 	}
 
 	hints->mode = FI_CONTEXT | FI_CONTEXT2 | FI_MSG_PREFIX | FI_ASYNC_IOV |
-		FI_RX_CQ_DATA | FI_BUFFERED_RECV;
-	hints->domain_attr->mr_mode = ~(FI_MR_BASIC | FI_MR_SCALABLE);
+		FI_RX_CQ_DATA;
+	hints->domain_attr->mr_mode = ~OFI_MR_DEPRECATED;
 
 	ret = fi_getinfo(FT_FIVERSION, NULL, 0, 0, hints, &fi);
 	if (ret) {

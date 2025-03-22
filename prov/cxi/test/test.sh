@@ -74,18 +74,20 @@ basic_test=("./cxitest --verbose --tap=cxitest.tap -j 1")
 
 swget_test=(
 	"FI_CXI_RGET_TC=BULK_DATA ./cxitest --verbose --filter=\"@(tagged|msg)/*\" --tap=cxitest-swget.tap -j1"
-	"csrutil store csr C_LPE_CFG_GET_CTRL get_en=0 > /dev/null"
-	"csrutil store csr C_LPE_CFG_GET_CTRL get_en=1 > /dev/null")
+	"cxiutil store csr C_LPE_CFG_GET_CTRL get_en=0 > /dev/null"
+	"cxiutil store csr C_LPE_CFG_GET_CTRL get_en=1 > /dev/null")
 
 swget_unaligned_test=(
 	"FI_CXI_RDZV_THRESHOLD=2036 ./cxitest --verbose --filter=\"@(tagged|msg)/*\" --tap=cxitest-swget-unaligned.tap -j1"
-	"csrutil store csr C_LPE_CFG_GET_CTRL get_en=0 > /dev/null"
-	"csrutil store csr C_LPE_CFG_GET_CTRL get_en=1 > /dev/null")
+	"cxiutil store csr C_LPE_CFG_GET_CTRL get_en=0 > /dev/null"
+	"cxiutil store csr C_LPE_CFG_GET_CTRL get_en=1 > /dev/null")
 
 constrained_le_test=(
 	"FI_CXI_DEFAULT_CQ_SIZE=16384 ./cxitest --verbose --filter=\"@(tagged|msg)/fc*\" --tap=cxitest-constrained-le.tap -j1"
-	"MAX_ALLOC=\$(csrutil dump csr le_pools[63] | grep max_alloc | awk '{print \$3}'); echo \"Saving MAX_ALLOC=\$MAX_ALLOC\"; csrutil store csr le_pools[] max_alloc=10 > /dev/null"
-	"echo \"Restoring MAX_ALLOC=\$MAX_ALLOC\"; csrutil store csr le_pools[] max_alloc=\$MAX_ALLOC > /dev/null")
+	"MAX_ALLOC=\$(cxiutil dump csr le_pools[63] | grep max_alloc | awk '{print \$3}'); echo \"Saving MAX_ALLOC=\$MAX_ALLOC\"; 
+	cxiutil store csr le_pools[0] max_alloc=10 > /dev/null; cxiutil store csr le_pools[16] max_alloc=10 > /dev/null;
+	cxiutil store csr le_pools[32] max_alloc=10 > /dev/null; cxiutil store csr le_pools[48] max_alloc=10 > /dev/null"
+	"echo \"Restoring MAX_ALLOC=\$MAX_ALLOC\"; cxiutil store csr le_pools[] max_alloc=\$MAX_ALLOC > /dev/null")
 
 hw_matching_rendezvous_test=(
 	"FI_CXI_DEVICE_NAME=\"cxi1,cxi0\" FI_CXI_RDZV_GET_MIN=0 FI_CXI_RDZV_THRESHOLD=2048 ./cxitest --verbose -j 1 --filter=\"tagged_directed/*\" --tap=cxitest-hw-rdzv-tag-matching.tap")
@@ -119,8 +121,8 @@ zero_eager_size_test=(
 
 alt_read_rendezvous_test=(
 	"FI_CXI_RDZV_PROTO=\"alt_read\" ./cxitest --filter=\"tagged/*rdzv\" -j 1 -f --verbose --tap=cxitest-alt-read-rdzv.tap"
-	"csrutil store csr C_LPE_CFG_GET_CTRL get_en=0 > /dev/null"
-	"csrutil store csr C_LPE_CFG_GET_CTRL get_en=1 > /dev/null")
+	"cxiutil store csr C_LPE_CFG_GET_CTRL get_en=0 > /dev/null"
+	"cxiutil store csr C_LPE_CFG_GET_CTRL get_en=1 > /dev/null")
 
 mr_mode_no_compat_test=(
 	"FI_CXI_COMPAT=0 ./cxitest -j 1 --filter=\"getinfo_infos/*\" -f --verbose --tap=cxitest-mr-mode-no-compat.tap")
@@ -149,6 +151,8 @@ fork_safe_kdreg2_test=(
 unlimited_triggered_ops_test=(
 	"FI_CXI_ENABLE_TRIG_OP_LIMIT=0 ./cxitest -j 1 --verbose --filter=\"deferred_work_trig_op_limit/*\" --tap=cxitest-disable-trig-op-limit.tap")
 
+mr_cache_test=("./cxitest --verbose --tap=cxitest-mr_cache_test.tap --filter=\"mr_cache/*\" -j 1")
+
 long_test_suite=(
 	"basic_test"
 	"swget_test"
@@ -174,6 +178,7 @@ long_test_suite=(
 	"fork_safe_memhooks_test"
 	"fork_safe_kdreg2_test"
 	"unlimited_triggered_ops_test"
+	"mr_cache_test"
 )
 
 # ################################################################

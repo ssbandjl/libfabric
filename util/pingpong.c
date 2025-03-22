@@ -982,7 +982,7 @@ static int generate_test_sizes(struct pp_opts *opts, size_t tx_size, int **sizes
 			n++;
 		}
 	} else {
-		for (i = 0;; i++) {
+		for (i = 0; i < 32; i++) {
 			power_of_two = (i == 0) ? 0 : (1 << i);
 			half_up =
 			    (i == 0) ? 1 : power_of_two + (power_of_two / 2);
@@ -1875,12 +1875,12 @@ static void pp_free_res(struct ct_pingpong *ct)
 {
 	PP_DEBUG("Freeing resources of test suite\n");
 
-	if (ct->mr != &(ct->no_mr))
-		PP_CLOSE_FID(ct->mr);
 	PP_CLOSE_FID(ct->ep);
 	PP_CLOSE_FID(ct->pep);
 	PP_CLOSE_FID(ct->rxcq);
 	PP_CLOSE_FID(ct->txcq);
+	if (ct->mr != &(ct->no_mr))
+		PP_CLOSE_FID(ct->mr);
 	PP_CLOSE_FID(ct->av);
 	PP_CLOSE_FID(ct->eq);
 	PP_CLOSE_FID(ct->domain);
@@ -2002,6 +2002,7 @@ static void pp_pingpong_usage(struct ct_pingpong *ct, char *name, char *desc)
 		"destination control port number (client: 47592)");
 
 	fprintf(stderr, " %-20s %s\n", "-d <domain>", "domain name");
+	fprintf(stderr, " %-20s %s\n", "-f <fabric>", "fabric name");
 	fprintf(stderr, " %-20s %s\n", "-s <source address>",
 		"source address associated with domain name");
 	fprintf(stderr, " %-20s %s\n", "-p <provider>",
@@ -2039,6 +2040,11 @@ static void pp_parse_opts(struct ct_pingpong *ct, int op, char *optarg)
 		 * initialization.
 		 */
 		ct->hints->fabric_attr->prov_name = strdup(optarg);
+		break;
+
+	/* Fabric */
+	case 'f':
+		ct->hints->fabric_attr->name = strdup(optarg);
 		break;
 
 	/* Endpoint */
@@ -2327,7 +2333,7 @@ int main(int argc, char **argv)
 
 	ofi_osd_init();
 
-	while ((op = getopt(argc, argv, "hvd:p:e:I:S:s:B:P:cm:6")) != -1) {
+	while ((op = getopt(argc, argv, "hvd:p:f:e:I:S:s:B:P:cm:6")) != -1) {
 		switch (op) {
 		default:
 			pp_parse_opts(&ct, op, optarg);

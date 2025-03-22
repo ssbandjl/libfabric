@@ -70,13 +70,14 @@ fi_msg_sockets
 # fi_unexpected_msg -e rdm fails with no message
 fi_unexpected_msg -e rdm
 
-# fi_bw -e msg fails with
+# fi_flood -e msg fails with
 # fi_eq_sread(): common/shared.c:1165, ret=-4 (Interrupted system call)
-fi_bw -e msg
+fi_flood -e msg
 
-# fi_bw fails by hanging
+# fi_flood fails by hanging
+# fi_flood fails by runfabtest timeout only on the CI.
 # This is a suspected race condition
-fi_bw
+fi_flood
 
 # fi_msg_pingpong fails with
 # fi_eq_sread(): common/shared.c:1127, ret=-4 (Interrupted system call)
@@ -108,8 +109,11 @@ fi_rma_bw -e msg -o writedata
 # ft_sock_recv(): ubertest/uber.c:356, ret=-107 (Transport endpoint is not connected)
 fi_ubertest
 
-# fi_multinode -C msg fails with no output
-fi_multinode -C msg
+# fi_multinode -x msg fails with no output
+fi_multinode -x msg
 
-# fi_multinode -C rma fails with no output
-fi_multinode -C rma
+# fi_multinode -x rma fails with no output
+fi_multinode -x rma
+
+# multi_recv -e rdm fails by hanging
+multi_recv -e rdm

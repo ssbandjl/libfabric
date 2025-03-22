@@ -184,12 +184,6 @@ static int efa_mr_hmem_setup(struct efa_mr *efa_mr,
 {
 	int err;
 	struct iovec mr_iov = {0};
-
-	if (flags & FI_MR_DMABUF)
-		ofi_mr_get_iov_from_dmabuf(&mr_iov, attr->dmabuf, 1);
-	else
-		mr_iov = *attr->mr_iov;
-
 	efa_mr->peer.flags = flags;
 
 	if (attr->iface == FI_HMEM_SYSTEM) {
@@ -198,7 +192,7 @@ static int efa_mr_hmem_setup(struct efa_mr *efa_mr,
 	}
 
 	if (efa_mr->domain->util_domain.info_domain_caps & FI_HMEM) {
-		if (efa_mr->domain->hmem_info[attr->iface].initialized) {
+		if (g_efa_hmem_info[attr->iface].initialized) {
 			efa_mr->peer.iface = attr->iface;
 		} else {
 			EFA_WARN(FI_LOG_MR,
@@ -227,7 +221,9 @@ static int efa_mr_hmem_setup(struct efa_mr *efa_mr,
 		efa_mr->needs_sync = true;
 		efa_mr->peer.device.cuda = attr->device.cuda;
 
-		if (cuda_is_gdrcopy_enabled()) {
+		/* Only attempt GDRCopy registrations for efa rdm path */
+		if (efa_mr->domain->info_type == EFA_INFO_RDM && !(flags & FI_MR_DMABUF) && cuda_is_gdrcopy_enabled()) {
+			mr_iov = *attr->mr_iov;
 			err = ofi_hmem_dev_register(FI_HMEM_CUDA, mr_iov.iov_base, mr_iov.iov_len,
 						    (uint64_t *)&efa_mr->peer.hmem_data);
 			efa_mr->peer.flags |= OFI_HMEM_DATA_DEV_REG_HANDLE;
@@ -397,14 +393,21 @@ static int efa_mr_dereg_impl(struct efa_mr *efa_mr)
 	struct efa_domain *efa_domain;
 	int ret = 0;
 	int err;
+	size_t ibv_mr_size;
 
 	efa_domain = efa_mr->domain;
 	if (efa_mr->ibv_mr) {
+		ibv_mr_size = efa_mr->ibv_mr->length;
 		err = -ibv_dereg_mr(efa_mr->ibv_mr);
 		if (err) {
 			EFA_WARN(FI_LOG_MR,
 				"Unable to deregister memory registration\n");
 			ret = err;
+		} else {
+			efa_mr->domain->ibv_mr_reg_ct--;
+			efa_mr->domain->ibv_mr_reg_sz -= ibv_mr_size;
+			EFA_INFO(FI_LOG_MR, "Deregistered memory of size %zu for ibv pd %p, total mr reg size %zu, mr reg count %zu\n",
+				 efa_mr->ibv_mr->length, efa_mr->domain->ibv_pd, efa_mr->domain->ibv_mr_reg_sz, efa_mr->domain->ibv_mr_reg_ct);
 		}
 	}
 
@@ -522,61 +525,32 @@ static struct ibv_mr *efa_mr_reg_ibv_mr(struct efa_mr *efa_mr, struct fi_mr_attr
 		);
 
 	/*
-	 * TODO: remove the synapseai and neuron blocks by onboarding the
-	 * ofi_hmem_get_dmabuf_fd API.
+	 * When FI_MR_DMABUF flag is not set,
+	 * only do ibv_reg_mr.
+	 * The only exception is synapseai,
+	 * because dmabuf is the only way
+	 * to register Gaudi device buffer and
+	 * it was implemented before the FI_MR_DMABUF API.
 	 */
-#if HAVE_SYNAPSEAI
 	if (efa_mr_is_synapseai(efa_mr)) {
 		int dmabuf_fd;
 		uint64_t offset;
 		int ret;
 
-		ret = synapseai_get_dmabuf_fd(mr_attr->mr_iov->iov_base,
-						(uint64_t) mr_attr->mr_iov->iov_len,
-						&dmabuf_fd, &offset);
+		ret = ofi_hmem_get_dmabuf_fd(FI_HMEM_SYNAPSEAI,
+					     mr_attr->mr_iov->iov_base,
+					     (uint64_t) mr_attr->mr_iov->iov_len,
+					     &dmabuf_fd, &offset);
 		if (ret != FI_SUCCESS) {
 			EFA_WARN(FI_LOG_MR, "Unable to get dmabuf fd for Gaudi device buffer \n");
 			return NULL;
 		}
+
 		return efa_mr_reg_ibv_dmabuf_mr(efa_mr->domain->ibv_pd, offset,
 					mr_attr->mr_iov->iov_len,
 					(uint64_t)mr_attr->mr_iov->iov_base,
 					dmabuf_fd, access);
 	}
-#endif
-
-#if HAVE_NEURON
-	if (efa_mr_is_neuron(efa_mr)) {
-		int dmabuf_fd;
-		uint64_t offset;
-		int ret;
-
-		ret = neuron_get_dmabuf_fd(
-				mr_attr->mr_iov->iov_base,
-				mr_attr->mr_iov->iov_len,
-				&dmabuf_fd,
-				&offset);
-
-		if (ret == FI_SUCCESS) {
-			/* Success => invoke ibv_reg_dmabuf_mr */
-			return efa_mr_reg_ibv_dmabuf_mr(
-					efa_mr->domain->ibv_pd, 0,
-					mr_attr->mr_iov->iov_len,
-					(uint64_t)mr_attr->mr_iov->iov_base,
-					dmabuf_fd, access);
-		} else if (ret == -FI_ENOPROTOOPT) {
-			/* Protocol not availabe => fallback */
-			EFA_INFO(FI_LOG_MR,
-				"Unable to get dmabuf fd for Neuron device buffer, "
-				"Fall back to ibv_reg_mr\n");
-			return ibv_reg_mr(
-				efa_mr->domain->ibv_pd,
-				(void *)mr_attr->mr_iov->iov_base,
-				mr_attr->mr_iov->iov_len, access);
-		}
-		return NULL;
-	}
-#endif
 
 	return ibv_reg_mr(efa_mr->domain->ibv_pd,
 			(void *)mr_attr->mr_iov->iov_base,
@@ -665,12 +639,12 @@ int efa_mr_update_domain_mr_map(struct efa_mr *efa_mr, struct fi_mr_attr *mr_att
 	if (err != -FI_ENOKEY) {
 		/* no way we can recover from this error, return error code */
 		EFA_WARN(FI_LOG_MR,
-			"Unable to add MR to map. errno: %d errmsg: (%s) key: %ld buff: %p hmem_iface: %d len: %zu\n",
+			"Unable to add MR to map. errno: %d errmsg: (%s) key: %ld buff: %p hmem_iface: %s len: %zu\n",
 			err,
 			fi_strerror(-err),
 			efa_mr->mr_fid.key,
 			mr_attr->mr_iov->iov_base,
-			mr_attr->iface,
+			fi_tostr(&mr_attr->iface, FI_TYPE_HMEM_IFACE),
 			mr_attr->mr_iov->iov_len);
 		return err;
 	}
@@ -681,10 +655,10 @@ int efa_mr_update_domain_mr_map(struct efa_mr *efa_mr, struct fi_mr_attr *mr_att
 
 	if (existing_mr->peer.iface != FI_HMEM_CUDA) {
 		/* no way we can recover from this situation, return error code */
-		EFA_WARN(FI_LOG_DOMAIN, "key %ld already assigned to buffer: %p hmem_iface: %d length: %ld\n",
+		EFA_WARN(FI_LOG_DOMAIN, "key %ld already assigned to buffer: %p hmem_iface: %s length: %ld\n",
 			 existing_mr->mr_fid.key,
 			 existing_mr->ibv_mr->addr,
-			 existing_mr->peer.iface,
+			 fi_tostr(&existing_mr->peer.iface, FI_TYPE_HMEM_IFACE),
 			 existing_mr->ibv_mr->length);
 		return -FI_ENOKEY;
 	}
@@ -731,12 +705,12 @@ int efa_mr_update_domain_mr_map(struct efa_mr *efa_mr, struct fi_mr_attr *mr_att
 	if (err) {
 		EFA_WARN(FI_LOG_MR,
 			"Unable to add MR to map, even though we already tried to evict staled memory registration."
-			"errno: %d errmsg: (%s) key: %ld buff: %p hmem_iface: %d len: %zu\n",
+			"errno: %d errmsg: (%s) key: %ld buff: %p hmem_iface: %s len: %zu\n",
 			err,
 			fi_strerror(-err),
 			efa_mr->mr_fid.key,
 			mr_attr->mr_iov->iov_base,
-			mr_attr->iface,
+			fi_tostr(&mr_attr->iface, FI_TYPE_HMEM_IFACE),
 			mr_attr->mr_iov->iov_len);
 		return err;
 	}
@@ -757,12 +731,12 @@ int efa_mr_update_domain_mr_map(struct efa_mr *efa_mr, struct fi_mr_attr *mr_att
 	ofi_genlock_unlock(&efa_mr->domain->util_domain.lock);
 	if (err) {
 		EFA_WARN(FI_LOG_MR,
-			"Unable to add MR to map. errno: %d errmsg: (%s) key: %ld buff: %p hmem_iface: %d len: %zu\n",
+			"Unable to add MR to map. errno: %d errmsg: (%s) key: %ld buff: %p hmem_iface: %s len: %zu\n",
 			err,
 			fi_strerror(-err),
 			efa_mr->mr_fid.key,
 			mr_attr->mr_iov->iov_base,
-			mr_attr->iface,
+			fi_tostr(&mr_attr->iface, FI_TYPE_HMEM_IFACE),
 			mr_attr->mr_iov->iov_len);
 		return err;
 	}
@@ -840,21 +814,26 @@ static int efa_mr_reg_impl(struct efa_mr *efa_mr, uint64_t flags, const void *at
 	 * For FI_HMEM_CUDA iface when p2p is unavailable, skip ibv_reg_mr() and
 	 * generate proprietary mr_fid key.
 	 */
-	if (mr_attr.iface == FI_HMEM_CUDA && !efa_mr->domain->hmem_info[FI_HMEM_CUDA].p2p_supported_by_device) {
+	if (mr_attr.iface == FI_HMEM_CUDA && !g_efa_hmem_info[FI_HMEM_CUDA].p2p_supported_by_device) {
 		efa_mr->mr_fid.key = efa_mr_cuda_non_p2p_keygen();
 	} else {
 		efa_mr->ibv_mr = efa_mr_reg_ibv_mr(efa_mr, &mr_attr, fi_ibv_access, flags);
 		if (!efa_mr->ibv_mr) {
-			EFA_WARN(FI_LOG_MR, "Unable to register MR: %s\n",
-					fi_strerror(-errno));
+			EFA_WARN(FI_LOG_MR, "Unable to register MR of %zu bytes: %s, ibv pd: %p, total mr reg size %zu, mr reg count %zu\n",
+				 (flags & FI_MR_DMABUF) ? mr_attr.dmabuf->len : mr_attr.mr_iov->iov_len, fi_strerror(-errno), efa_mr->domain->ibv_pd,
+				 efa_mr->domain->ibv_mr_reg_sz, efa_mr->domain->ibv_mr_reg_ct);
 			if (efa_mr->peer.iface == FI_HMEM_CUDA &&
 			    (efa_mr->peer.flags & OFI_HMEM_DATA_DEV_REG_HANDLE)) {
-					assert(efa_mr->peer.hmem_data);
-					ofi_hmem_dev_unregister(FI_HMEM_CUDA, (uint64_t)efa_mr->peer.hmem_data);
-				}
+				assert(efa_mr->peer.hmem_data);
+				ofi_hmem_dev_unregister(FI_HMEM_CUDA, (uint64_t)efa_mr->peer.hmem_data);
+			}
 
 			return -errno;
 		}
+		efa_mr->domain->ibv_mr_reg_ct++;
+		efa_mr->domain->ibv_mr_reg_sz += efa_mr->ibv_mr->length;
+		EFA_INFO(FI_LOG_MR, "Registered memory of size %zu for ibv pd %p, total mr reg size %zu, mr reg count %zu\n",
+			 efa_mr->ibv_mr->length, efa_mr->domain->ibv_pd, efa_mr->domain->ibv_mr_reg_sz, efa_mr->domain->ibv_mr_reg_ct);
 		efa_mr->mr_fid.key = efa_mr->ibv_mr->rkey;
 	}
 	efa_mr->mr_fid.mem_desc = efa_mr;

@@ -59,13 +59,13 @@
 #include "ips_config.h"
 #include "psm_user.h"
 
-#include "ips_tid.h"
 #include "ips_recvhdrq.h"
 #include "ips_epstate.h"
 #include "ips_proto_am.h"
 #include "ips_tidflow.h"
 #include "ips_path_rec.h"
 
+#if defined(PSM_SOCKETS) && defined(USE_UDP)
 // when defined, this enables use of byte based flow credits in addition
 // to packet based.
 // It can help UDP to avoid overflowing the sockets kernel buffers.
@@ -73,6 +73,7 @@
 // memory at scale.
 // UD/RC, TCP and OPA HALs self configure so this has no effect
 #define PSM_BYTE_FLOW_CREDITS
+#endif
 
 typedef enum ips_path_type {
 	IPS_PATH_LOW_PRIORITY,
@@ -93,8 +94,8 @@ struct ips_epinfo {
 	uint8_t ep_lmc;
 	enum psm3_ibv_rate ep_link_rate;
 	uint16_t ep_sl;		/* PSM3_NIC_SL only when path record not used */
-	uint32_t ep_mtu;	// PSM payload after potential hdr & PSM3_MTU decrease
-				// or TCP increase beyond wire size
+	uint32_t ep_mtu;	// PSM payload after potential hdr & PSM3_MTU adjustment
+	                	// for TCP and RC it can be beyond wire size
 	uint16_t ep_pkey;	/* PSM3_PKEY only when path record not used */
 	uint64_t ep_timeout_ack;	/* PSM3_ERRCHK_TIMEOUT if no path record */
 	uint64_t ep_timeout_ack_max;
@@ -328,7 +329,6 @@ typedef enum psm_transfer_type {
 
 typedef enum psm_protocol_type {
 	PSM_PROTOCOL_GO_BACK_N = 0,
-	PSM_PROTOCOL_TIDFLOW,
 	PSM_PROTOCOL_LAST	/* Keep this the last protocol type */
 } psm_protocol_type_t;
 
@@ -356,7 +356,7 @@ struct ips_proto {
 	uint32_t iovec_thresh_eager_blocking;
 #endif
 #ifdef PSM_HAVE_REG_MR
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 	uint32_t iovec_gpu_thresh_eager;
 	uint32_t iovec_gpu_thresh_eager_blocking;
 #endif
@@ -369,6 +369,10 @@ struct ips_proto {
 #ifdef PSM_BYTE_FLOW_CREDITS
 	uint32_t flow_credit_bytes;	// credit limit in bytes
 #endif
+	uint16_t min_credits;		// min credits
+	uint16_t max_credits;		// max credits
+	uint16_t credits_adjust;	// credit adjusting amount
+	uint16_t credits_inc_thresh;	// credit increase threshold
 	mpool_t pend_sends_pool;
 	struct ips_ibta_compliance_fn ibta;
 	struct ips_proto_stats stats;
@@ -427,21 +431,12 @@ struct ips_proto {
 	void *opp_ctxt;
 	struct opp_api opp_fn;
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 	struct ips_gpu_hostbuf_mpool_cb_context gpu_hostbuf_send_cfg;
 	struct ips_gpu_hostbuf_mpool_cb_context gpu_hostbuf_small_send_cfg;
 	mpool_t gpu_hostbuf_pool_send;
 	mpool_t gpu_hostbuf_pool_small_send;
-#endif
-
-#ifdef PSM_CUDA
-	CUstream cudastream_send;
-#elif defined(PSM_ONEAPI)
-	/* Will not be used if psm3_oneapi_immed_async_copy */
-	ze_command_queue_handle_t cq_sends[MAX_ZE_DEVICES];
-#endif
-
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+	union ips_proto_gpu_specific gpu_specific;
 	unsigned gpu_prefetch_limit;
 #endif
 /*
@@ -510,8 +505,6 @@ struct ips_flow {
 	uint16_t protocol:3;	/* go-back-n or tidflow */
 	uint16_t flags:8;	/* flow state flags */
 
-	// TBD - cwin only needed for OPA for CCA
-	uint16_t cwin;		/* Size of congestion window in packets */
 	// to allow for good pipelining of send/ACK need to trigger an ack at
 	// least every ack_interval packets (roughy flow_credits/4) or every
 	// ack_inteval_bytes bytes (roughly flow_credit_bytes/4) whichever
@@ -537,12 +530,14 @@ struct ips_flow {
 	// For UDP, sockets has byte oriented buffering so we need to
 	// impose a credit_bytes limit to allow sufficient pkt credits
 	// but avoid sockets buffer overflow and recv side discards/flow control
-	int16_t  credits;	/* Current credits available to send on flow */
+	int16_t  credits;	 /* Current credits available to send on flow */
+	uint16_t max_credits;	 /* credits limit */
+	uint32_t credits_inc_psn; /* the reference pkt psn used for increasing credit. We increase */
+	                         /* credit if current psn - credits_inc_psn > credit_inc_thresh */
 #ifdef PSM_BYTE_FLOW_CREDITS
 	int32_t  credit_bytes;	/* Current credit bytes avail to send on flow */
 #endif
 	uint32_t ack_index;     /* Index of the last ACK message type in pending message queue */
-
 	psmi_seqnum_t xmit_seq_num;	/* next psn for xmit */
 	psmi_seqnum_t xmit_ack_num;	/* last xmited psn acked + 1 */
 	psmi_seqnum_t recv_seq_num;	/* next psn expect to recv */
@@ -652,6 +647,21 @@ struct ips_epaddr {
 			uint32_t use_max_inline_data;
 
 			uint8_t rc_connected;
+
+			// MR for flow->recv_seq_num
+			struct ibv_mr *recv_seq_mr;
+			// remote flow->recv_seq_num addr and rkey
+			uint64_t remote_recv_seq_addr;
+			uint32_t remote_recv_seq_rkey;
+			// psn num of remote flow->recv_seq_num
+			uint32_t remote_recv_psn;
+			// MR for remote flow->recv_seq_num storage
+			struct ibv_mr *remote_recv_psn_mr;
+			// indicare whether we have outstanding RDMA Read for
+			// remote flow->recv_seq_num
+			uint8_t remote_seq_outstanding;
+			// congestion control count
+			uint16_t cc_count;
 #endif /* USE_RC */
 		} verbs;
 #endif /* PSM_VERBS */
@@ -834,7 +844,7 @@ MOCK_DCL_EPILOGUE(psm3_ips_ibta_init);
 psm2_error_t psm3_ips_ibta_fini(struct ips_proto *proto);
 
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 PSMI_ALWAYS_INLINE(
 uint32_t ips_gpu_next_window(uint32_t max_window, uint32_t offset,
 			      uint32_t len))

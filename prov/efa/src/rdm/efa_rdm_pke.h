@@ -14,6 +14,7 @@
 #define EFA_RDM_PKE_LOCAL_READ		BIT_ULL(2) /**< this packet entry is used as context of a local read operation */
 #define EFA_RDM_PKE_DC_LONGCTS_DATA	BIT_ULL(3) /**< this DATA packet entry is used by a delivery complete LONGCTS send/write protocol*/
 #define EFA_RDM_PKE_LOCAL_WRITE		BIT_ULL(4) /**< this packet entry is used as context of an RDMA Write to self */
+#define EFA_RDM_PKE_SEND_TO_USER_RECV_QP	BIT_ULL(5) /**< this packet entry is used for posting send to a dedicated QP that doesn't expect any pkt hdrs */
 
 #define EFA_RDM_PKE_ALIGNMENT		128
 
@@ -25,7 +26,7 @@ enum efa_rdm_pke_alloc_type {
 	EFA_RDM_PKE_FROM_EFA_RX_POOL,     /**< packet is allocated from `ep->efa_rx_pkt_pool` */
 	EFA_RDM_PKE_FROM_UNEXP_POOL,      /**< packet is allocated from `ep->rx_unexp_pkt_pool` */
 	EFA_RDM_PKE_FROM_OOO_POOL,	      /**< packet is allocated from `ep->rx_ooo_pkt_pool` */
-	EFA_RDM_PKE_FROM_USER_BUFFER,     /**< packet is from user provided buffer` */
+	EFA_RDM_PKE_FROM_USER_RX_POOL,     /**< packet is allocated from `ep->user_rx_pkt_pool` */
 	EFA_RDM_PKE_FROM_READ_COPY_POOL,  /**< packet is allocated from `ep->rx_readcopy_pkt_pool` */
 };
 
@@ -194,7 +195,7 @@ struct efa_rdm_pke {
 	_Alignas(EFA_RDM_PKE_ALIGNMENT) char wiredata[0];
 };
 
-#if defined(static_assert) && defined(__x86_64__)
+#if defined(static_assert)
 static_assert(sizeof (struct efa_rdm_pke) % EFA_RDM_PKE_ALIGNMENT == 0, "efa_rdm_pke alignment check");
 #endif
 
@@ -214,6 +215,8 @@ void efa_rdm_pke_release_tx(struct efa_rdm_pke *pkt_entry);
 
 void efa_rdm_pke_release_rx(struct efa_rdm_pke *pkt_entry);
 
+void efa_rdm_pke_release_rx_list(struct efa_rdm_pke *pkt_entry);
+
 void efa_rdm_pke_release(struct efa_rdm_pke *pkt_entry);
 
 void efa_rdm_pke_append(struct efa_rdm_pke *dst,
@@ -227,7 +230,7 @@ struct efa_rdm_pke *efa_rdm_pke_clone(struct efa_rdm_pke *src,
 struct efa_rdm_pke *efa_rdm_pke_get_unexp(struct efa_rdm_pke **pkt_entry_ptr);
 
 ssize_t efa_rdm_pke_sendv(struct efa_rdm_pke **pkt_entry_vec,
-			  int pkt_entry_cnt);
+			  int pkt_entry_cnt, uint64_t flags);
 
 int efa_rdm_pke_read(struct efa_rdm_pke *pkt_entry,
 		     void *local_buf, size_t len, void *desc,
@@ -235,6 +238,9 @@ int efa_rdm_pke_read(struct efa_rdm_pke *pkt_entry,
 
 ssize_t efa_rdm_pke_recvv(struct efa_rdm_pke **pke_vec,
 			  int pke_cnt);
+
+ssize_t efa_rdm_pke_user_recvv(struct efa_rdm_pke **pke_vec,
+			  int pke_cnt, uint64_t flags);
 
 int efa_rdm_pke_write(struct efa_rdm_pke *pkt_entry);
 #endif

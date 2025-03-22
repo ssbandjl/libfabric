@@ -81,10 +81,10 @@
 #define CTRL_MSG_DISCONNECT_REQUEST_QUEUED	0x0080
 #define CTRL_MSG_DISCONNECT_REPLY_QUEUED	0x0100
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
-uint32_t gpudirect_rdma_send_limit;
-uint32_t gpudirect_rdma_recv_limit;
-#endif
+#define CREDITS_INC_THRESH 2048
+// we are using 31 bits psn, and int16_t for psn diff on nak detection
+// to play safe we set max credit to 16384
+#define IPS_MAX_CREDIT 16384
 
 static void ctrlq_init(struct ips_ctrlq *ctrlq, struct ips_proto *proto);
 
@@ -93,18 +93,72 @@ static psm2_error_t proto_sdma_init(struct ips_proto *proto);
 #endif
 static psm2_error_t ips_proto_register_stats(struct ips_proto *proto);
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 void psmi_gpu_hostbuf_alloc_func(int is_alloc, void *context, void *obj)
 {
 	struct ips_gpu_hostbuf *icb = (struct ips_gpu_hostbuf *)obj;
 	if (is_alloc) {
 		PSM3_GPU_HOSTBUF_LAZY_INIT(icb);
+		icb->host_buf = NULL;
 	} else {
 		PSM3_GPU_HOSTBUF_DESTROY(icb);
 	}
 	return;
 }
-#endif /* PSM_CUDA || PSM_ONEAPI */
+#endif /* PSM_HAVE_GPU */
+
+static int parse_flow_credits(const char *str,
+			size_t errstr_size, char errstr[],
+			int tvals[3])
+{
+	psmi_assert(tvals);
+	int ntup = psm3_count_tuples(str);
+	int ret = psm3_parse_str_tuples(str, ntup, tvals);
+	if (ret < 0)
+		return ret;
+        // back compatibility - when only one value specified, set max=min, step=0
+        // this also can make value check to be accurate
+	if (ntup == 1) {
+		tvals[1] = tvals[0];
+		tvals[2] = 0;
+	}
+	if (tvals[0] < 0 || tvals[1] < 0 || tvals[2] < 0) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " Negative values not allowed");
+		return -2;
+	}
+	if (tvals[0] > IPS_MAX_CREDIT || tvals[1] > IPS_MAX_CREDIT || tvals[2] > IPS_MAX_CREDIT) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " Max allowed is %u", IPS_MAX_CREDIT);
+		return -2;
+	}
+	if (tvals[0] == 0 || tvals[1] == 0) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " Zero values not allowed on min, max");
+		return -2;
+	}
+	if (tvals[1] > tvals[0] && tvals[2] == 0) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " Zero values not allowed on adjust when max > min");
+		return -2;
+	}
+	if (tvals[0] > tvals[1]) {
+		if (errstr_size)
+			snprintf(errstr, errstr_size, " min (%d) must be <= max (%d)", tvals[0], tvals[1]);
+		return -2;
+	}
+	return 0;
+}
+
+static int parse_check_flow_credits(int type,
+			const union psmi_envvar_val val, void *ptr,
+			size_t errstr_size, char errstr[])
+{
+	// parser will set tvals to result, use a copy to protect input of defaults
+	int tvals[3] = { ((int*)ptr)[0], ((int*)ptr)[1], ((int*)ptr)[2]};
+	psmi_assert(type == PSMI_ENVVAR_TYPE_STR_TUPLES);
+	return parse_flow_credits(val.e_str, errstr_size, errstr, tvals);
+}
 
 psm2_error_t
 psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
@@ -133,15 +187,71 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 	{
 		/* Number of credits per flow */
 		union psmi_envvar_val env_flow_credits;
-		int df_flow_credits = min(PSM2_FLOW_CREDITS, num_of_send_desc);
+#ifdef PSM_VERBS
+		int min_credits = IPS_PROTOEXP_FLAG_RDMA_QP(proto->ep->rdmamode) == IPS_PROTOEXP_FLAG_RDMA_USER_RC ?
+				IPS_PROTO_FLOW_CREDITS_RC_MIN_DEFAULT : IPS_PROTO_FLOW_CREDITS_MIN_DEFAULT;
+		int max_credits = IPS_PROTOEXP_FLAG_RDMA_QP(proto->ep->rdmamode) == IPS_PROTOEXP_FLAG_RDMA_USER_RC ?
+				IPS_PROTO_FLOW_CREDITS_RC_MAX_DEFAULT : IPS_PROTO_FLOW_CREDITS_MAX_DEFAULT;
+		int tvals[3] = {
+			min(min_credits, num_of_send_desc),
+			min(max_credits, num_of_send_desc),
+			IPS_PROTO_FLOW_CREDITS_STEP_DEFAULT
+		};
+#else
+		int tvals[3] = {
+			min(IPS_PROTO_FLOW_CREDITS_MIN_DEFAULT, num_of_send_desc),
+			min(IPS_PROTO_FLOW_CREDITS_MAX_DEFAULT, num_of_send_desc),
+			IPS_PROTO_FLOW_CREDITS_STEP_DEFAULT
+		};
+#endif
+		char fcredits_def[32];
+		snprintf(fcredits_def, sizeof(fcredits_def), "%d:%d:%d", tvals[0], tvals[1], tvals[2]);
 
-		psm3_getenv("PSM3_FLOW_CREDITS",
-			    "Number of unacked packets (credits) per flow (default is 64)",
-			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
-			    (union psmi_envvar_val)df_flow_credits,
+		(void)psm3_getenv_range("PSM3_FLOW_CREDITS",
+			    "Number of unacked packets (credits) per flow in <min:max:adjust>",
+			    "Specified as min:max:adjust where min and max is the range of credits,\n"
+			    "and adjust is the adjustment amount for adjusting credits. For PSM3_RDMA=3,\n"
+				"adjust is ignored. Data send pauses when number of unacked packets is beyond\n"
+				"max credits, and send resumes when the number is below min credits",
+			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR_TUPLES,
+			    (union psmi_envvar_val)fcredits_def,
+			    (union psmi_envvar_val)NULL, (union psmi_envvar_val)NULL,
+			    parse_check_flow_credits, tvals,
 			    &env_flow_credits);
-		proto->flow_credits = env_flow_credits.e_uint;
+		if (parse_flow_credits(env_flow_credits.e_str, 0, NULL, tvals) < 0) {
+                	// already checked, shouldn't get parse errors nor empty strings
+                	psmi_assert(0);
+                }
+                if (tvals[0] > num_of_send_desc) {
+                	tvals[0] = num_of_send_desc;
+                }
+                if (tvals[1] > num_of_send_desc) {
+                	tvals[1] = num_of_send_desc;
+                }
+
+                // set init flow credits. Use PSM2_FLOW_CREDITS when possible
+		int df_flow_credits = min(PSM2_FLOW_CREDITS, num_of_send_desc);
+		if (df_flow_credits > tvals[0] && df_flow_credits < tvals[1]) {
+			proto->flow_credits = df_flow_credits;
+		} else {
+			proto->flow_credits = (tvals[0] + tvals[1]) / 2;
+		}
+		proto->min_credits = tvals[0];
+		proto->max_credits = tvals[1];
+		proto->credits_adjust = tvals[2];
 	}
+
+	{
+		union psmi_envvar_val env_thresh;
+		psm3_getenv_range("PSM3_CREDITS_INC_THRESH",
+			    "Threshold for increasing credits", NULL,
+			    PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_UINT,
+			    (union psmi_envvar_val)CREDITS_INC_THRESH,
+			    (union psmi_envvar_val)0, (union psmi_envvar_val)UINT16_MAX,
+			    NULL, NULL, &env_thresh);
+		proto->credits_inc_thresh = env_thresh.e_uint;
+	}
+
 
 	/*
 	 * Checksum packets within PSM. Default is off.
@@ -197,7 +307,7 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 		proto->multirail_thresh_load_balance = env_thresh_load_balance.e_uint;
 	}
 
-	/* Initialize IBTA related stuff (path record, SL2VL, CCA etc.) */
+	/* Initialize IBTA related stuff (path record, etc.) */
 	if ((err = psm3_ips_ibta_init(proto)))
 		goto fail;
 
@@ -233,9 +343,6 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 			proto->flags |= IPS_PROTO_FLAG_COALESCE_ACKS;
 	}
 
-	/*
-	 * Initialize SDMA, otherwise, turn on all PIO.
-	 */
 	// initialize sdma after PSM3_MR_CACHE_MODE
 	proto->flags |= IPS_PROTO_FLAG_SPIO;
 
@@ -316,13 +423,12 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 	 * If we enable tid-based expected rendezvous, the expected protocol code
 	 * handles its own rv scb buffers.  If not, we have to enable eager-based
 	 * rendezvous and we allocate scb buffers for it.
-	 * For UD PSM3_RDMA (ep->rdmamode) controls our use of RDMA for Rendezvous
-	 * For STL100 PSM3_TID controls use of EXPTID for Rendezvous
+	 * For verbs PSM3_RDMA (ep->rdmamode) controls our use of RDMA for Rendezvous
 	 */
 	protoexp_flags = proto->ep->rdmamode;	// PSM3_RDMA
 
-	// protoexp implements RDMA for UD and TID for STL100 native.  N/A to UDP
-	// when proto->protoexp is NULL, we will not attempt to use TID nor RDMA
+	// protoexp implements RDMA for verbs.  N/A to sockets
+	// when proto->protoexp is NULL, we will not attempt to use RDMA
 	{
 		(void)protoexp_flags;
 		// for UD, even when RDMA is enabled, we may fall back to LONG_DATA
@@ -350,7 +456,7 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 			goto fail;
 	}
 	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSM3_GPU_PREPARE_DTOH_MEMCPYS(proto);
 #endif
 		if ((err = psm3_ips_protoexp_init(proto, protoexp_flags,
@@ -378,59 +484,56 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 				     &proto->proto_am)))
 		goto fail;
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
-	is_gpudirect_enabled = psmi_parse_gpudirect();
-	gpudirect_rdma_send_limit = psmi_parse_gpudirect_rdma_send_limit(0);
-	gpudirect_rdma_recv_limit = psmi_parse_gpudirect_rdma_recv_limit(0);
+#ifdef PSM_HAVE_GPU
+	psm3_gpu_is_gpudirect_enabled = psmi_parse_gpudirect();
+	psm3_gpu_gpudirect_rdma_send_limit = psmi_parse_gpudirect_rdma_send_limit(0);
+	psm3_gpu_gpudirect_rdma_recv_limit = psmi_parse_gpudirect_rdma_recv_limit(0);
+#ifdef PSM_HAVE_RNDV_MOD
 	if (psmi_hal_has_cap(PSM_HAL_CAP_GPUDIRECT))
-		is_driver_gpudirect_enabled = 1;
+		psm3_gpu_is_driver_gpudirect_enabled = 1;
 	/* Check for mismatch between PSM3 and RV module */
-#ifdef PSM_CUDA
-	if (psmi_hal_has_cap(PSM_HAL_CAP_INTEL_GPU) &&
-	    !psmi_hal_has_cap(PSM_HAL_CAP_NVIDIA_GPU))
-		is_driver_gpudirect_enabled = 0;
+	if (! psmi_hal_has_cap(PSM3_GPU_HAL_CAP_EXPECTED))
+		psm3_gpu_is_driver_gpudirect_enabled = 0;
 #else
-	if (psmi_hal_has_cap(PSM_HAL_CAP_NVIDIA_GPU) &&
-	    !psmi_hal_has_cap(PSM_HAL_CAP_INTEL_GPU))
-		is_driver_gpudirect_enabled = 0;
+	psm3_gpu_is_driver_gpudirect_enabled = 0;
 #endif
 
-	if (! is_gpudirect_enabled) {
-		gpudirect_rdma_send_limit = gpudirect_rdma_recv_limit = 0;
-	} else if (PSMI_IS_GPU_DISABLED) {
-#ifdef PSM_CUDA
-		// should not happen since we don't dynamically disable CUDA
-		_HFI_INFO("WARNING: Non-CUDA application, PSM3_GPUDIRECT option ignored\n");
-#else
-		// should not happen since we don't dynamically disable ONEAPI_ZE
-		_HFI_INFO("WARNING: Non-ONEAPI_ZE application, PSM3_GPUDIRECT option ignored\n");
-#endif
-		is_gpudirect_enabled = 0;
-		gpudirect_rdma_send_limit = gpudirect_rdma_recv_limit = 0;
-	} else if (!device_support_gpudirect()) {
+	if (! psm3_gpu_is_gpudirect_enabled) {
+		psm3_gpu_gpudirect_rdma_send_limit = psm3_gpu_gpudirect_rdma_recv_limit = 0;
+	} else if (! PSM3_GPU_IS_ENABLED) {
+		// should not happen since we test psmi_parse_gpudirect earlier
+		// and it will trigger initialization of the proper GPU.  Then
+		// we provide no disabling of the GPU per EP.
+		_HFI_INFO("WARNING: Non-GPU application, PSM3_GPUDIRECT option ignored\n");
+		psm3_gpu_is_gpudirect_enabled = 0;
+		psm3_gpu_gpudirect_rdma_send_limit = psm3_gpu_gpudirect_rdma_recv_limit = 0;
+	} else if (!PSM3_GPU_GPUDIRECT_SUPPORTED()) {
 		_HFI_INFO("WARNING: GPU device does not support GPU Direct, PSM3_GPUDIRECT option ignored\n");
-		is_gpudirect_enabled = 0;
-		gpudirect_rdma_send_limit = gpudirect_rdma_recv_limit = 0;
-	} else if (
-		PSMI_IS_DRIVER_GPUDIRECT_DISABLED) {
+		psm3_gpu_is_gpudirect_enabled = 0;
+		psm3_gpu_gpudirect_rdma_send_limit = psm3_gpu_gpudirect_rdma_recv_limit = 0;
+	} else if (! PSM3_GPU_IS_DRIVER_GPUDIRECT_ENABLED) {
+#ifdef PSM_HAVE_RNDV_MOD
+		char buf[100];
+		PSM3_GPU_RV_CAP_STRING(buf, sizeof(buf), PSM3_GPU_RV_CAPABILITY_EXPECTED);
 		err = psm3_handle_error(PSMI_EP_NORETURN,
 				PSM2_INTERNAL_ERR,
-#ifdef PSM_CUDA
-				"Unable to start run, PSM3_GPUDIRECT requires rv module with CUDA support.\n");
+				"Unable to start run, PSM3_GPUDIRECT requires rv module with %s support.\n", buf);
 #else
-				"Unable to start run, PSM3_GPUDIRECT requires rv module with ONEAPI_ZE support.\n");
+		err = psm3_handle_error(PSMI_EP_NORETURN,
+				PSM2_INTERNAL_ERR,
+				"Unable to start run, PSM3_GPUDIRECT requires rv module with GPU support.\n");
 #endif
 	} else if (!(protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED)) {
 		// only GDR Copy and GPU Send DMA allowed
-		gpudirect_rdma_send_limit = gpudirect_rdma_recv_limit = 0;
+		psm3_gpu_gpudirect_rdma_send_limit = psm3_gpu_gpudirect_rdma_recv_limit = 0;
 	} else {
-		if (gpudirect_rdma_send_limit)
+		if (psm3_gpu_gpudirect_rdma_send_limit)
 			proto->flags |= IPS_PROTO_FLAG_GPUDIRECT_RDMA_SEND;
-		if (gpudirect_rdma_recv_limit)
+		if (psm3_gpu_gpudirect_rdma_recv_limit)
 			proto->flags |= IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV;
 	}
 	// from here forward can't use psmi_parse_gpudirect,
-	// must use is_gpudirect_enabled
+	// must use psm3_gpu_is_gpudirect_enabled
 
 	/* The following cases need to be handled:
 	 * 1) GPU DIRECT is turned off but GDR COPY is turned on by the user or
@@ -440,15 +543,15 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 	 * 2) GPU DIRECT is on but GDR COPY is turned off by the user - Leave
 	 *.   this config as it is.
 	 */
-	if (!is_gpudirect_enabled)
-		is_gdr_copy_enabled = gdr_copy_limit_send =
-			gdr_copy_limit_recv = 0;
+	if (!psm3_gpu_is_gpudirect_enabled)
+		psm3_gpu_is_gdr_copy_enabled = psm3_gpu_gdr_copy_limit_send =
+			psm3_gpu_gdr_copy_limit_recv = 0;
 	/* technically this is not needed since we only consider GDRCopy Send
 	 * for TINY, SHORT, and single MTU RTS payload.  But does no harm.
 	 */
-	gdr_copy_limit_send = min(gdr_copy_limit_send, proto->ep->mtu);
+	psm3_gpu_gdr_copy_limit_send = min(psm3_gpu_gdr_copy_limit_send, proto->ep->mtu);
 
-	if (PSMI_IS_GPU_ENABLED &&
+	if (PSM3_GPU_IS_ENABLED &&
 		 (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED)) {
 		struct psmi_rlimit_mpool rlim = GPU_HOSTBUFFER_LIMITS;
 		uint32_t maxsz, chunksz, max_elements;
@@ -517,7 +620,7 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 			proto->gpu_hostbuf_send_cfg.bufsz,
 			proto->gpu_prefetch_limit);
 	}
-#endif /* PSM_CUDA || PSM_ONEAPI */
+#endif /* PSM_HAVE_GPU */
 
 #ifdef PSM_HAVE_REG_MR
 	// we allocate MR cache here (as opposed to in protoexp) because
@@ -533,7 +636,7 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 		uint32_t default_cache_size_mb;	// in megabytes
 		uint32_t cache_pri_entries;
 		uint64_t cache_pri_size;	// in bytes
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		uint64_t cache_gpu_pri_size;	// in bytes
 		union psmi_envvar_val env_mr_cache_gpu_evict;
 #endif
@@ -594,7 +697,7 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 								((uint64_t)env_mr_cache_size_mb.e_uint
 									* (1024*1024))
 										/ max(psm3_mq_max_window_rv(proto->mq, 0)/2,
-												proto->mq->hfi_thresh_rv));
+												proto->mq->rndv_nic_thresh));
 			} else {
 				// only send DMA, size based on smaller MRs
 				default_cache_entries = max(default_cache_entries,
@@ -611,7 +714,7 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 				PSMI_ENVVAR_TYPE_UINT,
 				(union psmi_envvar_val)default_cache_entries,
 				&env_mr_cache_entries);
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		// cache_gpu_pri_size only used to confirm RV GPU cache size
 		// Without GPU Direct we will not register any GPU MRs
 		// if we have GPU Direct w/o RDMA, no priority pin/MRs except
@@ -620,17 +723,17 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 		// grow pri_entries to account for it
 		// Note cache_pri_size == 0 if rdmamode not enabled
 		cache_gpu_pri_size = 0;
-		if (PSMI_IS_GPU_ENABLED && is_gpudirect_enabled) {
-			if (gpudirect_rdma_send_limit || gpudirect_rdma_recv_limit)
+		if (PSM3_GPU_IS_ENABLED && psm3_gpu_is_gpudirect_enabled) {
+			if (psm3_gpu_gpudirect_rdma_send_limit || psm3_gpu_gpudirect_rdma_recv_limit)
 				cache_gpu_pri_size = cache_pri_size;
-			if (gdr_copy_limit_send || gdr_copy_limit_recv) {
+			if (psm3_gpu_gdr_copy_limit_send || psm3_gpu_gdr_copy_limit_recv) {
 				// min of one extra for GDRCopy
-				// largest recv with GDR copy is gdr_copy_limit_recv
-				// largest send with GDR copy is gdr_copy_limit_send
+				// largest recv with GDR copy is psm3_gpu_gdr_copy_limit_recv
+				// largest send with GDR copy is psm3_gpu_gdr_copy_limit_send
 				cache_gpu_pri_size +=
 					ROUNDUP64P2(max(proto->epinfo.ep_mtu,
-							max(gdr_copy_limit_recv,
-							gdr_copy_limit_send)),
+							max(psm3_gpu_gdr_copy_limit_recv,
+							psm3_gpu_gdr_copy_limit_send)),
 						PSMI_GPU_PAGESIZE);
 			}
 			psm3_getenv("PSM3_RV_GPU_CACHE_EVICT",
@@ -641,13 +744,13 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 			psm3_gpu_cache_evict = (uint64_t)env_mr_cache_gpu_evict.e_uint * 1024;
 		}
 
-#endif /* PSM_CUDA || PSM_ONEAPI */
+#endif /* PSM_HAVE_GPU */
 		proto->ep->mr_cache = proto->mr_cache
 					= psm3_verbs_alloc_mr_cache(proto->ep,
 						env_mr_cache_entries.e_uint, proto->ep->mr_cache_mode,
 						env_mr_cache_size_mb.e_uint,
 						cache_pri_entries, cache_pri_size
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 						, cache_gpu_pri_size
 #endif
 						);
@@ -667,7 +770,7 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 			_HFI_INFO("WARNING: Send DMA requires an MR Cache, disabling PSM3_SDMA\n");
 		proto->iovec_thresh_eager = proto->iovec_thresh_eager_blocking =
 		    ~0U;
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		proto->iovec_gpu_thresh_eager = proto->iovec_gpu_thresh_eager_blocking =
 		    ~0U;
 #endif
@@ -675,39 +778,34 @@ psm3_ips_proto_init(psm2_ep_t ep, const ptl_t *ptl,
 	// without a real cache, Send DMA makes no sense
 	psmi_assert(proto->ep->mr_cache_mode || proto->iovec_thresh_eager == ~0);
 	psmi_assert(proto->ep->mr_cache_mode || proto->iovec_thresh_eager_blocking == ~0U);
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 	// without a real cache, GPU Direct Send DMA makes no sense
 	psmi_assert(proto->ep->mr_cache_mode || proto->iovec_gpu_thresh_eager == ~0);
 	psmi_assert(proto->ep->mr_cache_mode || proto->iovec_gpu_thresh_eager_blocking == ~0U);
 #endif
 #endif /* PSM_HAVE_REG_MR */
 
-#ifdef PSM_CUDA
-	_HFI_DBG("Cuda %d GPU Direct support: driver %d GPU device %d\n",
-		is_cuda_enabled, is_driver_gpudirect_enabled, _device_support_gpudirect);
-#elif defined(PSM_ONEAPI)
-	_HFI_DBG("OneAPI ZE %d GPU Direct support: driver %d GPU device %d\n",
-		is_oneapi_ze_enabled, is_driver_gpudirect_enabled, _device_support_gpudirect);
-#endif
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
+	_HFI_DBG("GPU ("PSM3_GPU_TYPES") Enabled %d (%s) GPU Direct support: driver %d GPU device %d\n",
+		PSM3_GPU_IS_ENABLED, PSM3_GPU_TYPE, psm3_gpu_is_driver_gpudirect_enabled, PSM3_GPU_GPUDIRECT_SUPPORTED());
 	_HFI_DBG("GDR Copy: %d limit send=%u recv=%u gpu_rndv=%u GPU RDMA flags=0x%x limit send=%u recv=%u\n",
-		is_gdr_copy_enabled, gdr_copy_limit_send, gdr_copy_limit_recv,
-		gpu_thresh_rndv,
+		psm3_gpu_is_gdr_copy_enabled, psm3_gpu_gdr_copy_limit_send, psm3_gpu_gdr_copy_limit_recv,
+		psm3_gpu_thresh_rndv,
 		proto->flags & (IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV
 				|IPS_PROTO_FLAG_GPUDIRECT_RDMA_SEND),
-		gpudirect_rdma_send_limit, gpudirect_rdma_recv_limit);
+		psm3_gpu_gpudirect_rdma_send_limit, psm3_gpu_gpudirect_rdma_recv_limit);
 #ifdef PSM_HAVE_REG_MR
 	_HFI_DBG("send dma thresh: %u %u GPU send DMA thresh %u %u\n",
 		proto->iovec_thresh_eager, proto->iovec_thresh_eager_blocking,
 		proto->iovec_gpu_thresh_eager,
 		proto->iovec_gpu_thresh_eager_blocking);
 #endif
-#else /* PSM_CUDA || PSM_ONEAPI */
+#else /* PSM_HAVE_GPU */
 #ifdef PSM_HAVE_REG_MR
 	_HFI_DBG("send dma thresh: %u %u\n", proto->iovec_thresh_eager,
 		proto->iovec_thresh_eager_blocking);
 #endif
-#endif /* PSM_CUDA || PSM_ONEAPI */
+#endif /* PSM_HAVE_GPU */
 #ifdef PSM_HAVE_REG_MR
 	_HFI_DBG("rdma: %u MR cache %u\n", proto->ep->rdmamode,
 		proto->ep->mr_cache_mode);
@@ -875,9 +973,7 @@ psm3_ips_proto_fini(struct ips_proto *proto)
 {
 	psm2_error_t err = PSM2_OK;
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
 	PSM3_GPU_SHUTDOWN_DTOH_MEMCPYS(proto);
-#endif
 
 	if ((err = psm3_ips_ibta_fini(proto)))
 		goto fail;
@@ -942,11 +1038,11 @@ proto_sdma_init(struct ips_proto *proto)
 		}
 	}
 
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
-	if (! is_gpudirect_enabled
+#ifdef PSM_HAVE_GPU
+	if (! psm3_gpu_is_gpudirect_enabled
 	    || !psmi_hal_has_cap(PSM_HAL_CAP_GPUDIRECT_SDMA))
 		env_sdma.e_uint = 0;
-	else 
+	else
 		psm3_getenv("PSM3_GPUDIRECT_SDMA",
 		    "UD GPU send dma flags (0 disables send dma, 1 enables), default 1",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
@@ -968,7 +1064,7 @@ proto_sdma_init(struct ips_proto *proto)
 				 env_hfiegr.e_uint;
 		}
 	}
-#endif /* PSM_CUDA || PSM_ONEAPI */
+#endif /* PSM_HAVE_GPU */
 
 	return err;
 }
@@ -1104,7 +1200,7 @@ psm3_ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_exp
 						   cqe->msg_scb.flow, &cqe->msg_scb,
 						   cqe->msg_scb.cksum, 0, PSMI_TRUE,
 						   have_cksum, cqe->msg_scb.cksum[0]
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 			       , 0
 #endif
 				);
@@ -1213,7 +1309,7 @@ psm3_ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 	err = psmi_hal_transfer_frame(proto, flow,
 						   ctrlscb, payload, paylen,
 						   PSMI_TRUE, have_cksum, ctrlscb->cksum[0]
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 						   , 0
 #endif
 			     );
@@ -1396,7 +1492,7 @@ psm3_ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 							scb->ips_lrh.flags &
 							IPS_SEND_FLAG_PKTCKSUM,
 							scb->cksum[0]
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 						   , IS_TRANSFER_BUF_GPU_MEM(scb)
 #endif
 			     ))
@@ -1433,9 +1529,9 @@ psm3_ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 #endif
 			PSM2_LOG_PKT_STRM(PSM2_LOG_TX,&scb->ips_lrh,"PKT_STRM: payload_size=%d err: %d",
 				scb->payload_size, err);
-		} else if (err == PSM2_TCP_DATA_SENT) {
+		} else if (err == PSM2_RELIABLE_DATA_SENT) {
 			// no credits and timers
-			// TDB - implement credits for TCP
+			// TDB - implement credits for reliable send
 			GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR); /* perf stats */
 			scb->scb_flags &= ~IPS_SEND_FLAG_PENDING;
 			num_sent++;
@@ -1449,6 +1545,7 @@ psm3_ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 			// immediately ack the msg
 			struct ips_scb_unackedq *unackedq = &flow->scb_unacked;
 			flow->xmit_ack_num.psn_num = 1 + (__be32_to_cpu(scb->ips_lrh.bth[2]) & proto->psn_mask);
+			flow->xmit_ack_num.psn_num &= proto->psn_mask;
 
 			psmi_assert(scb == STAILQ_FIRST(unackedq));
 			STAILQ_REMOVE_HEAD(unackedq, nextq);
@@ -1517,6 +1614,22 @@ sendfull:
 #else
 		proto->stats.pio_no_flow_credits++;
 #endif
+		if (flow->credits <= 0) {
+//			_HFI_VDBG("flow=%p next=%d first_os=%d delta=%d\n", flow,
+//				flow->xmit_seq_num.psn_num, flow->credits_inc_psn,
+//				flow->xmit_seq_num.psn_num - flow->credits_inc_psn);
+			if (flow->max_credits < proto->max_credits && !between(flow->credits_inc_psn,
+				(flow->credits_inc_psn + proto->credits_inc_thresh) & proto->psn_mask,
+				flow->xmit_seq_num.psn_num)) {
+				// adjust with a small "random" number to avoid potential oscillation
+				uint16_t actual_adjust = min(proto->credits_adjust + (flow->xmit_seq_num.psn_num & 0xF),
+					proto->max_credits - flow->max_credits);
+				flow->max_credits += actual_adjust;
+				flow->credits += actual_adjust;
+				flow->credits_inc_psn = flow->xmit_seq_num.psn_num;
+				_HFI_VDBG("Increased flow (%p) credits to %d\n", flow, flow->max_credits);
+			}
+		}
 		psmi_timer_request(proto->timerq, flow->timer_send,
 				   get_cycles() + proto->timeout_send);
 	}
@@ -1620,9 +1733,8 @@ psm3_ips_proto_timer_ack_callback(struct psmi_timer *current_timer,
 		scb->abs_timeout = t_cyc_next + scb->ack_timeout;
 		if (done_local) {
 			_HFI_VDBG
-			    ("sending err_chk flow=%d with first=%d,last=%d\n",
-			     flow->flowid,
-			     STAILQ_FIRST(&flow->scb_unacked)->seq_num.psn_num,
+			    ("sending err_chk flow=%p with first=%d, last=%d\n",
+			     flow, scb->seq_num.psn_num,
 			     STAILQ_LAST(&flow->scb_unacked, ips_scb,
 					 nextq)->seq_num.psn_num);
 #ifdef PSM_BYTE_FLOW_CREDITS
@@ -1639,23 +1751,29 @@ psm3_ips_proto_timer_ack_callback(struct psmi_timer *current_timer,
 					flow->xmit_seq_num :
 					SLIST_FIRST(&flow->scb_pend)->seq_num;
 
-			if (flow->protocol == PSM_PROTOCOL_TIDFLOW) {
-				// for UD we use RC QP instead of STL100's TIDFLOW HW
-				// UDP has no RDMA
-				psmi_assert_always(0);	// we don't allocate ips_flow for TID
-				message_type = OPCODE_ERR_CHK;	// keep KlockWorks happy
-			} else {
-				PSM2_LOG_MSG("sending ERR_CHK message");
-				message_type = OPCODE_ERR_CHK;
-				err_chk_seq.psn_num = (err_chk_seq.psn_num - 1)
+			PSM2_LOG_MSG("sending ERR_CHK message");
+			message_type = OPCODE_ERR_CHK;
+			err_chk_seq.psn_num = (err_chk_seq.psn_num - 1)
 					& proto->psn_mask;
-			}
 			ctrlscb.ips_lrh.bth[2] =
 					__cpu_to_be32(err_chk_seq.psn_num);
 
 			psm3_ips_proto_send_ctrl_message(flow, message_type,
 					&flow->ipsaddr->ctrl_msg_queued,
 					&ctrlscb, ctrlscb.cksum, 0);
+			flow->credits_inc_psn = scb->seq_num.psn_num;
+			// decrease flow credits
+			if (flow->max_credits > proto->min_credits) {
+				uint16_t actual_adjust = min(proto->credits_adjust + (flow->xmit_seq_num.psn_num & 0xF),
+					flow->max_credits - proto->min_credits);
+				flow->max_credits -= actual_adjust;
+				if (flow->credits > actual_adjust) {
+					flow->credits -= actual_adjust;
+				} else {
+					flow->credits = 0;
+				}
+				_HFI_VDBG("Decreased flow (%p) credits to %d\n", flow, flow->max_credits);
+			}
 		}
 
 		t_cyc_next = get_cycles() + scb->ack_timeout;
@@ -1918,7 +2036,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 			"also carry all or a portion of the message payload.\n"
 			"Large Rendezvous messages may be broken into multiple "
 			"window size chunks each with a separate CTS.\n"
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 			"When sending from a GPU application buffer the "
 			"mechanisms include:\n"
 			"  - gdrcopy - Direct GPU copy via mmaping GPU memory\n"
@@ -1933,7 +2051,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 			"application buffer when it posts the receive. "
 			"With the exception of RDMA, all receive mechanisms "
 			"involve some form of copy.\n"
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 			"When receiving into a GPU application buffer the "
 			"mechanisms include:\n"
 			"  - gdrcopy - Direct GPU copy via mmaping GPU memory\n"
@@ -1950,7 +2068,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("tiny_cpu_isend_bytes",
 				   "Tiny message bytes sent async from a CPU buffer",
 				   &proto->strat_stats.tiny_cpu_isend_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("tiny_gdrcopy_isend",
 				   "Tiny messages sent async from a GPU buffer via GDR copy",
 				   &proto->strat_stats.tiny_gdrcopy_isend),
@@ -1970,7 +2088,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("tiny_cpu_send_bytes",
 				   "Tiny message bytes sent sync from a CPU buffer",
 				   &proto->strat_stats.tiny_cpu_send_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("tiny_gdrcopy_send",
 				   "Tiny messages sent sync from a GPU buffer via GDR copy",
 				   &proto->strat_stats.tiny_gdrcopy_send),
@@ -1996,7 +2114,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("tiny_sysbuf_recv_bytes",
 				   "Tiny message bytes received into a bounce buffer",
 				   &proto->strat_stats.tiny_sysbuf_recv_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("tiny_gdrcopy_recv",
 				   "Tiny messages received into an application GPU buffer via GDR copy",
 				   &proto->strat_stats.tiny_gdrcopy_recv),
@@ -2023,7 +2141,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("short_dma_cpu_isend_bytes",
 				   "Short message bytes sent async from a CPU buffer via send DMA",
 				   &proto->strat_stats.short_dma_cpu_isend_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("short_gdrcopy_isend",
 				   "Short messages sent async from a GPU buffer via GDR copy",
 				   &proto->strat_stats.short_gdrcopy_isend),
@@ -2055,7 +2173,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("short_dma_cpu_send_bytes",
 				   "Short message bytes sent sync from a CPU buffer via send DMA",
 				   &proto->strat_stats.short_dma_cpu_send_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("short_gdrcopy_send",
 				   "Short messages sent sync from a GPU buffer via GDR copy",
 				   &proto->strat_stats.short_gdrcopy_send),
@@ -2088,7 +2206,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("short_sysbuf_recv_bytes",
 				   "Short message bytes received into a bounce buffer",
 				   &proto->strat_stats.short_sysbuf_recv_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("short_gdrcopy_recv",
 				   "Short messages received into an application GPU buffer via GDR copy",
 				   &proto->strat_stats.short_gdrcopy_recv),
@@ -2115,7 +2233,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("eager_dma_cpu_isend_bytes",
 				   "Eager message bytes sent async from a CPU buffer via send DMA",
 				   &proto->strat_stats.eager_dma_cpu_isend_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("eager_cuCopy_isend",
 				   "Eager messages sent async from a GPU buffer via GPU copy",
 				   &proto->strat_stats.eager_cuCopy_isend),
@@ -2141,7 +2259,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("eager_dma_cpu_send_bytes",
 				   "Eager message bytes sent sync from a CPU buffer via send DMA",
 				   &proto->strat_stats.eager_dma_cpu_send_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("eager_cuCopy_send",
 				   "Eager messages sent sync from a GPU buffer via GPU copy",
 				   &proto->strat_stats.eager_cuCopy_send),
@@ -2168,7 +2286,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("eager_sysbuf_recv_bytes",
 				   "Eager message bytes received into a bounce buffer",
 				   &proto->strat_stats.eager_sysbuf_recv_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("eager_gdrcopy_recv",
 				   "Eager messages received into an application GPU buffer via GDR copy",
 				   &proto->strat_stats.eager_gdrcopy_recv),
@@ -2189,7 +2307,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("rndv_cpu_isend_bytes",
 				   "Rendezvous message bytes sent async from a CPU buffer",
 				   &proto->strat_stats.rndv_cpu_isend_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("rndv_gpu_isend",
 				   "Rendezvous messages sent async from a GPU buffer",
 				   &proto->strat_stats.rndv_gpu_isend),
@@ -2203,7 +2321,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("rndv_cpu_send_bytes",
 				   "Rendezvous message bytes sent sync from a CPU buffer",
 				   &proto->strat_stats.rndv_cpu_send_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("rndv_gpu_send",
 				   "Rendezvous messages sent sync from a GPU buffer",
 				   &proto->strat_stats.rndv_gpu_send),
@@ -2224,7 +2342,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("rndv_rts_sysbuf_recv_bytes",
 				   "RTS packet message bytes received into an bounce buffer",
 				   &proto->strat_stats.rndv_rts_sysbuf_recv_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("rndv_rts_cuCopy_recv",
 				   "RTS packet messages received into an application GPU buffer via GPU copy",
 				   &proto->strat_stats.rndv_rts_cuCopy_recv),
@@ -2245,7 +2363,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("rndv_long_cpu_recv_bytes",
 				   "Long Data rendezvous message bytes received into an application CPU buffer",
 				   &proto->strat_stats.rndv_long_cpu_recv_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("rndv_long_cuCopy_recv",
 				   "Long Data rendezvous messages received into an application GPU buffer via GPU copy",
 				   &proto->strat_stats.rndv_long_cuCopy_recv),
@@ -2272,7 +2390,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("rndv_long_dma_cpu_send_bytes",
 				   "Long Data rendezvous message bytes sent from a CPU buffer via send DMA",
 				   &proto->strat_stats.rndv_long_dma_cpu_send_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("rndv_long_cuCopy_send",
 				   "Long Data rendezvous messages sent from a GPU buffer via GPU copy",
 				   &proto->strat_stats.rndv_long_cuCopy_send),
@@ -2299,7 +2417,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("rndv_rdma_cpu_recv_bytes",
 				   "RDMA rendezvous message bytes received direct into a CPU buffer",
 				   &proto->strat_stats.rndv_rdma_cpu_recv_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("rndv_rdma_gdr_recv",
 				   "RDMA rendezvous messages received direct into a GPU buffer",
 				   &proto->strat_stats.rndv_rdma_gdr_recv),
@@ -2319,7 +2437,7 @@ ips_proto_register_stats(struct ips_proto *proto)
 		PSMI_STATS_DECLU64("rndv_rdma_cpu_send_bytes",
 				   "RDMA rendezvous message bytes sent from a CPU buffer via send RDMA",
 				   &proto->strat_stats.rndv_rdma_cpu_send_bytes),
-#if defined(PSM_CUDA) || defined(PSM_ONEAPI)
+#ifdef PSM_HAVE_GPU
 		PSMI_STATS_DECLU64("rndv_rdma_gdr_send",
 				   "RDMA rendezvous messages sent from a GPU buffer via send RDMA",
 				   &proto->strat_stats.rndv_rdma_gdr_send),

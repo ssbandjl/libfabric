@@ -28,12 +28,6 @@ static int cxip_dmabuf_hints(enum fi_hmem_iface iface, void *iov_base,
 		return -FI_ENOSYS;
 	}
 
-	if (iface == FI_HMEM_CUDA && cxip_env.disable_dmabuf_cuda)
-		return FI_SUCCESS;
-
-	if (iface == FI_HMEM_ROCR && cxip_env.disable_dmabuf_rocr)
-		return FI_SUCCESS;
-
 	ret = ofi_hmem_get_base_addr(iface, iov_base, len, (void*)&base, &size);
 	if (ret)
 		return ret;
@@ -44,6 +38,10 @@ static int cxip_dmabuf_hints(enum fi_hmem_iface iface, void *iov_base,
 		hints->dmabuf_fd = dmabuf_fd;
 		hints->dmabuf_offset = offset;
 		hints->dmabuf_valid = true;
+
+		/* Need to cache DMA buf FD to release later. */
+		md->dmabuf_fd = dmabuf_fd;
+		md->dmabuf_fd_valid = true;
 
 		return FI_SUCCESS;
 	}
@@ -112,7 +110,18 @@ static int cxip_do_map(struct ofi_mr_cache *cache, struct ofi_mr_entry *entry)
 		CXIP_WARN(MAP_FAIL_MSG, dom->lni->lni->id,
 			  entry->info.iov.iov_base, entry->info.iov.iov_len,
 			  map_flags,  ret, fi_strerror(-ret));
-		goto err;
+		goto err_free_dmabuf;
+	}
+
+	/* If the md len is larger than the iov_len, the VA and len have
+	 * been aligned to a larger page size. Update the cache memory
+	 * region registered by returning -FI_EAGAIN. Note, that GPU memory
+	 * cannot be aligned since the aligned iov_base may fall outside the
+	 * valid device address.
+	 */
+	if (entry->info.iface == FI_HMEM_SYSTEM) {
+		entry->info.iov.iov_base = (void *)md->md->va;
+		entry->info.iov.iov_len = md->md->len;
 	}
 
 	/* zeHostMalloc() returns FI_HMEM_ZE but this cannot currently be
@@ -156,6 +165,9 @@ static int cxip_do_map(struct ofi_mr_cache *cache, struct ofi_mr_entry *entry)
 
 err_unmap:
 	cxil_unmap(md->md);
+err_free_dmabuf:
+	if (md->dmabuf_fd_valid)
+		ofi_hmem_put_dmabuf_fd(entry->info.iface, md->dmabuf_fd);
 err:
 	md->dom = NULL;
 	return ret;
@@ -175,6 +187,9 @@ static void cxip_do_unmap(struct ofi_mr_cache *cache,
 
 	if (md->handle_valid)
 		ofi_hmem_dev_unregister(entry->info.iface, md->handle);
+
+	if (md->dmabuf_fd_valid)
+		ofi_hmem_put_dmabuf_fd(entry->info.iface, md->dmabuf_fd);
 
 	ret = cxil_unmap(md->md);
 	if (ret)
@@ -421,7 +436,7 @@ static int cxip_map_nocache(struct cxip_domain *dom, struct fi_mr_attr *attr,
 		       &uncached_md->md);
 	if (ret) {
 		CXIP_WARN("cxil_map failed: %d:%s\n", ret, fi_strerror(-ret));
-		goto err_free_uncached_md;
+		goto err_free_dmabuf;
 	}
 
 	/* zeHostMalloc() returns FI_HMEM_ZE but this cannot currently be
@@ -461,8 +476,12 @@ static int cxip_map_nocache(struct cxip_domain *dom, struct fi_mr_attr *attr,
 
 	return FI_SUCCESS;
 
+
 err_unmap:
 	cxil_unmap(uncached_md->md);
+err_free_dmabuf:
+	if (uncached_md->dmabuf_fd_valid)
+		ofi_hmem_put_dmabuf_fd(attr->iface, uncached_md->dmabuf_fd);
 err_free_uncached_md:
 	free(uncached_md);
 
@@ -475,10 +494,15 @@ static void cxip_map_get_mem_region_size(const void *buf, unsigned long len,
 {
 	int ret;
 
-	ret = ofi_hmem_get_base_addr(iface, buf, len, out_buf, out_len);
-	if (ret) {
+	if (iface == FI_HMEM_SYSTEM) {
 		*out_buf = (void *)buf;
 		*out_len = len;
+	} else {
+		ret = ofi_hmem_get_base_addr(iface, buf, len, out_buf, out_len);
+		if (ret) {
+			*out_buf = (void *)buf;
+			*out_len = len;
+		}
 	}
 
 	CXIP_DBG("%s: User addr=%p User len=%lu Region addr=%p Region len=0x%lx\n",
@@ -564,6 +588,9 @@ static void cxip_unmap_cache(struct cxip_md *md)
 static void cxip_unmap_nocache(struct cxip_md *md)
 {
 	int ret;
+
+	if (md->dmabuf_fd_valid)
+		ofi_hmem_put_dmabuf_fd(md->info.iface, md->dmabuf_fd);
 
 	if (md->handle_valid)
 		ofi_hmem_dev_unregister(md->info.iface, md->handle);

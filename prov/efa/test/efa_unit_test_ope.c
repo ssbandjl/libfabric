@@ -3,6 +3,8 @@
 
 #include "efa_unit_tests.h"
 
+typedef void (*efa_rdm_ope_handle_error_func_t)(struct efa_rdm_ope *ope, int err, int prov_errno);
+
 void test_efa_rdm_ope_prepare_to_post_send_impl(struct efa_resource *resource,
 						enum fi_hmem_iface iface,
 						size_t total_len,
@@ -65,7 +67,7 @@ void test_efa_rdm_ope_prepare_to_post_send_with_no_enough_tx_pkts(struct efa_res
 	struct efa_resource *resource = *state;
 	struct efa_rdm_ep *efa_rdm_ep;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
 	efa_rdm_ep->efa_outstanding_tx_ops = efa_rdm_ep->efa_max_outstanding_tx_ops - 1;
@@ -88,7 +90,7 @@ void test_efa_rdm_ope_prepare_to_post_send_host_memory(struct efa_resource **sta
 	int expected_pkt_entry_cnt;
 	int expected_pkt_entry_data_size_vec[1024];
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	/* data size should be aligned and evenly distributed.
 	 * alignment for host memory is 8 byte by default.
@@ -137,7 +139,7 @@ void test_efa_rdm_ope_prepare_to_post_send_host_memory_align128(struct efa_resou
 	int expected_pkt_entry_cnt;
 	int expected_pkt_entry_data_size_vec[1024];
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
 	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = true;
 
@@ -186,7 +188,7 @@ void test_efa_rdm_ope_prepare_to_post_send_cuda_memory(struct efa_resource **sta
 	int expected_pkt_entry_cnt;
 	int expected_pkt_entry_data_size_vec[1024];
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	/* default alignment of cuda memory is 64 bytes */
 	msg_length = 12000;
@@ -211,7 +213,7 @@ void test_efa_rdm_ope_prepare_to_post_send_cuda_memory_align128(struct efa_resou
 	int expected_pkt_entry_cnt;
 	int expected_pkt_entry_data_size_vec[1024];
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
 	efa_rdm_ep->sendrecv_in_order_aligned_128_bytes = true;
 
@@ -243,7 +245,7 @@ void test_efa_rdm_ope_post_write_0_byte(struct efa_resource **state)
 	fi_addr_t addr;
 	int ret, err;
 
-	efa_unit_test_resource_construct(resource, FI_EP_RDM);
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
 
 	ret = fi_getname(&resource->ep->fid, &raw_addr, &raw_addr_len);
 	assert_int_equal(ret, 0);
@@ -282,4 +284,231 @@ void test_efa_rdm_ope_post_write_0_byte(struct efa_resource **state)
 	efa_rdm_pke_release_tx((struct efa_rdm_pke *)g_ibv_submitted_wr_id_vec[0]);
 	mock_txe.ep->efa_outstanding_tx_ops = 0;
 	efa_unit_test_buff_destruct(&local_buff);
+}
+
+/**
+ * @brief efa_rdm_rxe_post_local_read_or_queue should call
+ * efa_rdm_pke_read.
+ * When efa_rdm_pke_read failed,
+ * make sure there is no txe leak in efa_rdm_rxe_post_local_read_or_queue
+ *
+ * @param[in]	state		struct efa_resource that is managed by the framework
+ * @param[in]	efa_rdm_pke_read_return	return code of efa_rdm_pke_read
+ */
+static
+void test_efa_rdm_rxe_post_local_read_or_queue_impl(struct efa_resource *resource, int efa_rdm_pke_read_return)
+{
+	struct efa_rdm_ep *efa_rdm_ep;
+	struct efa_rdm_pke *pkt_entry;
+	struct efa_rdm_ope *rxe;
+	struct efa_mr cuda_mr = {0};
+	char buf[16];
+	struct iovec iov = {
+		.iov_base = buf,
+		.iov_len = sizeof buf
+	};
+
+	/**
+	 * TODO: Ideally we should mock efa_rdm_ope_post_remote_read_or_queue here,
+	 * but this function is currently cannot be mocked as it is at the same file
+	 * with efa_rdm_rxe_post_local_read_or_queue, see this restriction in
+	 * prov/efa/test/README.md's mocking session
+	 */
+	g_efa_unit_test_mocks.efa_rdm_pke_read = &efa_mock_efa_rdm_pke_read_return_mock;
+
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+
+	/* Fake a rdma read enabled device */
+	efa_rdm_ep_domain(efa_rdm_ep)->device->max_rdma_size = efa_env.efa_read_segment_size;
+
+	pkt_entry = efa_rdm_pke_alloc(efa_rdm_ep, efa_rdm_ep->efa_rx_pkt_pool, EFA_RDM_PKE_FROM_EFA_RX_POOL);
+	assert_non_null(pkt_entry);
+	pkt_entry->payload = pkt_entry->wiredata;
+
+	rxe = efa_rdm_ep_alloc_rxe(efa_rdm_ep, FI_ADDR_UNSPEC, ofi_op_tagged);
+	cuda_mr.peer.iface = FI_HMEM_CUDA;
+
+	rxe->desc[0] = &cuda_mr;
+	rxe->iov_count = 1;
+	rxe->iov[0] = iov;
+	pkt_entry->ope = rxe;
+
+	assert_true(dlist_empty(&efa_rdm_ep->txe_list));
+
+	will_return(efa_mock_efa_rdm_pke_read_return_mock, efa_rdm_pke_read_return);
+
+	assert_int_equal(efa_rdm_rxe_post_local_read_or_queue(rxe, 0, pkt_entry, pkt_entry->payload, 16), efa_rdm_pke_read_return);
+
+	/* Clean up the rx entry no matter what returns */
+	efa_rdm_pke_release_rx(pkt_entry);
+}
+
+void test_efa_rdm_rxe_post_local_read_or_queue_unhappy(struct efa_resource **state)
+{
+	struct efa_rdm_ep *efa_rdm_ep;
+	struct efa_resource *resource = *state;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+
+	test_efa_rdm_rxe_post_local_read_or_queue_impl(resource, -FI_ENOMR);
+
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+
+	/* Make sure txe is cleaned for a failed read */
+	assert_true(dlist_empty(&efa_rdm_ep->txe_list));
+}
+
+void test_efa_rdm_rxe_post_local_read_or_queue_happy(struct efa_resource **state)
+{
+	struct efa_rdm_ep *efa_rdm_ep;
+	struct efa_resource *resource = *state;
+	struct efa_rdm_pke *tx_pkt_entry;
+	struct efa_rdm_ope *txe;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+
+	test_efa_rdm_rxe_post_local_read_or_queue_impl(resource, FI_SUCCESS);
+
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep, base_ep.util_ep.ep_fid);
+	/* Now we should have a txe allocated */
+	assert_int_equal(efa_unit_test_get_dlist_length(&efa_rdm_ep->txe_list),  1);
+	txe = container_of(efa_rdm_ep->txe_list.next, struct efa_rdm_ope, ep_entry);
+	assert_true(txe->internal_flags & EFA_RDM_OPE_INTERNAL);
+
+	/* We also have a tx pkt allocated inside efa_rdm_ope_read
+	 * and we need to clean it */
+	tx_pkt_entry = ofi_bufpool_get_ibuf(efa_rdm_ep->efa_tx_pkt_pool, 0);
+	efa_rdm_pke_release(tx_pkt_entry);
+}
+
+static
+void test_efa_rdm_ope_handle_error_impl(
+	struct efa_resource *resource,
+	efa_rdm_ope_handle_error_func_t efa_rdm_ope_handle_error,
+	struct efa_rdm_ope *ope, bool expect_cq_error)
+{
+	struct fi_cq_data_entry cq_entry;
+	struct fi_cq_err_entry cq_err_entry = {0};
+	struct fi_eq_err_entry eq_err_entry;
+
+	efa_rdm_ope_handle_error(ope, FI_ENOTCONN,
+				 EFA_IO_COMP_STATUS_LOCAL_ERROR_UNREACH_REMOTE);
+
+	if (expect_cq_error) {
+		assert_int_equal(fi_cq_read(resource->cq, &cq_entry, 1),
+				 -FI_EAVAIL);
+		assert_int_equal(fi_cq_readerr(resource->cq, &cq_err_entry, 0),
+				 1);
+		assert_int_equal(cq_err_entry.err, FI_ENOTCONN);
+		assert_int_equal(cq_err_entry.prov_errno,
+				 EFA_IO_COMP_STATUS_LOCAL_ERROR_UNREACH_REMOTE);
+	} else {
+		/* We should expect an empty cq and an eq error */
+		assert_int_equal(fi_cq_read(resource->cq, &cq_entry, 1),
+				 -FI_EAGAIN);
+		assert_int_equal(fi_eq_readerr(resource->eq, &eq_err_entry, 0),
+				 sizeof(eq_err_entry));
+		assert_int_equal(eq_err_entry.err, FI_ENOTCONN);
+		assert_int_equal(eq_err_entry.prov_errno,
+				 EFA_IO_COMP_STATUS_LOCAL_ERROR_UNREACH_REMOTE);
+	}
+}
+
+void test_efa_rdm_txe_handle_error_write_cq(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ope *txe;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+
+	txe = efa_unit_test_alloc_txe(resource, ofi_op_write);
+	assert_non_null(txe);
+
+	test_efa_rdm_ope_handle_error_impl(resource, efa_rdm_txe_handle_error, txe, true);
+
+	efa_rdm_txe_release(txe);
+}
+
+void test_efa_rdm_txe_handle_error_not_write_cq(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ope *txe;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+
+	txe = efa_unit_test_alloc_txe(resource, ofi_op_write);
+	assert_non_null(txe);
+
+	txe->internal_flags |= EFA_RDM_OPE_INTERNAL;
+
+	test_efa_rdm_ope_handle_error_impl(resource, efa_rdm_txe_handle_error, txe, false);
+
+	efa_rdm_txe_release(txe);
+}
+
+void test_efa_rdm_rxe_handle_error_write_cq(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ope *rxe;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+
+	rxe = efa_unit_test_alloc_rxe(resource, ofi_op_tagged);
+	assert_non_null(rxe);
+
+	test_efa_rdm_ope_handle_error_impl(resource, efa_rdm_rxe_handle_error, rxe, true);
+
+	efa_rdm_rxe_release(rxe);
+}
+
+void test_efa_rdm_rxe_handle_error_not_write_cq(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ope *rxe;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+
+	rxe = efa_unit_test_alloc_rxe(resource, ofi_op_tagged);
+	assert_non_null(rxe);
+
+	rxe->internal_flags |= EFA_RDM_OPE_INTERNAL;
+
+	test_efa_rdm_ope_handle_error_impl(resource, efa_rdm_rxe_handle_error, rxe, false);
+
+	efa_rdm_rxe_release(rxe);
+}
+
+void test_efa_rdm_rxe_map(struct efa_resource **state)
+{
+	struct efa_resource *resource = *state;
+	struct efa_rdm_ope *rxe;
+	struct efa_rdm_ep *efa_rdm_ep;
+
+	efa_unit_test_resource_construct(resource, FI_EP_RDM, EFA_FABRIC_NAME);
+
+	rxe = efa_unit_test_alloc_rxe(resource, ofi_op_tagged);
+	rxe->msg_id = 1;
+	assert_non_null(rxe);
+
+	/* rxe has not been inserted to any rxe_map yet */
+	assert_null(rxe->rxe_map);
+
+	efa_rdm_ep = container_of(resource->ep, struct efa_rdm_ep,
+				  base_ep.util_ep.ep_fid);
+
+	efa_rdm_rxe_map_insert(&efa_rdm_ep->rxe_map, rxe->msg_id, rxe->addr,
+			       rxe);
+	assert_true(rxe->rxe_map == &efa_rdm_ep->rxe_map);
+	assert_true(rxe == efa_rdm_rxe_map_lookup(rxe->rxe_map, rxe->msg_id,
+						  rxe->addr));
+
+	efa_rdm_rxe_release(rxe);
+
+	/**
+	 * Now the map_entry_pool should be empty so we can destroy it
+	 * Otherwise there will be an assertion error on the use cnt is
+	 * is non-zero
+	 */
+	ofi_bufpool_destroy(efa_rdm_ep->map_entry_pool);
+	efa_rdm_ep->map_entry_pool = NULL;
 }

@@ -79,9 +79,8 @@ int main(int argc, char **argv)
 
 	hints->ep_attr->type = FI_EP_RDM;
 	hints->caps = FI_MSG;
-	hints->mode |= FI_CONTEXT;
+	hints->mode |= FI_CONTEXT | FI_CONTEXT2;
 	hints->domain_attr->mr_mode = opts.mr_mode;
-	hints->domain_attr->threading = FI_THREAD_DOMAIN;
 	hints->addr_format = opts.address_format;
 
 	ret = ft_init_fabric();

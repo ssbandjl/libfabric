@@ -43,17 +43,20 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <assert.h>
+#include <complex.h>
 
 #include <rdma/fabric.h>
 #include <rdma/fi_rma.h>
 #include <rdma/fi_domain.h>
+
+#include "ofi_atomic.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #ifndef FT_FIVERSION
-#define FT_FIVERSION FI_VERSION(1,20)
+#define FT_FIVERSION FI_VERSION(1,21)
 #endif
 
 #include "ft_osd.h"
@@ -64,6 +67,16 @@ extern "C" {
 #define ALIGN(x, a) ALIGN_MASK(x, (typeof(x))(a) - 1)
 #define ALIGN_DOWN(x, a) ALIGN((x) - ((a) - 1), (a))
 
+#ifndef container_of
+#define container_of(ptr, type, field) \
+	((type *) ((char *)ptr - offsetof(type, field)))
+#endif
+
+/*
+ * Internal version of deprecated APIs.
+ * These are used internally to avoid compiler warnings.
+ */
+#define OFI_MR_DEPRECATED	(0x3) /* FI_MR_BASIC | FI_MR_SCALABLE */
 #define OFI_MR_BASIC_MAP (FI_MR_ALLOCATED | FI_MR_PROV_KEY | FI_MR_VIRT_ADDR)
 
 /* exit codes must be 0-255 */
@@ -135,6 +148,7 @@ enum {
 	FT_OPT_DISABLE_TAG_VALIDATION	= 1 << 25,
 	FT_OPT_ADDR_IS_OOB		= 1 << 26,
 	FT_OPT_REG_DMABUF_MR		= 1 << 27,
+	FT_OPT_NO_PRE_POSTED_RX		= 1 << 28,
 	FT_OPT_OOB_CTRL			= FT_OPT_OOB_SYNC | FT_OPT_OOB_ADDR_EXCH,
 };
 
@@ -175,6 +189,9 @@ struct ft_opts {
 	int iterations;
 	int warmup_iterations;
 	size_t transfer_size;
+	size_t max_msg_size;
+	size_t inject_size;
+	size_t min_multi_recv_size;
 	int window_size;
 	int av_size;
 	int verbose;
@@ -186,6 +203,7 @@ struct ft_opts {
 	char *dst_addr;
 	char *av_name;
 	int sizes_enabled;
+	int use_fi_more;
 	int options;
 	enum ft_comp_method comp_method;
 	int machr;
@@ -202,6 +220,7 @@ struct ft_opts {
 	int force_prefix;
 	enum fi_hmem_iface iface;
 	uint64_t device;
+	enum fi_threading threading;
 
 	char **argv;
 };
@@ -232,7 +251,7 @@ extern size_t buf_size, tx_size, rx_size, tx_mr_size, rx_mr_size;
 extern int tx_fd, rx_fd;
 extern int timeout;
 
-extern struct fi_context tx_ctx, rx_ctx;
+extern struct fi_context2 tx_ctx, rx_ctx;
 extern uint64_t remote_cq_data;
 
 extern uint64_t tx_seq, rx_seq, tx_cq_cntr, rx_cq_cntr;
@@ -261,7 +280,11 @@ void ft_mcusage(char *name, char *desc);
 void ft_csusage(char *name, char *desc);
 
 int ft_fill_buf(void *buf, size_t size);
+int ft_fill_atomic(void *buf, size_t count, enum fi_datatype datatype);
 int ft_check_buf(void *buf, size_t size);
+int ft_check_atomic(enum ft_atomic_opcodes atomic, enum fi_op op,
+		    enum fi_datatype type, void *src, void *orig_dst, void *dst,
+		    void *cmp, void *res, size_t count);
 int ft_check_opts(uint64_t flags);
 uint64_t ft_init_cq_data(struct fi_info *info);
 int ft_sock_listen(char *node, char *service);
@@ -269,7 +292,7 @@ int ft_sock_connect(char *node, char *service);
 int ft_sock_accept();
 int ft_sock_send(int fd, void *msg, size_t len);
 int ft_sock_recv(int fd, void *msg, size_t len);
-int ft_sock_sync(int value);
+int ft_sock_sync(int fd, int value);
 void ft_sock_shutdown(int fd);
 extern int (*ft_mr_alloc_func)(void);
 extern uint64_t ft_tag;
@@ -307,7 +330,8 @@ extern char default_port[8];
 		.iface = FI_HMEM_SYSTEM, \
 		.device = 0, \
 		.argc = argc, .argv = argv, \
-		.address_format = FI_FORMAT_UNSPEC \
+		.address_format = FI_FORMAT_UNSPEC, \
+		.threading = FI_THREAD_DOMAIN \
 	}
 
 #define FT_STR_LEN 32
@@ -435,8 +459,8 @@ int ft_alloc_ep_res(struct fi_info *fi, struct fid_cq **new_txcq,
 		    struct fid_cntr **new_rma_cntr,
 		    struct fid_av **new_av);
 int ft_alloc_msgs(void);
-int ft_alloc_host_tx_buf(size_t size);
-void ft_free_host_tx_buf(void);
+int ft_alloc_host_bufs(size_t size);
+void ft_free_host_bufs(void);
 int ft_alloc_active_res(struct fi_info *fi);
 int ft_enable_ep_recv(void);
 int ft_enable_ep(struct fid_ep *bind_ep, struct fid_eq *bind_eq, struct fid_av *bind_av,
@@ -453,6 +477,11 @@ int ft_init_av_dst_addr(struct fid_av *av_ptr, struct fid_ep *ep_ptr,
 		fi_addr_t *remote_addr);
 int ft_init_av_addr(struct fid_av *av, struct fid_ep *ep,
 		fi_addr_t *addr);
+int ft_fill_rma_info(struct fid_mr *mr, void *mr_buf,
+		     struct fi_rma_iov *rma_iov, size_t *key_size,
+		     size_t *rma_iov_len);
+int ft_get_rma_info(struct fi_rma_iov *rma_iov,
+		    struct fi_rma_iov *peer_iov, size_t key_size);
 int ft_exchange_keys(struct fi_rma_iov *peer_iov);
 void ft_fill_mr_attr(struct iovec *iov, struct fi_mr_dmabuf *dmabuf,
 		     int iov_count, uint64_t access,
@@ -540,6 +569,8 @@ void *ft_get_aligned_addr(void *ptr, size_t alignment)
 
 int ft_read_cq(struct fid_cq *cq, uint64_t *cur, uint64_t total,
 		int timeout, uint64_t tag);
+int ft_sync_oob(void);
+int ft_sync_inband(bool repost_rx);
 int ft_sync(void);
 int ft_sync_pair(int status);
 int ft_fork_and_pair(void);
@@ -567,7 +598,7 @@ ssize_t ft_tx(struct fid_ep *ep, fi_addr_t fi_addr, size_t size, void *ctx);
 ssize_t ft_tx_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote,
 		  struct fid_ep *ep, fi_addr_t fi_addr, size_t size, void *ctx);
 ssize_t ft_post_inject_buf(struct fid_ep *ep, fi_addr_t fi_addr, size_t size,
-		       void *op_buf, uint64_t op_tag);
+		       uint64_t data, void *op_buf, uint64_t op_tag);
 ssize_t ft_post_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size);
 ssize_t ft_inject(struct fid_ep *ep, fi_addr_t fi_addr, size_t size);
 ssize_t ft_inject_rma(enum ft_rma_opcodes rma_op, struct fi_rma_iov *remote,
@@ -576,6 +607,8 @@ ssize_t ft_post_rma(enum ft_rma_opcodes op, char *buf, size_t size,
 		struct fi_rma_iov *remote, void *context);
 ssize_t ft_post_rma_inject(enum ft_rma_opcodes op, char *buf, size_t size,
 		struct fi_rma_iov *remote);
+ssize_t ft_post_rma_writemsg(char *buf, size_t size, struct fi_rma_iov *remote,
+		void *context, uint64_t flags);
 int ft_rma_poll_buf(void *buf, int iter, size_t size);
 
 ssize_t ft_post_atomic(enum ft_atomic_opcodes opcode, struct fid_ep *ep,
@@ -597,11 +630,11 @@ int ft_get_cq_comp(struct fid_cq *cq, uint64_t *cur, uint64_t total, int timeout
 int ft_get_cntr_comp(struct fid_cntr *cntr, uint64_t total, int timeout);
 
 int ft_recvmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-		size_t size, void *ctx, int flags);
+	       void *buf, size_t size, void *ctx, uint64_t flags);
 int ft_sendmsg(struct fid_ep *ep, fi_addr_t fi_addr,
-		size_t size, void *ctx, int flags);
+	       void *buf, size_t size, void *ctx, uint64_t flags);
 int ft_tx_msg(struct fid_ep *ep, fi_addr_t fi_addr,
-	      size_t size, void *ctx, uint64_t flags);
+	      void *buf, size_t size, void *ctx, uint64_t flags);
 int ft_cq_read_verify(struct fid_cq *cq, void *op_context);
 
 void eq_readerr(struct fid_eq *eq, const char *eq_str);
@@ -637,6 +670,9 @@ enum {
 	LONG_OPT_DEBUG_ASSERT,
 	LONG_OPT_DATA_PROGRESS,
 	LONG_OPT_CONTROL_PROGRESS,
+	LONG_OPT_MAX_MSG_SIZE,
+	LONG_OPT_USE_FI_MORE,
+	LONG_OPT_THREADING,
 };
 
 extern int debug_assert;
@@ -714,5 +750,101 @@ static inline void *ft_get_page_end(const void *addr, size_t page_size)
 	return (void *)((uintptr_t)ft_get_page_start((const char *)addr
 			+ page_size, page_size) - 1);
 }
+
+/*
+ * Common validation functions and variables
+ */
+
+#define integ_alphabet "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+#define integ_alphabet_length (sizeof(integ_alphabet) - 1)
+
+#define FT_FILL(dst,cnt,type)					\
+	do {							\
+		int i, a = 0;					\
+		type *d = (dst);				\
+		for (i = 0; i < cnt; i++) {			\
+			d[i] = integ_alphabet[a];		\
+			if (++a >= integ_alphabet_length)	\
+				a = 0;				\
+		}						\
+	} while (0);
+
+#define FT_FILL_COMPLEX(dst,cnt,type)				\
+	do {							\
+		int i, a = 0;					\
+		OFI_COMPLEX(type) *d = (dst);			\
+		for (i = 0; i < cnt; i++) {			\
+			ofi_complex_fill_##type (&d[i], 	\
+					(type) integ_alphabet[a]); \
+			if (++a >= integ_alphabet_length)	\
+				a = 0;				\
+		}						\
+	} while (0);
+
+#define FT_CHECK(buf,cmp,cnt,type)				\
+	do {							\
+		int i;						\
+		type *b = (buf);				\
+		type *c = (cmp);				\
+		for (i = 0; i < cnt; i++) {			\
+			if (b[i] != c[i])			\
+				return -FI_EIO;			\
+		}						\
+	} while (0);
+
+#define FT_CHECK_COMPLEX(buf,cmp,cnt,type)			\
+	do {							\
+		int i;						\
+		OFI_COMPLEX(type) *b = (buf);			\
+		OFI_COMPLEX(type) *c = (cmp);			\
+		for (i = 0; i < cnt; i++) {			\
+			if (!ofi_complex_eq_##type (b[i], c[i])) \
+				return -FI_EIO;			\
+		}						\
+	} while (0);
+
+
+#ifdef  HAVE___INT128
+
+/* If __int128 supported, things just work. */
+#define FT_FILL_INT128(...)	FT_FILL(__VA_ARGS__)
+#define FT_CHECK_INT128(...)	FT_CHECK(__VA_ARGS__)
+
+#else
+
+/* If __int128, we're not going to fill/verify. */
+#define FT_FILL_INT128(...)
+#define FT_CHECK_INT128(...)
+
+#endif
+
+#define EXPAND( x ) x
+
+#define SWITCH_REAL_TYPES(type,FUNC,...)				\
+	switch (type) {						\
+	case FI_INT8:	EXPAND( FUNC(__VA_ARGS__,int8_t) ); break;	\
+	case FI_UINT8:	EXPAND( FUNC(__VA_ARGS__,uint8_t) ); break;	\
+	case FI_INT16:	EXPAND( FUNC(__VA_ARGS__,int16_t) ); break;	\
+	case FI_UINT16: EXPAND( FUNC(__VA_ARGS__,uint16_t) ); break;	\
+	case FI_INT32:	EXPAND( FUNC(__VA_ARGS__,int32_t) ); break;	\
+	case FI_UINT32: EXPAND( FUNC(__VA_ARGS__,uint32_t) ); break;	\
+	case FI_INT64:	EXPAND( FUNC(__VA_ARGS__,int64_t) ); break;	\
+	case FI_UINT64: EXPAND( FUNC(__VA_ARGS__,uint64_t) ); break;	\
+	case FI_INT128:	EXPAND( FUNC##_INT128(__VA_ARGS__,ofi_int128_t) ); break;	\
+	case FI_UINT128: EXPAND( FUNC##_INT128(__VA_ARGS__,ofi_uint128_t) ); break; \
+	case FI_FLOAT:	EXPAND( FUNC(__VA_ARGS__,float) ); break;		\
+	case FI_DOUBLE:	EXPAND( FUNC(__VA_ARGS__,double) ); break;	\
+	case FI_LONG_DOUBLE: EXPAND( FUNC(__VA_ARGS__,long double) ); break;		\
+	default: return -FI_EOPNOTSUPP;				\
+	}
+
+#define SWITCH_COMPLEX_TYPES(type,FUNC,...)				\
+	switch (type) {						\
+	case FI_FLOAT_COMPLEX:	EXPAND( FUNC(__VA_ARGS__,float) ); break;	\
+	case FI_DOUBLE_COMPLEX:	EXPAND( FUNC(__VA_ARGS__,double) ); break;	\
+	case FI_LONG_DOUBLE_COMPLEX: EXPAND( FUNC(__VA_ARGS__,long_double) ); break;\
+	default: return -FI_EOPNOTSUPP;				\
+	}
+
 
 #endif /* _SHARED_H_ */

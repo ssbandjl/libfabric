@@ -39,7 +39,9 @@ The following features are supported:
   message size of the MTU of the underlying hardware (approximately 8 KiB).
 
 *Address vectors*
-: The provider supports *FI_AV_TABLE* and *FI_AV_MAP* address vector types.
+: The provider supports *FI_AV_TABLE*. *FI_AV_MAP* was deprecated in Libfabric 2.x.
+  Applications can still use *FI_AV_MAP* to create an address vector. But the EFA
+  provider implementation will print a warning and switch to *FI_AV_TABLE*.
   *FI_EVENT* is unsupported.
 
 *Completion events*
@@ -84,6 +86,15 @@ No support for counters for the DGRAM endpoint.
 
 No support for inject.
 
+## Zero-copy receive mode
+- The receive operation cannot be cancelled via `fi_cancel()`.
+- Zero-copy receive mode can be enabled only if SHM transfer is disabled.
+- Unless the application explicitly disables P2P, e.g. via FI_HMEM_P2P_DISABLED,
+  zero-copy receive can be enabled only if available FI_HMEM devices all have
+  P2P support.
+  
+
+
 When using FI_HMEM for AWS Neuron or Habana SynapseAI buffers, the provider
 requires peer to peer transaction support between the EFA and the FI_HMEM
 device. Therefore, the FI_HMEM_P2P_DISABLED option is not supported by the EFA
@@ -104,7 +115,8 @@ provider for AWS Neuron or Habana SynapseAI.
   these operations are assisted by hardware support (return value is false).
 
 *FI_OPT_EFA_USE_DEVICE_RDMA - bool*
-: Only available if the application selects a libfabric API version >= 1.18.
+: These option only applies to the fi_setopt() call.
+  Only available if the application selects a libfabric API version >= 1.18.
   This option allows an application to change libfabric's behavior
   with respect to RDMA transfers.  Note that there is also an environment
   variable FI_EFA_USE_DEVICE_RDMA which the user may set as well.  If the
@@ -120,7 +132,8 @@ provider for AWS Neuron or Habana SynapseAI.
   revisions.
 
 *FI_OPT_EFA_SENDRECV_IN_ORDER_ALIGNED_128_BYTES - bool*
-: It is used to force the endpoint to use in-order send/recv operation for each 128 bytes
+: These option only applies to the fi_setopt() call.
+  It is used to force the endpoint to use in-order send/recv operation for each 128 bytes
   aligned block. Enabling the option will guarantee data inside each 128 bytes
   aligned block being sent and received in order, it will also guarantee data
   to be delivered to the receive buffer only once. If endpoint is not able to
@@ -128,7 +141,8 @@ provider for AWS Neuron or Habana SynapseAI.
 
 
 *FI_OPT_EFA_WRITE_IN_ORDER_ALIGNED_128_BYTES - bool*
-: It is used to set the endpoint to use in-order RDMA write operation for each 128 bytes
+: These option only applies to the fi_setopt() call..
+  It is used to set the endpoint to use in-order RDMA write operation for each 128 bytes
   aligned block. Enabling the option will guarantee data inside each 128 bytes
   aligned block being written in order, it will also guarantee data to be
   delivered to the target buffer only once. If endpoint is not able to support
@@ -196,8 +210,16 @@ struct fi_efa_mr_attr {
 **query_mr()** returns 0 on success, or the value of errno on failure
 (which indicates the failure reason).
 
+# Traffic Class (tclass) in EFA
+To prioritize the messages from a given endpoint, user can specify `fi_info->tx_attr->tclass = FI_TC_LOW_LATENCY` in the fi_endpoint() call to set the service level in rdma-core. All other tclass values will be ignored.
 
 # RUNTIME PARAMETERS
+
+*FI_EFA_IFACE*
+: A comma-delimited list of EFA device, i.e. NIC, names that should be visible to
+  the application. This paramater can be used to include/exclude NICs to enforce
+  process affinity based on the hardware topology. The default value is "all" which
+  allows all available NICs to be discovered.
 
 *FI_EFA_TX_SIZE*
 : Maximum number of transmit operations before the provider returns -FI_EAGAIN.
@@ -308,6 +330,23 @@ These OFI runtime parameters apply only to the RDM endpoint.
 Using huge page memory has a small performance advantage, but can
 cause system to run out of huge page memory. By default, EFA provider
 will use huge page unless FI_EFA_FORK_SAFE is set to 1/on/true.
+
+*FI_EFA_USE_ZCPY_RX*
+: Enables the use of application's receive buffers in place of bounce-buffers when feasible.
+(Default: 1). Setting this environment variable to 0 can disable this feature.
+Explicitly setting this variable to 1 does not guarantee this feature
+due to other requirements. See
+https://github.com/ofiwg/libfabric/blob/main/prov/efa/docs/efa_rdm_protocol_v4.md
+for details.
+
+*FI_EFA_USE_UNSOLICITED_WRITE_RECV*
+: Use device's unsolicited write recv functionality when it's available. (Default: 1).
+Setting this environment variable to 0 can disable this feature.
+
+*FI_EFA_INTERNAL_RX_REFILL_THRESHOLD*
+: The threshold that EFA provider will refill the internal rx pkt pool. (Default: 8).
+When the number of internal rx pkts to post is lower than this threshold,
+the refill will be skipped.
 
 # SEE ALSO
 

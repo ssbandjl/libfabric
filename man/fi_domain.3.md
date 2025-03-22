@@ -41,6 +41,8 @@ int fi_set_ops(struct fid *domain, const char *name, uint64_t flags,
 
 *info*
 : Fabric information, including domain capabilities and attributes.
+  The struct fi_info must have been obtained using either fi_getinfo()
+  or fi_dupinfo().
 
 *domain*
 : An opened access domain.
@@ -161,18 +163,12 @@ events that occur on the domain or active endpoints allocated on a
 domain.  This includes CM events.  Endpoints may direct their control
 events to alternate EQs by binding directly with the EQ.
 
+**Deprecated**:
 Binding an event queue to a domain with the FI_REG_MR flag indicates
 that the provider should perform all memory registration operations
 asynchronously, with the completion reported through the event queue.
 If an event queue is not bound to the domain with the FI_REG_MR flag,
 then memory registration requests complete synchronously.
-
-See [`fi_av_bind`(3)](fi_av_bind.3.html),
-[`fi_ep_bind`(3)](fi_ep_bind.3.html),
-[`fi_mr_bind`(3)](fi_mr_bind.3.html),
-[`fi_pep_bind`(3)](fi_pep_bind.3.html), and
-[`fi_scalable_ep_bind`(3)](fi_scalable_ep_bind.3.html) for more
-information.
 
 ## fi_close
 
@@ -190,8 +186,7 @@ struct fi_domain_attr {
 	struct fid_domain     *domain;
 	char                  *name;
 	enum fi_threading     threading;
-	enum fi_progress      control_progress;
-	enum fi_progress      data_progress;
+	enum fi_progress      progress;
 	enum fi_resource_mgmt resource_mgmt;
 	enum fi_av_type       av_type;
 	int                   mr_mode;
@@ -215,6 +210,7 @@ struct fi_domain_attr {
 	size_t                mr_cnt;
 	uint32_t              tclass;
 	size_t                max_ep_auth_key;
+	uint32_t              max_group_id;
 };
 ```
 
@@ -250,49 +246,36 @@ resources and interfaces enable a provider to eliminate lower-level locks.
 : The completion threading model is best suited for multi-threaded applications
   using scalable endpoints which desire lockless operation.  Applications must
   serialize access to all objects that are associated by a common completion
-  mechanism (for example, endpoints bound to the same CQ or counter).  It is
-  recommended that providers which support scalable endpoints also support this
-  threading model.
+  mechanism (for example, transmit and receive contexts bound to the same CQ
+  or counter).  It is recommended that providers which support scalable
+  endpoints support this threading model.
 
-  Applications wanting to leverage FI_THREAD_COMPLETION should allocate
-  transmit contexts, receive contexts, and completion queues and counters to
+  Applications wanting to leverage FI_THREAD_COMPLETION should dedicate
+  transmit contexts, receive contexts, completion queues, and counters to
   individual threads.
 
 *FI_THREAD_DOMAIN*
-: A domain serialization model requires applications to serialize
-  access to all objects belonging to a domain.
+: The domain threading model is best suited for single-threaded applications
+  and multi-threaded applications using standard endpoints which desire lockless
+  operation.  Applications must serialize access to all objects
+  under the same domain.  This includes endpoints, transmit and receive contexts,
+  completion queues and counters, and registered memory regions.
 
-*FI_THREAD_ENDPOINT*
+*FI_THREAD_ENDPOINT* (deprecated)
 : The endpoint threading model is similar to FI_THREAD_FID, but with
   the added restriction that serialization is required when accessing
   the same endpoint, even if multiple transmit and receive contexts are
-  used.  Conceptually, FI_THREAD_ENDPOINT maps well to providers that
-  implement fabric services in hardware but use a single command
-  queue to access different data flows.
+  used.
 
-*FI_THREAD_FID*
+*FI_THREAD_FID* (deprecated)
 : A fabric descriptor (FID) serialization model requires applications
   to serialize access to individual fabric resources associated with
-  data transfer operations and completions.  Multiple threads must
-  be serialized when accessing the same endpoint, transmit context,
-  receive context, completion queue, counter, wait set, or poll set.
-  Serialization is required only by threads accessing the same object.
-
-  For example, one thread may be initiating a data transfer on an
-  endpoint, while another thread reads from a completion queue
-  associated with the endpoint.
-
-  Serialization to endpoint access is only required when accessing
-  the same endpoint data flow.  Multiple threads may initiate transfers
-  on different transmit contexts of the same endpoint without serializing,
-  and no serialization is required between the submission of data
-  transmit requests and data receive operations.
-
-  In general, FI_THREAD_FID allows the provider to be implemented
-  without needing internal locking when handling data transfers.
-  Conceptually, FI_THREAD_FID maps well to providers that implement
-  fabric services in hardware and provide separate command queues to
-  different data flows.
+  data transfer operations and completions. For endpoint access,
+  serialization is only required when accessing the same endpoint data
+  flow.  Multiple threads may initiate transfers on different transmit
+  contexts or the same endpoint without serializing, and no serialization
+  is required between the submission of data transmit requests and data
+  receive operations.
 
 *FI_THREAD_SAFE*
 : A thread safe serialization model allows a multi-threaded
@@ -306,7 +289,7 @@ resources and interfaces enable a provider to eliminate lower-level locks.
   providers will return a threading model that allows for the greatest
   level of parallelism.
 
-## Progress Models (control_progress / data_progress)
+## Progress Models (progress)
 
 Progress is the ability of the underlying implementation to complete
 processing of an asynchronous request.  In many cases, the processing
@@ -327,6 +310,11 @@ Data progress indicates the method that the provider uses to make
 progress on data transfer operations.  This includes message queue,
 RMA, tagged messaging, and atomic operations, along with their
 completion processing.
+
+The progress field defines the behavior of both control and data operations.
+For applications that require compilation portability between the version 1
+and version 2 libfabric series, the progress field may be referenced as
+data_progress.
 
 Progress frequently requires action being taken at both the transmitting
 and receiving sides of an operation.  This is often a requirement for
@@ -377,12 +365,11 @@ are defined.
   received operations.
 
 *FI_PROGRESS_CONTROL_UNIFIED*
-: This progress model indicates that the user will synchronize progressing the
-  data and control operations themselves (i.e. this allows the control interface
-  to NOT be thread safe). It is only valid for control progress (not data progress).
-  Setting control=FI_PROGRESS_CONTROL_UNIFIED, data=FI_PROGRESS_MANUAL, and
-  threading=FI_THREAD_DOMAIN/FI_THREAD_COMPLETION allows Libfabric to remove all
-  locking in the critical data progress path.
+: This progress model indicates that the user will synchronize progressing
+  the data and control operations themselves (i.e. this allows the control
+  interface to NOT be thread safe). It implies manual progress, and when
+  combined with threading=FI_THREAD_DOMAIN/FI_THREAD_COMPLETION allows
+  Libfabric to remove all locking in the critical data progress path.
 
 *FI_PROGRESS_UNSPEC*
 : This value indicates that no progress model has been defined.  It
@@ -426,17 +413,18 @@ the endpoint is reliable or unreliable, as well as provider and protocol
 specific implementation details, as shown in the following table.  The
 table assumes that all peers enable or disable RM the same.
 
-| Resource | DGRAM EP-no RM | DGRAM EP-with RM | RDM/MSG EP-no RM | RDM/MSG EP-with RM |
-|:--------:|:-------------------:|:-------------------:|:------------------:|:-----------------:|
-| Tx Ctx         | undefined error  | EAGAIN           | undefined error   | EAGAIN             |
-| Rx Ctx         | undefined error  | EAGAIN           | undefined error   | EAGAIN             |
-| Tx CQ          | undefined error  | EAGAIN           | undefined error   | EAGAIN             |
-| Rx CQ          | undefined error  | EAGAIN           | undefined error   | EAGAIN             |
-| Target EP      | dropped          | dropped          | transmit error    | retried            |
-| No Rx Buffer   | dropped          | dropped          | transmit error    | retried            |
-| Rx Buf Overrun | truncate or drop | truncate or drop | truncate or error | truncate or error  |
-| Unmatched RMA  | not applicable   | not applicable   | transmit error    | transmit error     |
-| RMA Overrun    | not applicable   | not applicable   | transmit error    | transmit error     |
+| Resource | DGRAM EP-no RM | DGRAM EP-with RM | MSG EP-no RM | MSG EP-with RM | RDM EP-no RM | RDM EP-with RM |
+|:--------:|:-------------------:|:-------------------:|:------------------:|:-----------------:| :------------------:|:-----------------:|
+| Tx Ctx         | undefined error  | EAGAIN           | undefined error   | EAGAIN             | undefined error   | EAGAIN             |
+| Rx Ctx         | undefined error  | EAGAIN           | undefined error   | EAGAIN             | undefined error   | EAGAIN             |
+| Tx CQ          | undefined error  | EAGAIN           | undefined error   | EAGAIN             | undefined error   | EAGAIN             |
+| Rx CQ          | undefined error  | EAGAIN           | undefined error   | EAGAIN             | undefined error   | EAGAIN             |
+| Target EP      | dropped          | dropped          | transmit error    | retried            | transmit error    | retried            |
+| No Rx Buffer   | dropped          | dropped          | transmit error    | retried            | transmit error    | retried            |
+| Rx Buf Overrun | truncate or drop | truncate or drop | truncate or error | truncate or error  | truncate or error | truncate or error  |
+| Unmatched RMA  | not applicable   | not applicable   | transmit error    | transmit error     | transmit error    | transmit error     |
+| RMA Overrun    | not applicable   | not applicable   | transmit error    | transmit error     | transmit error    | transmit error     |
+| Unreachable EP | dropped          | dropped          | not applicable    | not applicable     | transmit error    | transmit error     |
 
 The resource column indicates the resource being accessed by a data
 transfer operation.
@@ -495,12 +483,25 @@ transfer operation.
   operations, or attempt to access outside of the target memory region
   will fail, resulting in a transmit error.
 
-When a resource management error occurs on an endpoint, the endpoint is
-transitioned into a disabled state.  Any operations which have not
-already completed will fail and be discarded.  For connectionless endpoints,
-the endpoint must be re-enabled before it will accept new data transfer
-operations.  For connected endpoints, the connection is torn down and
-must be re-established.
+*Unreachable EP*
+: Unreachable endpoint is a connectionless specific scenario where transmit
+  operations are issued to unreachable target endpoints. Such scenarios include
+  no-route-to-host or down target NIC. For FI_EP_DGRAM endpoints, transmit
+  operations targeting an unreachable endpoint will have operation dropped. For
+  FI_EP_RDM, target operations targeting an unreachable endpoint will result in
+  a transmit error.
+
+When a resource management error occurs on an a connected endpoint, the endpoint
+will transition into a disabled state and the connection torn down. A disabled
+endpoint will drop any queued or inflight operations.
+
+The behavior of resource management errors on connectionless endpoints depends
+on the type of error. If RM is disabled and one of the following errors occur,
+the endpoint will be disabled: Tx Ctx, Rx Ctx, Tx CQ, or Rx CQ. For other errors
+(Target EP, No Rx Buffer, etc.), the operation may fail, but the endpoint will
+remain enabled. A disabled endpoint will drop or fail any queued or inflight
+operations. In addition, a disabled endpoint must be re-enabled before it will
+accept new data transfer operations.
 
 There is one notable restriction on the protections offered by resource
 management.  This occurs when resource management is enabled on an
@@ -524,7 +525,7 @@ Specifies the type of address vectors that are usable with this domain.
 For additional details on AV type, see [`fi_av`(3)](fi_av.3.html).
 The following values may be specified.
 
-*FI_AV_MAP*
+*FI_AV_MAP* (deprecated)
 : Only address vectors of type AV map are requested or supported.
 
 *FI_AV_TABLE*
@@ -582,7 +583,7 @@ The following values may be specified.
 : Indicates that the memory regions associated with completion counters
   must be explicitly enabled after being bound to any counter.
 
-*FI_MR_UNSPEC*
+*FI_MR_UNSPEC* (deprecated)
 : Defined for compatibility -- library versions 1.4 and earlier.  Setting
   mr_mode to 0 indicates that FI_MR_BASIC or FI_MR_SCALABLE are requested
   and supported.
@@ -591,14 +592,14 @@ The following values may be specified.
 : Registered memory regions are referenced by peers using the virtual address
   of the registered memory region, rather than a 0-based offset.
 
-*FI_MR_BASIC*
+*FI_MR_BASIC* (deprecated)
 : Defined for compatibility -- library versions 1.4 and earlier.  Only
   basic memory registration operations are requested or supported.
   This mode is equivalent to the FI_MR_VIRT_ADDR, FI_MR_ALLOCATED, and
   FI_MR_PROV_KEY flags being set in later library versions.  This flag
   may not be used in conjunction with other mr_mode bits.
 
-*FI_MR_SCALABLE*
+*FI_MR_SCALABLE* (deprecated)
 : Defined for compatibility -- library versions 1.4 and earlier.
   Only scalable memory registration operations
   are requested or supported.  Scalable registration uses offset based
@@ -725,6 +726,11 @@ The following are support primary capabilities:
   FI_AV_USER_ID can still be supported through the AV insert calls without
   this domain capability set. See [`fi_av`(3)](fi_av.3.html).
 
+*FI_PEER*
+: Specifies that the domain must support importing resources to be used in the
+  the peer API flow. The domain must support importing owner_ops when opening
+  a CQ, counter, and shared receive queue.
+
 The following are supported secondary capabilities:
 
 *FI_LOCAL_COMM*
@@ -773,9 +779,10 @@ Providers which support authorization keys and connectionless endpoint must
 support this option.
 
 ## Max Error Data Size (max_err_data)
-: The maximum amount of error data, in bytes, that may be returned as part of
-  a completion or event queue error.  This value corresponds to the
-  err_data_size field in struct fi_cq_err_entry and struct fi_eq_err_entry.
+
+The maximum amount of error data, in bytes, that may be returned as part of
+a completion or event queue error.  This value corresponds to the
+err_data_size field in struct fi_cq_err_entry and struct fi_eq_err_entry.
 
 ## Memory Regions Count (mr_cnt)
 
@@ -796,8 +803,17 @@ for additional information.
 
 ## Max Authorization Keys per Endpoint (max_ep_auth_key)
 
-: The maximum number of authorization keys which can be supported per connectionless
-  endpoint.
+The maximum number of authorization keys which can be supported per connectionless
+endpoint.
+
+## Maximum Peer Group Id (max_group_id)
+
+The maximum value that a peer group may be assigned, inclusive.  Valid peer
+group id's must be between 0 and max_group_id.  See [`fi_av`(3)](fi_av.3.html)
+for additional information on peer groups and their use.  Users may request
+support for peer groups by setting this to a non-zero value.  Providers that
+cannot meet the requested max_group_id will fail fi_getinfo().  On output,
+providers may return a value higher than that requested by the application.
 
 # RETURN VALUE
 
