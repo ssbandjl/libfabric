@@ -22,10 +22,11 @@ clear
 # build_bin=/home/xb/project/libfabric/libfabric/build/bin
 # ./configure --with-libfabric=/home/xb/project/libfabric/libfabric/build/libfabric --prefix=/home/xb/project/libfabric/libfabric/build/ --enable-debug && make -j 32 && make install
 # for mercury ./configure --enable-debug && make -j 32 && make install
-./configure --prefix=/home/xb/project/libfabric/libfabric/build/ --enable-debug && make -j 32 && make install
+# ./configure --prefix=/home/xb/project/libfabric/libfabric/build/ --enable-debug && make -j 32 && make install
+./configure --prefix=/root/project/net/libfabric/build/ --enable-debug && make -j 32 && make install
 
 # 测试安装成功, 可能缺少原子库:yum install libatomic* -y
-export PATH=/home/xb/project/libfabric/libfabric/build/bin:$PATH
+export PATH=/root/project/net/libfabric//build/bin:$PATH
 echo "fi_info"
 
 
