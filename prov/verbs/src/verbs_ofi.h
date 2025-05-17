@@ -51,6 +51,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <ofi_epoll.h>
+#include <sys/syscall.h>
 
 #include <infiniband/ib.h>
 #include <infiniband/verbs.h>
@@ -117,6 +118,9 @@
 #define VRB_WARN_ERR(subsys, fn, err) \
 	VRB_WARN(subsys, fn ": %s (%d)\n", fi_strerror((int) -(err)), (int) err)
 
+
+#define printf_ffl(format, arg...)						\
+	printf("tid:%ld, %s(), %s:%d, " format, syscall(SYS_gettid), __FUNCTION__, __FILE__, __LINE__, ##arg)
 
 #define VERBS_INJECT_FLAGS(ep, len, flags, desc) \
 	(((flags) & FI_INJECT) || !(desc) || \

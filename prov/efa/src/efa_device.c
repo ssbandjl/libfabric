@@ -198,6 +198,7 @@ int efa_device_list_initialize(void)
 	}
 
 	for (device_idx = 0; device_idx < g_device_cnt; device_idx++) {
+		printf("efa_device_construct, %s(), %s:%d\n", __FUNCTION__, __FILE__, __LINE__);
 		err = efa_device_construct(&g_device_list[device_idx], device_idx, ibv_device_list[device_idx]);
 		if (err) {
 			ret = err;

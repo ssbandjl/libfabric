@@ -32,6 +32,7 @@
  */
 
 #include <ofi_util.h>
+#include <execinfo.h>
 
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -701,6 +702,7 @@ static int vrb_have_device(void)
 		return 0;
 
 	for (i = 0; devs[i]; i++) {
+		printf_ffl("idx:%d, Open dev_name:%s\n", i, devs[i]->name);
 		verbs = ibv_open_device(devs[i]);
 		if (verbs) {
 			ret = ibv_query_device(verbs, &attr);
@@ -972,6 +974,7 @@ static int vrb_ifa_rdma_info(const struct ifaddrs *ifa, char **dev_name,
 		goto err1;
 	}
 
+	printf_ffl("rdma_bind_addr, name:%s\n", name);
 	ret = rdma_bind_addr(id, rai_->ai_src_addr);
 	if (ret) {
 		ret = -errno;
@@ -1059,10 +1062,11 @@ static int vrb_get_sib(struct dlist_entry *verbs_devs)
 	if (!devices)
 		return -errno;
 
+	printf_ffl("Ready to open device, num_devices:%d\n", num_devices);
 	for (int dev = 0; dev < num_devices; dev++) {
 		if (!devices[dev])
 			continue;
-
+		printf_ffl("Open dev_name:%s\n", devices[dev]->name);
 		context = ibv_open_device(devices[dev]);
 		if (!context)
 			continue;
@@ -1348,6 +1352,23 @@ static int vrb_device_has_ipoib_addr(const char *dev_name)
 }
 
 #define VERBS_NUM_DOMAIN_TYPES		3
+
+
+static inline void dump_stack_user(void)
+{
+  int  size=32;
+  void *array[32]={0};
+  int i = 0;
+  int stack_num = backtrace(array, size);
+  char **stacktrace = backtrace_symbols(array, stack_num);
+  printf("########## start ###########\n");
+  for(; i<stack_num; ++i)
+  {
+    printf("Network_Crt %s\n",stacktrace[i]);
+  }
+  printf("########### end ##########\n");
+  free(stacktrace);
+}
 
 static int vrb_init_info(const struct fi_info **all_infos)
 {

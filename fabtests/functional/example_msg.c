@@ -154,7 +154,7 @@ static int start_client(void)
 
 static int start_server(void)
 {
-	const struct sockaddr_in *sin;
+	// const struct sockaddr_in *sin;
 
 	/* The first OFI call to happen for initialization is fi_getinfo which queries libfabric
 	 * and returns any appropriate providers that fulfill the hints requirements. Any applicable
