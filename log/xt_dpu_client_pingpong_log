@@ -1,0 +1,758 @@
+
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var mr_ze_cache_monitor_enabled
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable mr_cache_max_size=<not set>
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable mr_cache_max_count=<not set>
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable mr_cache_monitor=<not set>
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable mr_cuda_cache_monitor_enabled=<not set>
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable mr_rocr_cache_monitor_enabled=<not set>
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable mr_ze_cache_monitor_enabled=<not set>
+libfabric:15866:1747530290::core:mr:ofi_default_cache_size():66<info> default cache size=231273528
+libfabric:15866:1747530290::core:mr:ofi_monitors_init():315<info> Default memory monitor is: memhooks
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var xpmem_memcpy_chunksize
+libfabric:15866:1747530290::core:core:ofi_xpmem_init():111<info> Failed to export process virtual address space for use with xpmem
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var provider
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable provider=<not set>
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var fork_unsafe
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var universe_size
+libfabric:15866:1747530290::core:core:fi_param_get_():404<info> read long var universe_size=16
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var av_remove_cleanup
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable av_remove_cleanup=<not set>
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var offload_coll_provider
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable offload_coll_provider=<not set>
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var provider_path
+libfabric:15866:1747530290::core:core:fi_param_get_():372<info> variable provider_path=<not set>
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libefa-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libefa-fi.so): libefa-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libpsm2-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libpsm2-fi.so): libpsm2-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libopx-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libopx-fi.so): libopx-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libusnic-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libusnic-fi.so): libusnic-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libverbs-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libverbs-fi.so): libverbs-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libcxi-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libcxi-fi.so): libcxi-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libpsm3-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libpsm3-fi.so): libpsm3-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libucx-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libucx-fi.so): libucx-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib librxm-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(librxm-fi.so): librxm-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib librxd-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(librxd-fi.so): librxd-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libshm-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libshm-fi.so): libshm-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libudp-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libudp-fi.so): libudp-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libtcp-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libtcp-fi.so): libtcp-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libsockets-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libsockets-fi.so): libsockets-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libnet-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libnet-fi.so): libnet-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libhook_perf-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libhook_perf-fi.so): libhook_perf-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libhook_trace-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libhook_trace-fi.so): libhook_trace-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libhook_profile-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libhook_profile-fi.so): libhook_profile-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libhook_debug-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libhook_debug-fi.so): libhook_debug-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libhook_noop-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libhook_noop-fi.so): libhook_noop-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libhook_hmem-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libhook_hmem-fi.so): libhook_hmem-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libhook_dmabuf_peer_mem-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libhook_dmabuf_peer_mem-fi.so): libhook_dmabuf_peer_mem-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():666<debug> opening provider lib libcoll-fi.so
+libfabric:15866:1747530290::core:core:ofi_reg_dl_prov():674<debug> dlopen(libcoll-fi.so): libcoll-fi.so: cannot open shared object file: No such file or directory
+libfabric:15866:1747530290::psm3:core:fi_psm3_ini():893<info> hpc117:pid15866: build options: VERSION=400.0=4.0.0.0, HAVE_PSM3_SRC=1, PSM3_CUDA=0
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var name_server
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var tagged_rma
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var uuid
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var delay
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var timeout
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var conn_timeout
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var prog_interval
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var prog_affinity
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var inject_size
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var lock_level
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var lazy_conn
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var disconnect
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var tag_layout
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var yield_mode
+libfabric:15866:1747530290::psm3:core:fi_param_define_():251<debug> registered var wait_enable
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_bool():96<info> hpc117:pid15866: variable FI_PSM3_NAME_SERVER=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_bool():96<info> hpc117:pid15866: variable FI_PSM3_TAGGED_RMA=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_str():126<info> hpc117:pid15866: variable FI_PSM3_UUID=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_int():111<info> hpc117:pid15866: variable FI_PSM3_DELAY=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_int():111<info> hpc117:pid15866: variable FI_PSM3_TIMEOUT=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_int():111<info> hpc117:pid15866: variable FI_PSM3_PROG_INTERVAL=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_str():126<info> hpc117:pid15866: variable FI_PSM3_PROG_AFFINITY=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_int():111<info> hpc117:pid15866: variable FI_PSM3_INJECT_SIZE=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_int():111<info> hpc117:pid15866: variable FI_PSM3_LOCK_LEVEL=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_bool():96<info> hpc117:pid15866: variable FI_PSM3_LAZY_CONN=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_int():111<info> hpc117:pid15866: variable FI_PSM3_CONN_TIMEOUT=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_bool():96<info> hpc117:pid15866: variable FI_PSM3_DISCONNECT=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_str():126<info> hpc117:pid15866: variable FI_PSM3_TAG_LAYOUT=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_bool():96<info> hpc117:pid15866: variable FI_PSM3_YIELD_MODE=<not set>
+libfabric:15866:1747530290::psm3:core:psmx3_param_get_bool():96<info> hpc117:pid15866: variable FI_PSM3_WAIT_ENABLE=<not set>
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: psm3 (400.0)
+libfabric:15866:1747530290::core:core:ofi_register_provider():520<debug> no provider structure or name
+libfabric:15866:1747530290::core:core:ofi_register_provider():520<debug> no provider structure or name
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: usnic (1.0)
+libfabric:15866:1747530290::shm:core:fi_param_define_():251<debug> registered var sar_threshold
+libfabric:15866:1747530290::shm:core:fi_param_define_():251<debug> registered var tx_size
+libfabric:15866:1747530290::shm:core:fi_param_define_():251<debug> registered var rx_size
+libfabric:15866:1747530290::shm:core:fi_param_define_():251<debug> registered var disable_cma
+libfabric:15866:1747530290::shm:core:fi_param_define_():251<debug> registered var use_dsa_sar
+libfabric:15866:1747530290::shm:core:fi_param_define_():251<debug> registered var use_xpmem
+libfabric:15866:1747530290::shm:core:fi_param_get_():372<info> variable sar_threshold=<not set>
+libfabric:15866:1747530290::shm:core:fi_param_get_():372<info> variable tx_size=<not set>
+libfabric:15866:1747530290::shm:core:fi_param_get_():372<info> variable rx_size=<not set>
+libfabric:15866:1747530290::shm:core:fi_param_get_():372<info> variable disable_cma=<not set>
+libfabric:15866:1747530290::shm:core:fi_param_get_():372<info> variable use_dsa_sar=<not set>
+libfabric:15866:1747530290::shm:core:fi_param_get_():372<info> variable use_xpmem=<not set>
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: shm (201.0)
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: sm2 (201.0)
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var buffer_size
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var comp_per_progress
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var sar_limit
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var use_srx
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var tx_size
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var rx_size
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var msg_tx_size
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var msg_rx_size
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var cm_progress_interval
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var cq_eq_fairness
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var data_auto_progress
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var use_rndv_write
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var enable_direct_send
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var enable_passthru
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var detect_hmem_iface
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable enable_passthru=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable buffer_size=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable tx_size=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable rx_size=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable msg_tx_size=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable msg_rx_size=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable cm_progress_interval=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable cq_eq_fairness=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable data_auto_progress=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable use_rndv_write=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var def_wait_obj
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_define_():251<debug> registered var def_tcp_wait_obj
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable def_wait_obj=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable def_tcp_wait_obj=<not set>
+libfabric:15866:1747530290::ofi_rxm:core:fi_param_get_():372<info> variable detect_hmem_iface=<not set>
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: ofi_rxm (201.0)
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: verbs (201.0)
+libfabric:15866:1747530290::ofi_mrail:core:fi_param_define_():251<debug> registered var config
+libfabric:15866:1747530290::ofi_mrail:core:fi_param_get_():372<info> variable config=<not set>
+libfabric:15866:1747530290::ofi_mrail:core:fi_param_define_():251<debug> registered var addr_strc
+libfabric:15866:1747530290::ofi_mrail:core:fi_param_define_():251<debug> registered var addr
+libfabric:15866:1747530290::ofi_mrail:core:fi_param_get_():372<info> variable addr=<not set>
+libfabric:15866:1747530290::ofi_mrail:core:fi_param_get_():372<info> variable addr_strc=<not set>
+libfabric:15866:1747530290::ofi_mrail:core:mrail_parse_env_vars():115<info> unable to read FI_OFI_MRAIL_ADDR env variable
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: ofi_mrail (201.0)
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_define_():251<debug> registered var spin_count
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_define_():251<debug> registered var retry
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_define_():251<debug> registered var max_peers
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_define_():251<debug> registered var max_unacked
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_get_():372<info> variable spin_count=<not set>
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_get_():372<info> variable retry=<not set>
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_get_():372<info> variable max_peers=<not set>
+libfabric:15866:1747530290::ofi_rxd:core:fi_param_get_():372<info> variable max_unacked=<not set>
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: ofi_rxd (201.0)
+efa_device_construct, efa_device_list_initialize(), prov/efa/src/efa_device.c:201
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x7ffff7328010, dev:mlx5_0, context:0x7ffff7328010
+libfabric:15866:1747530290::efa:fabric:efa_device_construct():67<info> efadv_query_device: Unknown error -95(-95)
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: efa (201.0)
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var uuid
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var force_cpuaffinity
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var reliability_service_usec_max
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var reliability_max_uncongested_pings
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var reliability_max_congested_pings
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var reliability_service_pre_ack_rate
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var selinux
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var hfi_select
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var mp_eager_disable
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var rzv_min_payload_bytes
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var delivery_completion_threshold
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var sdma_bounce_buf_threshold
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var sdma_disable
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var sdma_min_payload_bytes
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var tid_min_payload_bytes
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var tid_disable
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var expected_receive_enable
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var prog_affinity
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var auto_progress_interval_usec
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var pkey
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var sl
+libfabric:15866:1747530290::core:core:fi_param_define_():251<debug> registered var opx_tracer_out_path
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var shm_enable
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var port
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var link_down_wait_time_max_sec
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var route_control
+libfabric:15866:1747530290::opx:core:fi_param_define_():251<debug> registered var mixed_network
+libfabric:15866:1747530290::opx:fabric:fi_opx_ini():809<trace> Using opx Provider: Library file location is /root/project/net/libfabric/build/lib/libfabric.so.1.
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: opx (201.0)
+libfabric:15866:1747530290::core:core:ofi_register_provider():520<debug> no provider structure or name
+libfabric:15866:1747530290::udp:core:fi_param_define_():251<debug> registered var iface
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: udp (201.0)
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var pe_waittime
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var conn_timeout
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var max_conn_retry
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var def_conn_map_sz
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var def_av_sz
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var def_cq_sz
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var def_eq_sz
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var pe_affinity
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var keepalive_enable
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var keepalive_time
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var keepalive_intvl
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var keepalive_probes
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var iface
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var max_buf_sz
+libfabric:15866:1747530290::sockets:core:fi_param_define_():251<debug> registered var dgram_drop_rate
+libfabric:15866:1747530290::core:core:ofi_register_provider():525<info> registering provider: sockets (201.0)
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var prov_name
+libfabric:15866:1747530290::tcp:core:fi_param_get_():372<info> variable prov_name=<not set>
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var iface
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var port_low_range
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var port_high_range
+libfabric:15866:1747530290::tcp:core:fi_param_get_():372<info> variable port_high_range=<not set>
+libfabric:15866:1747530290::tcp:core:fi_param_get_():372<info> variable port_low_range=<not set>
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var tx_size
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var rx_size
+libfabric:15866:1747530290::tcp:core:fi_param_get_():372<info> variable tx_size=<not set>
+libfabric:15866:1747530290::tcp:core:fi_param_get_():372<info> variable rx_size=<not set>
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var max_inject
+libfabric:15866:1747530290::tcp:core:fi_param_get_():372<info> variable max_inject=<not set>
+libfabric:15866:1747530290::tcp:core:fi_param_define_():251<debug> registered var max_saved
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable max_saved=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var max_saved_size
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable max_saved_size=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var max_rx_size
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable max_rx_size=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var nodelay
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable nodelay=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var staging_sbuf_size
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var prefetch_rbuf_size
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var zerocopy_size
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable staging_sbuf_size=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable prefetch_rbuf_size=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable zerocopy_size=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var trace_msg
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable trace_msg=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var disable_auto_progress
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable disable_auto_progress=<not set>
+libfabric:15866:1747530291::tcp:core:fi_param_define_():251<debug> registered var io_uring
+libfabric:15866:1747530291::tcp:core:fi_param_get_():372<info> variable io_uring=<not set>
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: tcp (201.0)
+libfabric:15866:1747530291::lnx:core:fi_param_define_():251<debug> registered var prov_links
+libfabric:15866:1747530291::lnx:core:fi_param_define_():251<debug> registered var disable_shm
+libfabric:15866:1747530291::lnx:core:fi_param_define_():251<debug> registered var use_srq
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 20800 region_size 20480 align_entry 320 entry_size 264 chunk_cnt 64 pool 0x555555580520  (0x7ffff7f9c0a8)
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: lnx (201.0)
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: ofi_hook_perf (201.0)
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: ofi_hook_trace (201.0)
+libfabric:15866:1747530291::core:core:ofi_register_provider():520<debug> no provider structure or name
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: ofi_hook_debug (201.0)
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: ofi_hook_hmem (201.0)
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: ofi_hook_dmabuf_peer_mem (201.0)
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: ofi_hook_noop (201.0)
+libfabric:15866:1747530291::core:core:ofi_register_provider():525<info> registering provider: off_coll (201.0)
+libfabric:15866:1747530291::core:core:fi_getinfo_():1347<debug> hints prov_name: verbs;ofi_rxm
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable use_srx=<not set>
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1347<debug> hints prov_name: verbs;^ofi_rxm
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var tx_size
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable tx_size=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var rx_size
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable rx_size=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var tx_iov_limit
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable tx_iov_limit=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var rx_iov_limit
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable rx_iov_limit=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var inline_size
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable inline_size=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var min_rnr_timer
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable min_rnr_timer=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var use_odp
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable use_odp=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var prefer_xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable prefer_xrc=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var xrcd_filename
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable xrcd_filename=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var cqread_bunch_size
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable cqread_bunch_size=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var gid_idx
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable gid_idx=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var device_name
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable device_name=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var use_dmabuf
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable use_dmabuf=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_read_params():736<info> dmabuf support is enabled
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var iface
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable iface=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var dgram_use_name_server
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable dgram_use_name_server=<not set>
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_define_():251<debug> registered var dgram_name_server_port
+libfabric:15866:1747530291:ofi_rxm:verbs:core:fi_param_get_():372<info> variable dgram_name_server_port=<not set>
+tid:15866, vrb_have_device(), prov/verbs/src/verbs_info.c:705, idx:0, Open dev_name:mlx5_0
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x555555587100, dev:mlx5_0, context:0x555555587100
+tid:15866, vrb_ifa_rdma_info(), prov/verbs/src/verbs_info.c:977, rdma_bind_addr, name:10.20.10.117
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_ifa_rdma_info():981<debug> rdma_bind_addr failed with error code: 19 (No such device) for interface enp6s0 with address: 10.20.10.117
+tid:15866, vrb_ifa_rdma_info(), prov/verbs/src/verbs_info.c:977, rdma_bind_addr, name:192.168.1.117
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x555555589500, dev:mlx5_0, context:0x555555589500
+tid:15866, vrb_ifa_rdma_info(), prov/verbs/src/verbs_info.c:977, rdma_bind_addr, name:192.168.2.117
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x5555555cabb0, dev:xtrdma_0, context:0x5555555cabb0
+tid:15866, xtrdma_ualloc_context(), ../providers/xtrdma/umain.c:247, dev:xtrdma_0, uctx:0x5555555cabb0
+tid:15866, huge_mem_init(), ../providers/xtrdma/huge_mem.c:99, Huge map file /dev/hugepages/huge_ctx_map_file_1747530291_0x5555555cabb0_512463280
+tid:15866, vrb_ifa_rdma_info(), prov/verbs/src/verbs_info.c:977, rdma_bind_addr, name:fe80::8e0:afff:fead:365a%enp6s0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_ifa_rdma_info():981<debug> rdma_bind_addr failed with error code: 19 (No such device) for interface enp6s0 with address: fe80::8e0:afff:fead:365a%enp6s0
+tid:15866, vrb_ifa_rdma_info(), prov/verbs/src/verbs_info.c:977, rdma_bind_addr, name:fe80::e29d:73ff:fec4:a29c%ens6f0np0
+tid:15866, vrb_ifa_rdma_info(), prov/verbs/src/verbs_info.c:977, rdma_bind_addr, name:fe80::201:2ff:fe04:0%ens2f0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:verbs_devs_print():889<info> list of verbs devices found for FI_EP_MSG:
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:verbs_devs_print():893<info> #1 mlx5_0 - IPoIB addresses:
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:verbs_devs_print():903<info>    192.168.1.117
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:verbs_devs_print():903<info>    fe80::e29d:73ff:fec4:a29c
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:verbs_devs_print():893<info> #2 xtrdma_0 - IPoIB addresses:
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:verbs_devs_print():903<info>    192.168.2.117
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:verbs_devs_print():903<info>    fe80::201:2ff:fe04:0
+tid:15866, vrb_get_sib(), prov/verbs/src/verbs_info.c:1065, Ready to open device, num_devices:3
+tid:15866, vrb_get_sib(), prov/verbs/src/verbs_info.c:1069, Open dev_name:mlx5_0
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x5555555db890, dev:mlx5_0, context:0x5555555db890
+tid:15866, vrb_get_sib(), prov/verbs/src/verbs_info.c:1069, Open dev_name:mlx5_1
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x5555555db890, dev:mlx5_1, context:0x5555555db890
+tid:15866, vrb_get_sib(), prov/verbs/src/verbs_info.c:1069, Open dev_name:xtrdma_0
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x5555555db890, dev:xtrdma_0, context:0x5555555db890
+tid:15866, xtrdma_ualloc_context(), ../providers/xtrdma/umain.c:247, dev:xtrdma_0, uctx:0x5555555db890
+tid:15866, huge_mem_init(), ../providers/xtrdma/huge_mem.c:99, Huge map file /dev/hugepages/huge_ctx_map_file_1747530291_0x5555555db890_1243967627
+tid:15866, _verbs_init_and_alloc_context(), ../libibverbs/device.c:284, drv_context:0x5555555db890, dev:mlx5_1, context:0x5555555db890
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():614<info> device mlx5_0: first found active port is 1
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():614<info> device mlx5_0: first found active port is 1
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():614<info> device mlx5_0: first found active port is 1
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():610<info> device mlx5_1: there are no active ports
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():610<info> device mlx5_1: there are no active ports
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():610<info> device mlx5_1: there are no active ports
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():614<info> device xtrdma_0: first found active port is 1
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():559<info> XRC support unavailable in device: xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_device_attrs():614<info> device xtrdma_0: first found active port is 1
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #1 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #2 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #3 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #4 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #5 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #6 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #7 xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #8 xtrdma_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1398<debug> fi_getinfo: provider verbs returned success
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_fabric_attr():435<info> Requesting provider verbs;ofi_rxm, skipping tcp
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_fabric_attr():435<info> Requesting provider verbs;ofi_rxm, skipping tcp
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable use_srx=<not set>
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1347<debug> hints prov_name: verbs;^ofi_rxm
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #1 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #2 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #3 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #4 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #5 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #6 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #7 xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #8 xtrdma_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1398<debug> fi_getinfo: provider verbs returned success
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable use_srx=<not set>
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1347<debug> hints prov_name: verbs;^ofi_rxm
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #1 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #2 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #3 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #4 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #5 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #6 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #7 xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #8 xtrdma_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1398<debug> fi_getinfo: provider verbs returned success
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::core:core:fi_getinfo_():1398<debug> fi_getinfo: provider ofi_rxm returned success
+[debug] util/pingpong.c:1402: Opening fabric resources: fabric, eq & domain
+libfabric:15866:1747530291::core:core:fi_getinfo_():1347<debug> hints prov_name: verbs;^ofi_rxm
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #1 mlx5_0
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: mlx5_0
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #2 mlx5_0
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: mlx5_0
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #3 mlx5_0-xrc
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1609<info> hints->ep_attr->rx_ctx_cnt != FI_SHARED_CONTEXT. Skipping XRC FI_EP_MSG endpoints
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #4 mlx5_0-xrc
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1609<info> hints->ep_attr->rx_ctx_cnt != FI_SHARED_CONTEXT. Skipping XRC FI_EP_MSG endpoints
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #5 mlx5_0-dgram
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: mlx5_0-dgram
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #6 mlx5_0-dgram
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: mlx5_0-dgram
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #7 xtrdma_0
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: xtrdma_0
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #8 xtrdma_0-dgram
+libfabric:15866:1747530291::verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: xtrdma_0-dgram
+libfabric:15866:1747530291::core:core:fi_getinfo_():1398<debug> fi_getinfo: provider verbs returned success
+libfabric:15866:1747530291::core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291::core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291::core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291::core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::core:core:fi_fabric_():1591<info> Opened fabric: IB-0xfe80000000000000
+libfabric:15866:1747530291::core:core:fi_fabric_():1598<info> Using verbs provider 2.1, path:/root/project/net/libfabric/build/lib/libfabric.so.1
+libfabric:15866:1747530291::core:core:fi_getinfo_():1347<debug> hints prov_name: off_coll
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_fabric_attr():435<info> Requesting provider off_coll, skipping verbs
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_fabric_attr():435<info> Requesting provider off_coll, skipping tcp
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_fabric_attr():435<info> Requesting provider off_coll, skipping tcp
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable use_srx=<not set>
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1347<debug> hints prov_name: off_coll;^ofi_rxm
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping off_coll
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable use_srx=<not set>
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1347<debug> hints prov_name: off_coll;^ofi_rxm
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping off_coll
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::core:core:fi_getinfo_():1385<info> fi_getinfo: provider ofi_rxm returned -61 (No data available)
+libfabric:15866:1747530291:ofi_rxd:core:core:fi_getinfo_():1347<debug> hints prov_name: off_coll;^ofi_rxd
+libfabric:15866:1747530291:ofi_rxd:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxm
+libfabric:15866:1747530291:ofi_rxd:core:core:ofi_layering_ok():1264<info> Provider ofi_rxd is excluded
+libfabric:15866:1747530291:ofi_rxd:core:core:ofi_layering_ok():1275<info> Need core provider, skipping off_coll
+libfabric:15866:1747530291:ofi_rxd:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxd:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::core:core:fi_getinfo_():1385<info> fi_getinfo: provider ofi_rxd returned -61 (No data available)
+libfabric:15866:1747530291::core:core:fi_getinfo_():1398<debug> fi_getinfo: provider off_coll returned success
+libfabric:15866:1747530291::ofi_mrail:fabric:mrail_get_core_info():285<info> OFI_MRAIL_ADDR_STRC env variable not set!
+libfabric:15866:1747530291::core:core:fi_getinfo_():1385<info> fi_getinfo: provider ofi_mrail returned -61 (No data available)
+libfabric:15866:1747530291::core:core:fi_fabric_():1591<info> Opened fabric: UTIL-COLL
+libfabric:15866:1747530291::core:core:fi_fabric_():1598<info> Using off_coll provider 2.1, path:/root/project/net/libfabric/build/lib/libfabric.so.1
+libfabric:15866:1747530291::core:core:fi_fabric_():1591<info> Opened fabric: IB-0xfe80000000000000
+libfabric:15866:1747530291::core:core:fi_fabric_():1598<info> Using ofi_rxm provider 2.1, path:/root/project/net/libfabric/build/lib/libfabric.so.1
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable use_srx=<not set>
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1347<debug> hints prov_name: verbs;^ofi_rxm
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #1 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #2 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #3 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #4 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #5 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #6 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #7 xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #8 xtrdma_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1398<debug> fi_getinfo: provider verbs returned success
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::core:mr:ofi_monitors_update():116<info> Starting memory monitor: memhooks
+libfabric:15866:1747530291::core:mr:ofi_intercept_symbol():494<debug> overwriting function mmap
+libfabric:15866:1747530291::core:mr:ofi_intercept_symbol():494<debug> overwriting function munmap
+libfabric:15866:1747530291::core:mr:ofi_intercept_symbol():494<debug> overwriting function mremap
+libfabric:15866:1747530291::core:mr:ofi_intercept_symbol():494<debug> overwriting function madvise
+libfabric:15866:1747530291::core:mr:ofi_intercept_symbol():494<debug> overwriting function shmat
+libfabric:15866:1747530291::core:mr:ofi_intercept_symbol():494<debug> overwriting function shmdt
+libfabric:15866:1747530291::core:mr:ofi_intercept_symbol():494<debug> overwriting function brk
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 27040 region_size 26624 align_entry 416 entry_size 352 chunk_cnt 64 pool 0x55555563dd50  (0x5555556396d8)
+libfabric:15866:1747530291::verbs:mr:vrb_domain():382<info> MR cache enabled for FI_HMEM_SYSTEM memory
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 98400 region_size 98304 align_entry 96 entry_size 32 chunk_cnt 1024 pool 0x55555563d8c0  (0x5555556394c0)
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 164000 region_size 163840 align_entry 160 entry_size 104 chunk_cnt 1024 pool 0x55555563d600  (0x5555556394c8)
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 278528 region_size 262144 align_entry 16384 entry_size 16288 chunk_cnt 16 pool 0x55555563d690  (0x55555563cf30)
+[debug] util/pingpong.c:1422: Fabric resources opened
+libfabric:15866:1747530291::verbs:mr:ofi_mr_cache_search():356<debug> search 0x7ffff3dfe000 (len: 12587008)
+libfabric:15866:1747530291::verbs:mr:util_mr_cache_create():282<debug> create 0x7ffff3dfe000 (len: 12587008)
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x55555563dd50  size 27040 region_size 26624 entry_cnt 64 chunk_cnt 64
+libfabric:15866:1747530291::core:mr:ofi_monitor_subscribe():514<debug> subscribing addr=0x7ffff3dfe000 len=12587008
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 8840 region_size 8704 align_entry 136 entry_size 80 chunk_cnt 64 pool 0x55555563dfc0  (0x55555563b848)
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 11960 region_size 11776 align_entry 184 entry_size 128 chunk_cnt 64 pool 0x55555563dea0  (0x55555563b850)
+libfabric:15866:1747530291::ofi_rxm:av:util_av_init():468<info> AV size 16
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 2448 region_size 2304 align_entry 144 entry_size 88 chunk_cnt 16 pool 0x555555620450  (0x55555563b770)
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable comp_per_progress=<not set>
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_rx_attr():864<info> Tx only caps ignored in Rx caps
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_tx_attr():953<info> Rx only caps ignored in Tx caps
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_fabric_attr():435<info> Requesting provider verbs;ofi_rxm, skipping tcp
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_fabric_attr():435<info> Requesting provider verbs;ofi_rxm, skipping tcp
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_rx_attr():864<info> Tx only caps ignored in Rx caps
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_tx_attr():953<info> Rx only caps ignored in Tx caps
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_ep_attr():849<info> Tag size exceeds supported size
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_ep_attr():850<info> Supported: 6148914691236517205
+libfabric:15866:1747530291::ofi_rxm:core:ofi_check_ep_attr():850<info> Requested: 12297829382473034410
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable use_srx=<not set>
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1347<debug> hints prov_name: verbs;^ofi_rxm
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #1 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #2 mlx5_0
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0 (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #3 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #4 mlx5_0-xrc
+libfabric:15866:1747530291:ofi_rxm:verbs:core:vrb_check_hints():262<info> skipping device mlx5_0-xrc (want xtrdma_0)
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #5 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #6 mlx5_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #7 xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1634<info> adding fi_info for domain: xtrdma_0
+libfabric:15866:1747530291:ofi_rxm:verbs:fabric:vrb_get_matching_info():1588<info> checking domain: #8 xtrdma_0-dgram
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291:ofi_rxm:verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291:ofi_rxm:core:core:fi_getinfo_():1398<debug> fi_getinfo: provider verbs returned success
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1264<info> Provider ofi_rxm is excluded
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_rxd
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping ofi_mrail
+libfabric:15866:1747530291:ofi_rxm:core:core:ofi_layering_ok():1275<info> Need core provider, skipping lnx
+libfabric:15866:1747530291::ofi_rxm:core:fi_param_get_():372<info> variable sar_limit=<not set>
+libfabric:15866:1747530291::ofi_rxm:core:rxm_ep_settings_init():1161<info> Settings:
+                 MR local: MSG - 1, RxM - 1
+                 Completions per progress: MSG - 1
+                 Buffered min: 88
+                 inject size: 256
+                 Protocol limits: Eager: 16384, SAR: 131072
+[debug] util/pingpong.c:1544: Initializing endpoint
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 17154400 region_size 17137664 align_entry 16736 entry_size 16672 chunk_cnt 1024 pool 0x5555556374a0  (0x5555556790d0)
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 17334800 region_size 17317888 align_entry 16912 entry_size 16856 chunk_cnt 1024 pool 0x555555620370  (0x5555556790d8)
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 131200 region_size 131072 align_entry 128 entry_size 72 chunk_cnt 1024 pool 0x5555556204e0  (0x5555556790e0)
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 131200 region_size 131072 align_entry 128 entry_size 72 chunk_cnt 1024 pool 0x55555563e420  (0x5555556790e8)
+libfabric:15866:1747530291::core:core:ofi_bufpool_create_attr():272<debug> ofi_bufpool_create_attr alloc_size 590112 region_size 589824 align_entry 288 entry_size 232 chunk_cnt 2048 pool 0x55555563e5f0  (0x5555556b4390)
+libfabric:15866:1747530291::verbs:ep_ctrl:vrb_pep_listen():566<info> listening on: fi_sockaddr_in://192.168.2.117:52077
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x55555563e5f0  size 590112 region_size 589824 entry_cnt 2048 chunk_cnt 2048
+[debug] util/pingpong.c:1563: Endpoint initialized
+[debug] util/pingpong.c:593 : Fetching local address
+[debug] util/pingpong.c:615 : Sending name length
+[debug] util/pingpong.c:621 : Sending address format
+[debug] util/pingpong.c:633 : Sending name
+[debug] util/pingpong.c:635 : Sent name
+[debug] util/pingpong.c:1573: Connection-less endpoint: inserting new address in vector
+libfabric:15866:1747530291::ofi_rxm:av:ofi_ip_av_insertv():633<debug> inserting 1 addresses
+libfabric:15866:1747530291::ofi_rxm:av:ofi_av_insert_addr():306<info> inserting addr: fi_sockaddr_in://192.168.2.118:41605
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x555555620450  size 2448 region_size 2304 entry_cnt 16 chunk_cnt 16
+libfabric:15866:1747530291::ofi_rxm:av:ofi_av_insert_addr():327<info> fi_addr: 0
+libfabric:15866:1747530291::ofi_rxm:av:ip_av_insert_addr():603<debug> av_insert addr: fi_sockaddr_in://192.168.2.118:41605
+libfabric:15866:1747530291::ofi_rxm:av:ip_av_insert_addr():605<debug> av_insert fi_addr: 0
+libfabric:15866:1747530291::ofi_rxm:av:ofi_ip_av_insertv():649<debug> 1 addresses successful
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x55555563dfc0  size 8840 region_size 8704 entry_cnt 64 chunk_cnt 64
+[debug] util/pingpong.c:1586: Connection-less endpoint: new address inserted in vector
+[debug] util/pingpong.c:1573: Connection-less endpoint: inserting new address in vector
+libfabric:15866:1747530291::ofi_rxm:av:ofi_ip_av_insertv():633<debug> inserting 1 addresses
+libfabric:15866:1747530291::ofi_rxm:av:ofi_av_insert_addr():306<info> inserting addr: fi_sockaddr_in://192.168.2.117:52077
+libfabric:15866:1747530291::ofi_rxm:av:ofi_av_insert_addr():327<info> fi_addr: 1
+libfabric:15866:1747530291::ofi_rxm:av:ip_av_insert_addr():603<debug> av_insert addr: fi_sockaddr_in://192.168.2.117:52077
+libfabric:15866:1747530291::ofi_rxm:av:ip_av_insert_addr():605<debug> av_insert fi_addr: 1
+libfabric:15866:1747530291::ofi_rxm:av:ofi_ip_av_insertv():649<debug> 1 addresses successful
+[debug] util/pingpong.c:1586: Connection-less endpoint: new address inserted in vector
+[debug] util/pingpong.c:1863: Connection-less endpoint: address vector initialized
+[debug] util/pingpong.c:1865: Fabric Initialized
+[debug] util/pingpong.c:253 : Running pingpong test with fi_info:
+fi_info:
+    caps: [ FI_TAGGED, FI_RECV, FI_SEND, FI_MULTI_RECV, FI_LOCAL_COMM, FI_REMOTE_COMM ]
+    mode: [  ]
+    addr_format: FI_SOCKADDR_IN
+    src_addrlen: 16
+    dest_addrlen: 16
+    src_addr: fi_sockaddr_in://192.168.2.117:0
+    dest_addr: fi_sockaddr_in://192.168.2.118:41605
+    handle: (nil)
+    fi_tx_attr:
+        caps: [ FI_TAGGED, FI_SEND ]
+        mode: [  ]
+        op_flags: [  ]
+        msg_order: [ FI_ORDER_RAR, FI_ORDER_RAW, FI_ORDER_RAS, FI_ORDER_WAW, FI_ORDER_WAS, FI_ORDER_SAW, FI_ORDER_SAS, FI_ORDER_RMA_RAR, FI_ORDER_RMA_RAW, FI_ORDER_RMA_WAW, FI_ORDER_ATOMIC_RAR, FI_ORDER_ATOMIC_RAW, FI_ORDER_ATOMIC_WAW ]
+        inject_size: 192
+        size: 2048
+        iov_limit: 4
+        rma_iov_limit: 1
+        tclass: 0x0
+    fi_rx_attr:
+        caps: [ FI_TAGGED, FI_RECV, FI_MULTI_RECV, FI_SOURCE ]
+        mode: [  ]
+        op_flags: [  ]
+        msg_order: [ FI_ORDER_RAR, FI_ORDER_RAW, FI_ORDER_RAS, FI_ORDER_WAW, FI_ORDER_WAS, FI_ORDER_SAW, FI_ORDER_SAS, FI_ORDER_RMA_RAR, FI_ORDER_RMA_RAW, FI_ORDER_RMA_WAW, FI_ORDER_ATOMIC_RAR, FI_ORDER_ATOMIC_RAW, FI_ORDER_ATOMIC_WAW ]
+        size: 2048
+        iov_limit: 4
+    fi_ep_attr:
+        type: FI_EP_RDM
+        protocol: FI_PROTO_RXM
+        protocol_version: 1
+        max_msg_size: 2147483648
+        msg_prefix_size: 0
+        max_order_raw_size: 2147483648
+        max_order_war_size: 0
+        max_order_waw_size: 2147483648
+        mem_tag_format: 0xaaaaaaaaaaaaaaaa
+        tx_ctx_cnt: 1
+        rx_ctx_cnt: 1
+        auth_key_size: 0
+    fi_domain_attr:
+        domain: 0x0
+        name: xtrdma_0
+        threading: FI_THREAD_SAFE
+        progress: FI_PROGRESS_MANUAL
+        resource_mgmt: FI_RM_ENABLED
+        av_type: FI_AV_UNSPEC
+        mr_mode: [ FI_MR_LOCAL, FI_MR_VIRT_ADDR, FI_MR_ALLOCATED, FI_MR_PROV_KEY ]
+        mr_key_size: 4
+        cq_data_size: 4
+        cq_cnt: 65536
+        ep_cnt: 32768
+        tx_ctx_cnt: 1
+        rx_ctx_cnt: 1
+        max_ep_tx_ctx: 1
+        max_ep_rx_ctx: 1
+        max_ep_stx_ctx: 0
+        max_ep_srx_ctx: 0
+        cntr_cnt: 0
+        mr_iov_limit: 1
+        caps: [ FI_LOCAL_COMM, FI_REMOTE_COMM ]
+        mode: [  ]
+        auth_key_size: 0
+        max_err_data: 0
+        mr_cnt: 0
+        tclass: 0x0
+    fi_fabric_attr:
+        name: IB-0xfe80000000000000
+        prov_name: verbs;ofi_rxm
+        prov_version: 201.0
+        api_version: 2.1
+    nic:
+        fi_device_attr:
+            name: xtrdma_0
+            device_id: 0x9038
+            device_version: 0
+            vendor_id: 0x10ee
+            driver: (null)
+            firmware: 1.0.009
+        fi_bus_attr:
+            bus_type: FI_BUS_UNKNOWN
+        fi_link_attr:
+            address: (null)
+            mtu: 1024
+            speed: 25000000000
+            state: FI_LINK_UP
+            network_type: Ethernet
+
+[debug] util/pingpong.c:963 : Generating test sizes
+[debug] util/pingpong.c:1004: Generated 6 test sizes
+[debug] util/pingpong.c:2197: Count of sizes to test: 6
+[debug] util/pingpong.c:700 : Syncing nodes
+[debug] util/pingpong.c:706 : CLIENT: syncing
+[debug] util/pingpong.c:708 : CLIENT: after send / ret=2
+[debug] util/pingpong.c:716 : CLIENT: syncing now
+[debug] util/pingpong.c:561 : receiving
+[debug] util/pingpong.c:719 : CLIENT: after recv / ret=2
+[debug] util/pingpong.c:728 : CLIENT: synced
+[debug] util/pingpong.c:758 : Nodes synced
+[debug] util/pingpong.c:849 : Starting test chrono
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x55555563dea0  size 11960 region_size 11776 entry_cnt 64 chunk_cnt 64
+libfabric:15866:1747530291::ofi_rxm:ep_ctrl:rxm_alloc_conn():414<debug> allocated conn 0x5555556b44b8
+libfabric:15866:1747530291::ofi_rxm:ep_ctrl:rxm_send_connect():275<debug> connecting 0x5555556b44b8
+libfabric:15866:1747530291::ofi_rxm:ep_ctrl:rxm_open_conn():180<debug> open msg ep 0x5555556b44b8
+libfabric:15866:1747530291::verbs:fabric:vrb_open_ep():1228<debug> open_ep src addr: fi_sockaddr_in://192.168.2.117:0
+libfabric:15866:1747530291::verbs:fabric:vrb_open_ep():1231<debug> open_ep dest addr: fi_sockaddr_in://192.168.2.118:41605
+libfabric:15866:1747530291::verbs:core:ofi_check_tx_attr():953<info> Rx only caps ignored in Tx caps
+libfabric:15866:1747530291::verbs:core:ofi_check_rx_attr():864<info> Tx only caps ignored in Rx caps
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():747<info> Max message size too large
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():748<info> Supported: 1073741824
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():748<info> Requested: 2147483648
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():747<info> Max message size too large
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():748<info> Supported: 1073741824
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():748<info> Requested: 2147483648
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():735<info> Unsupported protocol
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():736<info> Supported: FI_PROTO_RDMA_CM_IB_XRC
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():736<info> Requested: FI_PROTO_RDMA_CM_IB_RC
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():735<info> Unsupported protocol
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():736<info> Supported: FI_PROTO_RDMA_CM_IB_XRC
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_attr():736<info> Requested: FI_PROTO_RDMA_CM_IB_RC
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291::verbs:core:ofi_check_rx_attr():864<info> Tx only caps ignored in Rx caps
+libfabric:15866:1747530291::verbs:core:ofi_check_tx_attr():953<info> Rx only caps ignored in Tx caps
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():707<info> unsupported endpoint type
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():708<info> Supported: FI_EP_DGRAM
+libfabric:15866:1747530291::verbs:core:ofi_check_ep_type():708<info> Requested: FI_EP_MSG
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x5555556374a0  size 17154400 region_size 17137664 entry_cnt 1024 chunk_cnt 1024
+libfabric:15866:1747530291::verbs:mr:ofi_mr_cache_reg():454<debug> reg 0x7ffff2ba4170 (len: 17137664)
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x55555563d600  size 164000 region_size 163840 entry_cnt 1024 chunk_cnt 1024
+libfabric:15866:1747530291::core:core:ofi_bufpool_grow():144<debug> ofi_bufpool_grow pool 0x55555563d8c0  size 98400 region_size 98304 entry_cnt 1024 chunk_cnt 1024
+tid:15866, xtrdma_upost_recv(), ../providers/xtrdma/wr.c:1953, Post recv for qp:0
+tid:15866, xtrdma_upost_recv(), ../providers/xtrdma/wr.c:1953, Post recv for qp:0
+tid:15866, xtrdma_upost_recv(), ../providers/xtrdma/wr.c:1953, Post recv for qp:0
+tid:15866, xtrdma_upost_recv(), ../providers/xtrdma/wr.c:1953, Post recv for qp:0
