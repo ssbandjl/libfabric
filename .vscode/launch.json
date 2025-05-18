@@ -141,5 +141,34 @@
           }
       ]
     },
+	{
+		"name": "fi_pingpong_s",
+		"type": "cppdbg",
+		"request": "launch",
+		"program": "${workspaceFolder}/build/bin/fi_pingpong",
+		// "args": ["-e", "rdm", "-d", "mlx5_0", "-I", "2", "-p", "\"verbs;ofi_rxm\"", "-m", "tagged", "-v"],
+		"args": ["-e", "rdm", "-d", "mlx5_1", "-I", "2", "-p", "\"verbs;ofi_rxm\"", "-m", "tagged", "-v"],
+		"stopAtEntry": false,
+		"cwd": "${workspaceFolder}/build/bin/",
+		"environment": [
+			  {"name": "FI_LOG_LEVEL", "value": "debug"},
+			  {"name": "FI_UNIVERSE_SIZE", "value": "16"},
+		  ],
+		"externalConsole": false,
+		"MIMode": "gdb",
+		"miDebuggerPath": "/bin/gdb",
+		"setupCommands": [
+			{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			},
+			{
+				"description": "Set Disassembly Flavor to Intel",
+				"text": "-gdb-set disassembly-flavor intel",
+				"ignoreFailures": true
+			}
+		]
+	  },
   ]
 }
