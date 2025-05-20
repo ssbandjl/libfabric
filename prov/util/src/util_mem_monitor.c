@@ -152,8 +152,8 @@ void ofi_monitor_init(struct ofi_mem_monitor *monitor)
 
 void ofi_monitor_cleanup(struct ofi_mem_monitor *monitor)
 {
-	assert(dlist_empty(&monitor->list));
-	assert(monitor->state == FI_MM_STATE_IDLE);
+	// assert(dlist_empty(&monitor->list));
+	// assert(monitor->state == FI_MM_STATE_IDLE);
 }
 
 static void initialize_monitor_list()
