@@ -100,7 +100,7 @@ extern "C" {
 #define PSMX3_DBG(prov, subsys, func, line, format, ...) \
 		FI_DBG(prov, subsys, "%s: " format, psm3_get_mylabel(), ##__VA_ARGS__)
 #define psmx3_log(prov, level, subsys, func, line, format, ...) \
-		fi_log(prov, level, subsys, func, line, "%s: " format, psm3_get_mylabel(), ##__VA_ARGS__)
+		fi_log(prov, level, subsys, func, __FILE__, line, "%s: " format, psm3_get_mylabel(), ##__VA_ARGS__)
 
 extern struct fi_provider psmx3_prov;
 

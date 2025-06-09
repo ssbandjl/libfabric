@@ -285,7 +285,7 @@ trace_cq_context_entry(const struct fi_provider *prov, const char *func,
 	struct fi_cq_entry *entry = (struct fi_cq_entry *)buf;
 
 	for (i = 0; i < count; i++) {
-		fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, line,
+		fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, func, line,
 		       "ctx %p\n", entry[i].op_context);
 	}
 }
@@ -299,11 +299,11 @@ trace_cq_msg_entry(const struct fi_provider *prov, const char *func,
 
 	for (i = 0; i < count; i++) {
 		if (entry[i].flags & FI_RECV) {
-			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, line,
+			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, func, line,
 			       "ctx %p flags 0x%lx len %zu\n",
 			       entry[i].op_context, entry[i].flags,  entry[i].len);
 		} else {
-			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, line,
+			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, func, line,
 			       "ctx %p flags 0x%lx\n",
 			       entry[i].op_context, entry[i].flags);
 		}
@@ -319,13 +319,13 @@ trace_cq_data_entry(const struct fi_provider *prov, const char *func,
 
 	for (i = 0; i < count; i++) {
 		if (entry[i].flags & FI_RECV) {
-			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, line,
+			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, func, line,
 			       "ctx %p flags 0x%lx len %zu buf %p, data %lu\n",
 			       entry[i].op_context, entry[i].flags,
 			       entry[i].len, entry[i].buf,
 			       (entry[i].flags & FI_REMOTE_CQ_DATA) ? entry[i].data : 0);
 		} else {
-			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, line,
+			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, func, line,
 			       "ctx %p flags 0x%lx\n",
 			       entry[i].op_context, entry[i].flags);
 		}
@@ -341,14 +341,14 @@ trace_cq_tagged_entry(const struct fi_provider *prov, const char *func,
 
 	for (i = 0; i < count; i++) {
 		if (entry[i].flags & FI_RECV) {
-			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, line,
+			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, func, line,
 			       "ctx %p flags 0x%lx len %zu buf %p, data %lu tag 0x%lx\n",
 			       entry[i].op_context, entry[i].flags,
 			       entry[i].len, entry[i].buf,
 			       (entry[i].flags & FI_REMOTE_CQ_DATA) ? entry[i].data : 0,
 			       entry[i].tag);
 		} else {
-			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, line,
+			fi_log(prov, FI_LOG_TRACE, FI_LOG_CQ, func, func, line,
 			       "ctx %p flags 0x%lx\n",
 			       entry[i].op_context, entry[i].flags);
 		}
@@ -386,7 +386,7 @@ trace_cq_err(struct hook_cq *cq, const char *func, int line,
 	fi_cq_strerror(cq->hcq, entry->prov_errno, entry->err_data, err_buf, 80);
 	if (entry->flags & FI_RECV) {
 		fi_log(cq->domain->fabric->hprov, FI_LOG_TRACE, FI_LOG_CQ,
-		       func, line,
+		       func, func, line,
 		       "ctx %p flags 0x%lx, len %zu buf %p data %lu tag 0x%lx "
 		       "olen %zu err %d (%s) prov_errno %d (%s)\n",
 		       entry->op_context, entry->flags, entry->len, entry->buf,
@@ -395,7 +395,7 @@ trace_cq_err(struct hook_cq *cq, const char *func, int line,
 		       entry->prov_errno, err_buf);
 	} else {
 		fi_log(cq->domain->fabric->hprov, FI_LOG_TRACE, FI_LOG_CQ,
-		       func, line,
+		       func, func, line,
 		       "ctx %p flags 0x%lx, data %lu tag 0x%lx "
 		       "olen %zu err %d (%s) prov_errno %d (%s)\n",
 		       entry->op_context, entry->flags,

@@ -227,7 +227,7 @@ void psmx2_epid_to_epaddr(struct psmx2_trx_ctxt *trx_ctxt,
 	}
 
 	/* call fi_log() directly to always generate the output */
-	fi_log(&psmx2_prov, FI_LOG_WARN, FI_LOG_AV, __func__, __LINE__,
+	fi_log(&psmx2_prov, FI_LOG_WARN, FI_LOG_AV, __func__, __FILE__, __LINE__,
 		"psm2_ep_connect retured error %s, remote epid=%lx."
 		"If it is a timeout error, try setting FI_PSM2_CONN_TIMEOUT "
 		"to a larger value (current: %d seconds).\n",

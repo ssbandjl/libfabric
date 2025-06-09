@@ -149,7 +149,7 @@ struct fi_ops_log {
 	int (*ready)(const struct fi_provider *prov, enum fi_log_level level,
 		     enum fi_log_subsys subsys, uint64_t flags, uint64_t *showtime);
 	void (*log)(const struct fi_provider *prov, enum fi_log_level level,
-		    enum fi_log_subsys subsys, const char *func, int line,
+		    enum fi_log_subsys subsys, const char *func, const char *file, int line,
 		    const char *msg);
 };
 
