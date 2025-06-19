@@ -43,6 +43,11 @@ extern "C" {
 #define BENCHMARK_OPTS "rvkj:W:"
 #define FT_BENCHMARK_MAX_MSG_SIZE (test_size[TEST_CNT - 1].size)
 
+#ifndef printf_ffl
+#define printf_ffl(format, arg...)						\
+	printf("%s(), %s:%d, " format, __FUNCTION__, __FILE__, __LINE__, ##arg)
+#endif
+
 void ft_parse_benchmark_opts(int op, char *optarg);
 void ft_benchmark_usage(void);
 int pingpong(void);
