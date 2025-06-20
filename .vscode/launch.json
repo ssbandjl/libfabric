@@ -120,11 +120,11 @@
       // "args": ["-e", "rdm", "-o", "write", "-I", "5", "-p", "verbs", "172.17.29.63"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/build/bin",
-      // "environment": [
-      //   {
-      //       "name": "FI_LOG_LEVEL",
-      //       "value": "debug"
-      //   }],
+      "environment": [
+        {
+            "name": "FI_LOG_LEVEL",
+            "value": "debug"
+        }],
       "externalConsole": false,
       "MIMode": "gdb",
       "miDebuggerPath": "/bin/gdb",
@@ -169,6 +169,167 @@
 				"ignoreFailures": true
 			}
 		]
-	  },
+	},
+	{
+		"name": "fi_pingpong_c_xt",
+		"type": "cppdbg",
+		"request": "launch",
+		"program": "${workspaceFolder}/build/bin/fi_pingpong",
+		// "args": ["-e", "rdm", "-d", "xtrdma_0", "-I", "1000", "-p", "\"verbs;ofi_rxm\"", "-m", "tagged", "-v", "192.168.1.11"],
+		"args": ["-e", "rdm", "-d", "xtrdma_0", "-I", "1000", "-p", "\"verbs;ofi_rxm\"", "-m", "tagged", "192.168.1.11"],
+		"stopAtEntry": false,
+		"cwd": "${workspaceFolder}/build/bin/",
+		"environment": [
+			  {"name": "LD_LIBRARY_PATH", "value": "/root/project/rdma/dpu_user_rdma/build/lib"},
+			  {"name": "HUGE_PAGE_NUM", "value": "20"},
+			  {"name": "XT_CQ_INLINE_CQE", "value": "0"},
+			  {"name": "FI_UNIVERSE_SIZE", "value": "16"},
+		  ],
+		"externalConsole": false,
+		"MIMode": "gdb",
+		"miDebuggerPath": "/bin/gdb",
+		"setupCommands": [
+			{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			},
+			{
+				"description": "Set Disassembly Flavor to Intel",
+				"text": "-gdb-set disassembly-flavor intel",
+				"ignoreFailures": true
+			}
+		]
+	},
+	// ./fi_rma_bw -e rdm -o write -d mlx5_0 192.168.1.118 -S all
+	{
+		"name": "fi_rma_bw_c_xt",
+		"type": "cppdbg",
+		"request": "launch",
+		"program": "${workspaceFolder}/build/bin/fi_rma_bw",
+		// "args": ["-e", "rdm", "-d", "xtrdma_0", "-o", "write", "-p", "\"verbs;ofi_rxm\"", "-S", "all", "192.168.1.11"],
+		// "args": ["-e", "rdm", "-d", "xtrdma_0", "-o", "read", "-p", "\"verbs;ofi_rxm\"", "-S", "all", "192.168.1.11"],
+		"args": ["-e", "rdm", "-d", "xtrdma_0", "-o", "writedata", "-p", "\"verbs;ofi_rxm\"", "-S", "all", "192.168.1.11"],
+		// "args": ["-e", "msg", "-d", "xtrdma_0", "-o", "write", "-p", "\"verbs;ofi_rxm\"", "-S", "all", "192.168.1.11"],
+		"stopAtEntry": false,
+		"cwd": "${workspaceFolder}/build/bin/",
+		"environment": [
+			  {"name": "LD_LIBRARY_PATH", "value": "/root/project/rdma/dpu_user_rdma/build/lib"},
+			  {"name": "HUGE_PAGE_NUM", "value": "20"},
+			  {"name": "XT_CQ_INLINE_CQE", "value": "0"},
+			  {"name": "FI_UNIVERSE_SIZE", "value": "16"},
+		  ],
+		"externalConsole": false,
+		"MIMode": "gdb",
+		"miDebuggerPath": "/bin/gdb",
+		"setupCommands": [
+			{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			},
+			{
+				"description": "Set Disassembly Flavor to Intel",
+				"text": "-gdb-set disassembly-flavor intel",
+				"ignoreFailures": true
+			}
+		]
+	},
+	{
+		"name": "fi_dgram_pingpong_c_xt",
+		"type": "cppdbg",
+		"request": "launch",
+		"program": "${workspaceFolder}/build/bin/fi_dgram_pingpong",
+		"args": ["-d", "xtrdma_0","-p", "\"verbs;ofi_rxm\"", "-S", "all", "-v", "192.168.1.11"],
+		"stopAtEntry": false,
+		"cwd": "${workspaceFolder}/build/bin/",
+		"environment": [
+			  {"name": "LD_LIBRARY_PATH", "value": "/root/project/rdma/dpu_user_rdma/build/lib"},
+			  {"name": "HUGE_PAGE_NUM", "value": "20"},
+			  {"name": "XT_CQ_INLINE_CQE", "value": "0"},
+			  {"name": "FI_LOG_LEVEL", "value": "debug"},
+			  {"name": "FI_UNIVERSE_SIZE", "value": "16"},
+		  ],
+		"externalConsole": false,
+		"MIMode": "gdb",
+		"miDebuggerPath": "/bin/gdb",
+		"setupCommands": [
+			{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			},
+			{
+				"description": "Set Disassembly Flavor to Intel",
+				"text": "-gdb-set disassembly-flavor intel",
+				"ignoreFailures": true
+			}
+		]
+	},
+	{
+		"name": "fi_rdm_cntr_pingpong_xt_c",
+		"type": "cppdbg",
+		"request": "launch",
+		"program": "${workspaceFolder}/build/bin/fi_rdm_cntr_pingpong",
+		"args": ["-d", "xtrdma_0", "-p", "\"verbs;ofi_rxm\"", "-S", "all", "192.168.1.11"],
+		"stopAtEntry": false,
+		"cwd": "${workspaceFolder}/build/bin/",
+		"environment": [
+			  {"name": "LD_LIBRARY_PATH", "value": "/root/project/rdma/dpu_user_rdma/build/lib"},
+			  {"name": "HUGE_PAGE_NUM", "value": "20"},
+			  {"name": "XT_CQ_INLINE_CQE", "value": "0"},
+			//   {"name": "FI_LOG_LEVEL", "value": "debug"},
+			  {"name": "FI_UNIVERSE_SIZE", "value": "16"},
+		  ],
+		"externalConsole": false,
+		"MIMode": "gdb",
+		"miDebuggerPath": "/bin/gdb",
+		"setupCommands": [
+			{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			},
+			{
+				"description": "Set Disassembly Flavor to Intel",
+				"text": "-gdb-set disassembly-flavor intel",
+				"ignoreFailures": true
+			}
+		]
+	},
+	{
+		"name": "fi_rdm_x_xt_c",
+		"type": "cppdbg",
+		"request": "launch",
+		// "program": "${workspaceFolder}/build/bin/fi_rdm_pingpong",
+		// "program": "${workspaceFolder}/build/bin/fi_rdm_tagged_bw",
+		// "program": "${workspaceFolder}/build/bin/fi_rdm_tagged_pingpong",
+		"program": "${workspaceFolder}/build/bin/fi_rma_pingpong",
+		"args": ["-d", "xtrdma_0", "-p", "\"verbs;ofi_rxm\"", "-S", "all", "192.168.1.11"],
+		"stopAtEntry": false,
+		"cwd": "${workspaceFolder}/build/bin/",
+		"environment": [
+			  {"name": "LD_LIBRARY_PATH", "value": "/root/project/rdma/dpu_user_rdma/build/lib"},
+			  {"name": "HUGE_PAGE_NUM", "value": "20"},
+			  {"name": "XT_CQ_INLINE_CQE", "value": "0"},
+			//   {"name": "FI_LOG_LEVEL", "value": "debug"},
+			  {"name": "FI_UNIVERSE_SIZE", "value": "16"},
+		  ],
+		"externalConsole": false,
+		"MIMode": "gdb",
+		"miDebuggerPath": "/bin/gdb",
+		"setupCommands": [
+			{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			},
+			{
+				"description": "Set Disassembly Flavor to Intel",
+				"text": "-gdb-set disassembly-flavor intel",
+				"ignoreFailures": true
+			}
+		]
+	},
   ]
 }
