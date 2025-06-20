@@ -1066,10 +1066,10 @@ void ofi_straddr_log_internal(const char *func, int line, uint32_t addr_format,
 		if (addr) {
 			if (addr_format == FI_FORMAT_UNSPEC)
 				addr_format = ofi_translate_addr_format(ofi_sa_family(addr));
-			fi_log(prov, level, subsys, func, line, "%s: %s\n", log_str,
+			fi_log(prov, level, subsys, func, __FILE__, line, "%s: %s\n", log_str,
 			       ofi_straddr(buf, &len, addr_format, addr));
 		} else {
-			fi_log(prov, level, subsys, func, line, "%s: (null)\n", log_str);
+			fi_log(prov, level, subsys, func, __FILE__, line, "%s: (null)\n", log_str);
 		}
 	}
 }

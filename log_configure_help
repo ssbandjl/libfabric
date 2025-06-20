@@ -1,0 +1,480 @@
+[root@node1 libfabric]# ./configure -h
+`configure' configures libfabric 1.19.0rc1 to adapt to many kinds of systems.
+
+Usage: ./configure [OPTION]... [VAR=VALUE]...
+
+To assign environment variables (e.g., CC, CFLAGS...), specify them as
+VAR=VALUE.  See below for descriptions of some of the useful variables.
+
+Defaults for the options are specified in brackets.
+
+Configuration:
+  -h, --help              display this help and exit
+      --help=short        display options specific to this package
+      --help=recursive    display the short help of all the included packages
+  -V, --version           display version information and exit
+  -q, --quiet, --silent   do not print `checking ...' messages
+      --cache-file=FILE   cache test results in FILE [disabled]
+  -C, --config-cache      alias for `--cache-file=config.cache'
+  -n, --no-create         do not create output files
+      --srcdir=DIR        find the sources in DIR [configure dir or `..']
+
+Installation directories:
+  --prefix=PREFIX         install architecture-independent files in PREFIX
+                          [/usr/local]
+  --exec-prefix=EPREFIX   install architecture-dependent files in EPREFIX
+                          [PREFIX]
+
+By default, `make install' will install all the files in
+`/usr/local/bin', `/usr/local/lib' etc.  You can specify
+an installation prefix other than `/usr/local' using `--prefix',
+for instance `--prefix=$HOME'.
+
+For better control, use the options below.
+
+Fine tuning of the installation directories:
+  --bindir=DIR            user executables [EPREFIX/bin]
+  --sbindir=DIR           system admin executables [EPREFIX/sbin]
+  --libexecdir=DIR        program executables [EPREFIX/libexec]
+  --sysconfdir=DIR        read-only single-machine data [PREFIX/etc]
+  --sharedstatedir=DIR    modifiable architecture-independent data [PREFIX/com]
+  --localstatedir=DIR     modifiable single-machine data [PREFIX/var]
+  --libdir=DIR            object code libraries [EPREFIX/lib]
+  --includedir=DIR        C header files [PREFIX/include]
+  --oldincludedir=DIR     C header files for non-gcc [/usr/include]
+  --datarootdir=DIR       read-only arch.-independent data root [PREFIX/share]
+  --datadir=DIR           read-only architecture-independent data [DATAROOTDIR]
+  --infodir=DIR           info documentation [DATAROOTDIR/info]
+  --localedir=DIR         locale-dependent data [DATAROOTDIR/locale]
+  --mandir=DIR            man documentation [DATAROOTDIR/man]
+  --docdir=DIR            documentation root [DATAROOTDIR/doc/libfabric]
+  --htmldir=DIR           html documentation [DOCDIR]
+  --dvidir=DIR            dvi documentation [DOCDIR]
+  --pdfdir=DIR            pdf documentation [DOCDIR]
+  --psdir=DIR             ps documentation [DOCDIR]
+
+Program names:
+  --program-prefix=PREFIX            prepend PREFIX to installed program names
+  --program-suffix=SUFFIX            append SUFFIX to installed program names
+  --program-transform-name=PROGRAM   run sed PROGRAM on installed program names
+
+System types:
+  --build=BUILD     configure for building on BUILD [guessed]
+  --host=HOST       cross-compile to build programs to run on HOST [BUILD]
+
+Optional Features:
+  --disable-option-checking  ignore unrecognized --enable/--with options
+  --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
+  --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
+  --enable-silent-rules   less verbose build output (undo: "make V=1")
+  --disable-silent-rules  verbose build output (undo: "make V=0")
+  --enable-dependency-tracking
+                          do not reject slow dependency extractors
+  --disable-dependency-tracking
+                          speeds up one-time build
+  --enable-direct=[provider]
+                          Enable direct calls to a fabric provider
+                          [default=no]
+
+  --enable-only           Only build explicitly specified fabric providers
+
+  --enable-atomics        Enable atomics support [default=yes]
+
+  --enable-debug          Enable debugging [default=no]
+
+  --enable-asan           Enable address sanitizer [default=no]
+
+  --enable-shared[=PKGS]  build shared libraries [default=yes]
+  --enable-static[=PKGS]  build static libraries [default=yes]
+  --enable-fast-install[=PKGS]
+                          optimize for fast installation [default=yes]
+  --disable-libtool-lock  avoid locking (might break parallel builds)
+  --enable-picky          Enable developer-level compiler pickyness when
+                          building [default=no]
+  --disable-epoll         Disable epoll if available[default=no]
+  --enable-embedded       Enable embedded support (turns off symbol
+                          versioning) [default=no]
+
+  --enable-xpmem[=yes|no|PATH]
+                          Enable xpmem (gni and shm providers) [default=yes]
+                          (yes: enable xpmem; no: disable xpmem; PATH: enable
+                          xpmem and use xpmem installed under PATH)
+  --enable-cuda-dlopen    Enable dlopen of CUDA libraries [default=no]
+
+  --enable-ze-dlopen      Enable dlopen of ZE libraries [default=no]
+
+  --disable-memhooks-monitor
+                          Determine whether memhooks memory monitor is
+                          disabled.
+  --disable-uffd-monitor  Determine whether uffd memory monitor is disabled.
+  --enable-gdrcopy-dlopen Enable dlopen of gdrcopy libraries [default=no]
+
+  --enable-rocr-dlopen    Enable dlopen of ROCR libraries [default=no]
+
+  --enable-psm2[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable psm2 provider [default=auto] (yes: enable
+                          psm2 provider; no: disable psm2 provider; auto:
+                          enable psm2 provider if possible; dl: enable psm2
+                          provider and build as a loadable library; PATH:
+                          enable psm2 provider and use psm2 installed under
+                          PATH; dl:PATH: enable psm2 provider and build as a
+                          loadable library and use psm2 installed under PATH)
+
+  --enable-psm2_mq_req_user
+                          Enable the use of psm2_mq_req_user if present
+  --enable-psm2_mq_fp_msg Enable the use of psm2_mq_fp_msg if present
+  --enable-psm3[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable psm3 provider [default=auto] (yes: enable
+                          psm3 provider; no: disable psm3 provider; auto:
+                          enable psm3 provider if possible; dl: enable psm3
+                          provider and build as a loadable library; PATH:
+                          enable psm3 provider and use psm3 installed under
+                          PATH; dl:PATH: enable psm3 provider and build as a
+                          loadable library and use psm3 installed under PATH)
+
+  --enable-psm3-verbs     Enable PSM3 support on Verbs HAL (UD QPs)
+                          [default=yes]
+  --enable-psm3-sockets   Enable PSM3 support on Scokets HAL (TCP)
+                          [default=yes]
+  --enable-psm3-udp       Enable UDP on applicable HALs [default=no]
+  --enable-psm3-rc        EXPERIMENTAL: Enable User Space RC QPs on applicable
+                          HALs [default=[Verbs HAL]]
+  --enable-psm3-dsa       Enable support for Intel Data Streaming Accelerator
+                          (DSA) [default=check]
+  --enable-psm3-umr-cache Enable support for Userspace Memory Region (UMR)
+                          Caching [default=check]
+  --enable-sockets[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable sockets provider [default=auto] (yes: enable
+                          sockets provider; no: disable sockets provider;
+                          auto: enable sockets provider if possible; dl:
+                          enable sockets provider and build as a loadable
+                          library; PATH: enable sockets provider and use
+                          sockets installed under PATH; dl:PATH: enable
+                          sockets provider and build as a loadable library and
+                          use sockets installed under PATH)
+
+  --enable-verbs[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable verbs provider [default=auto] (yes: enable
+                          verbs provider; no: disable verbs provider; auto:
+                          enable verbs provider if possible; dl: enable verbs
+                          provider and build as a loadable library; PATH:
+                          enable verbs provider and use verbs installed under
+                          PATH; dl:PATH: enable verbs provider and build as a
+                          loadable library and use verbs installed under PATH)
+
+  --enable-efa[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable efa provider [default=auto] (yes: enable efa
+                          provider; no: disable efa provider; auto: enable efa
+                          provider if possible; dl: enable efa provider and
+                          build as a loadable library; PATH: enable efa
+                          provider and use efa installed under PATH; dl:PATH:
+                          enable efa provider and build as a loadable library
+                          and use efa installed under PATH)
+
+  --enable-efa-mem-poisoning
+                          Enable EFA memory poisoning support for debugging
+                          [default=no]
+
+
+                          --enable-efa-unit-test=CMOCKA_INSTALL_DIR
+                          Provide a path to the CMocka installation directory
+                          in order to enable EFA Unit Tests.
+
+  --enable-usnic[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable usnic provider [default=auto] (yes: enable
+                          usnic provider; no: disable usnic provider; auto:
+                          enable usnic provider if possible; dl: enable usnic
+                          provider and build as a loadable library; PATH:
+                          enable usnic provider and use usnic installed under
+                          PATH; dl:PATH: enable usnic provider and build as a
+                          loadable library and use usnic installed under PATH)
+
+  --enable-gni[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable gni provider [default=auto] (yes: enable gni
+                          provider; no: disable gni provider; auto: enable gni
+                          provider if possible; dl: enable gni provider and
+                          build as a loadable library; PATH: enable gni
+                          provider and use gni installed under PATH; dl:PATH:
+                          enable gni provider and build as a loadable library
+                          and use gni installed under PATH)
+
+  --enable-ugni-static    Enable static linking with uGNI. Recommended for
+                          KNL.
+  --enable-udp[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable udp provider [default=auto] (yes: enable udp
+                          provider; no: disable udp provider; auto: enable udp
+                          provider if possible; dl: enable udp provider and
+                          build as a loadable library; PATH: enable udp
+                          provider and use udp installed under PATH; dl:PATH:
+                          enable udp provider and build as a loadable library
+                          and use udp installed under PATH)
+
+  --enable-tcp[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable tcp provider [default=auto] (yes: enable tcp
+                          provider; no: disable tcp provider; auto: enable tcp
+                          provider if possible; dl: enable tcp provider and
+                          build as a loadable library; PATH: enable tcp
+                          provider and use tcp installed under PATH; dl:PATH:
+                          enable tcp provider and build as a loadable library
+                          and use tcp installed under PATH)
+
+  --enable-rxm[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable rxm provider [default=auto] (yes: enable rxm
+                          provider; no: disable rxm provider; auto: enable rxm
+                          provider if possible; dl: enable rxm provider and
+                          build as a loadable library; PATH: enable rxm
+                          provider and use rxm installed under PATH; dl:PATH:
+                          enable rxm provider and build as a loadable library
+                          and use rxm installed under PATH)
+
+  --enable-mrail[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable mrail provider [default=auto] (yes: enable
+                          mrail provider; no: disable mrail provider; auto:
+                          enable mrail provider if possible; dl: enable mrail
+                          provider and build as a loadable library; PATH:
+                          enable mrail provider and use mrail installed under
+                          PATH; dl:PATH: enable mrail provider and build as a
+                          loadable library and use mrail installed under PATH)
+
+  --enable-rxd[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable rxd provider [default=auto] (yes: enable rxd
+                          provider; no: disable rxd provider; auto: enable rxd
+                          provider if possible; dl: enable rxd provider and
+                          build as a loadable library; PATH: enable rxd
+                          provider and use rxd installed under PATH; dl:PATH:
+                          enable rxd provider and build as a loadable library
+                          and use rxd installed under PATH)
+
+  --enable-bgq[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable bgq provider [default=auto] (yes: enable bgq
+                          provider; no: disable bgq provider; auto: enable bgq
+                          provider if possible; dl: enable bgq provider and
+                          build as a loadable library; PATH: enable bgq
+                          provider and use bgq installed under PATH; dl:PATH:
+                          enable bgq provider and build as a loadable library
+                          and use bgq installed under PATH)
+
+  --enable-shm[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable shm provider [default=auto] (yes: enable shm
+                          provider; no: disable shm provider; auto: enable shm
+                          provider if possible; dl: enable shm provider and
+                          build as a loadable library; PATH: enable shm
+                          provider and use shm installed under PATH; dl:PATH:
+                          enable shm provider and build as a loadable library
+                          and use shm installed under PATH)
+
+  --enable-sm2[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable sm2 provider [default=auto] (yes: enable sm2
+                          provider; no: disable sm2 provider; auto: enable sm2
+                          provider if possible; dl: enable sm2 provider and
+                          build as a loadable library; PATH: enable sm2
+                          provider and use sm2 installed under PATH; dl:PATH:
+                          enable sm2 provider and build as a loadable library
+                          and use sm2 installed under PATH)
+
+  --enable-rstream[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable rstream provider [default=auto] (yes: enable
+                          rstream provider; no: disable rstream provider;
+                          auto: enable rstream provider if possible; dl:
+                          enable rstream provider and build as a loadable
+                          library; PATH: enable rstream provider and use
+                          rstream installed under PATH; dl:PATH: enable
+                          rstream provider and build as a loadable library and
+                          use rstream installed under PATH)
+
+  --enable-ucx[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable ucx provider [default=auto] (yes: enable ucx
+                          provider; no: disable ucx provider; auto: enable ucx
+                          provider if possible; dl: enable ucx provider and
+                          build as a loadable library; PATH: enable ucx
+                          provider and use ucx installed under PATH; dl:PATH:
+                          enable ucx provider and build as a loadable library
+                          and use ucx installed under PATH)
+
+  --enable-perf[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable perf provider [default=auto] (yes: enable
+                          perf provider; no: disable perf provider; auto:
+                          enable perf provider if possible; dl: enable perf
+                          provider and build as a loadable library; PATH:
+                          enable perf provider and use perf installed under
+                          PATH; dl:PATH: enable perf provider and build as a
+                          loadable library and use perf installed under PATH)
+
+  --enable-trace[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable trace provider [default=auto] (yes: enable
+                          trace provider; no: disable trace provider; auto:
+                          enable trace provider if possible; dl: enable trace
+                          provider and build as a loadable library; PATH:
+                          enable trace provider and use trace installed under
+                          PATH; dl:PATH: enable trace provider and build as a
+                          loadable library and use trace installed under PATH)
+
+  --enable-profile[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable profile provider [default=auto] (yes: enable
+                          profile provider; no: disable profile provider;
+                          auto: enable profile provider if possible; dl:
+                          enable profile provider and build as a loadable
+                          library; PATH: enable profile provider and use
+                          profile installed under PATH; dl:PATH: enable
+                          profile provider and build as a loadable library and
+                          use profile installed under PATH)
+
+  --enable-hook_debug[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable hook_debug provider [default=auto] (yes:
+                          enable hook_debug provider; no: disable hook_debug
+                          provider; auto: enable hook_debug provider if
+                          possible; dl: enable hook_debug provider and build
+                          as a loadable library; PATH: enable hook_debug
+                          provider and use hook_debug installed under PATH;
+                          dl:PATH: enable hook_debug provider and build as a
+                          loadable library and use hook_debug installed under
+                          PATH)
+
+  --enable-hook_hmem[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable hook_hmem provider [default=auto] (yes:
+                          enable hook_hmem provider; no: disable hook_hmem
+                          provider; auto: enable hook_hmem provider if
+                          possible; dl: enable hook_hmem provider and build as
+                          a loadable library; PATH: enable hook_hmem provider
+                          and use hook_hmem installed under PATH; dl:PATH:
+                          enable hook_hmem provider and build as a loadable
+                          library and use hook_hmem installed under PATH)
+
+  --enable-dmabuf_peer_mem[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable dmabuf_peer_mem provider [default=auto] (yes:
+                          enable dmabuf_peer_mem provider; no: disable
+                          dmabuf_peer_mem provider; auto: enable
+                          dmabuf_peer_mem provider if possible; dl: enable
+                          dmabuf_peer_mem provider and build as a loadable
+                          library; PATH: enable dmabuf_peer_mem provider and
+                          use dmabuf_peer_mem installed under PATH; dl:PATH:
+                          enable dmabuf_peer_mem provider and build as a
+                          loadable library and use dmabuf_peer_mem installed
+                          under PATH)
+
+  --enable-opx[=yes|no|auto|dl|PATH|dl:PATH]
+                          Enable opx provider [default=auto] (yes: enable opx
+                          provider; no: disable opx provider; auto: enable opx
+                          provider if possible; dl: enable opx provider and
+                          build as a loadable library; PATH: enable opx
+                          provider and use opx installed under PATH; dl:PATH:
+                          enable opx provider and build as a loadable library
+                          and use opx installed under PATH)
+
+
+Optional Packages:
+  --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
+  --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
+  --with-build_id         Enable build_id annotation [default=no]
+  --with-valgrind         Enable valgrind annotations [default=no]
+  --with-pic[=PKGS]       try to use only PIC/non-PIC objects [default=use
+                          both]
+  --with-gnu-ld           assume the C compiler uses GNU ld [default=no]
+  --with-sysroot=DIR Search for dependent libraries within DIR
+                        (or the compiler's sysroot if not specified).
+  --with-dlopen           dl-loadable provider support [default=yes]
+  --with-uring[=DIR]      Enable uring support [default=yes]. Optional=<Path
+                          to where liburing is installed.>
+  --with-cuda=DIR         Enable CUDA build and fail if not found.
+                          Optional=<Path to where the CUDA libraries and
+                          headers are installed.>
+  --with-ze=DIR           Enable ZE build and fail if not found.
+                          Optional=<Path to where the ZE libraries and headers
+                          are installed.>
+  --with-neuron=DIR       Enable Neuron build and fail if not found.
+                          Optional=<Path to where the Neuron libraries and
+                          headers are installed.>
+  --with-synapseai=DIR    Enable SynapseAI build and fail if not found.
+                          Optional=<Path to where the SynapseAI libraries and
+                          headers are installed.>
+  --with-lttng=DIR        Enable tracing capability with LTTNG [default=no]
+  --with-gdrcopy=DIR      Enable gdrcopy build and fail if not found.
+                          Optional=<Path to where the gdrcopy development and
+                          runtime libraries are installed.>
+  --with-rocr=DIR         Enable ROCR/HSA build and fail if not found.
+                          Optional=<Path to where the ROCR/HSA libraries and
+                          headers are installed.>
+  --with-psm2-src=DIR     Provide path to the source code of PSM2 library to
+                          be compiled into the provider
+  --with-numa=DIR         Provide path to where the numactl-devel or
+                          libnuma-devel package is installed
+  --with-psm3-rv          Enable RV module use [default=check]
+  --with-libnl(=DIR)      Directory prefix for libnl (typically only necessary
+                          if libnl is installed in a location that the
+                          compiler/linker will not search by default)
+  --with-criterion        Location for criterion unit testing framework
+  --with-kdreg            Install directory for kdreg headers
+  --with-bgq-driver=[BGQ driver installation path]
+                          Provide path to where BGQ system headers are
+                          installed
+
+  --with-bgq-src(=DIR)    bgq opensource distribution [default=auto]
+
+  --with-bgq-progress(=auto|manual|runtime)
+                          Specify the bgq FABRIC_DIRECT progess mode
+                          [default=manual]
+
+  --with-bgq-mr(=scalable|basic)
+                          Specify the bgq FABRIC_DIRECT mr mode
+                          [default=scalable]
+
+  --with-dsa=DIR          Enable DSA build and fail if not found.
+                          Optional=<Path to where the DSA headers are
+                          installed.>
+
+Some influential environment variables:
+  CC          C compiler command
+  CFLAGS      C compiler flags
+  LDFLAGS     linker flags, e.g. -L<lib dir> if you have libraries in a
+              nonstandard directory <lib dir>
+  LIBS        libraries to pass to the linker, e.g. -l<library>
+  CPPFLAGS    (Objective) C/C++ preprocessor flags, e.g. -I<include dir> if
+              you have headers in a nonstandard directory <include dir>
+  CCAS        assembler compiler command (defaults to CC)
+  CCASFLAGS   assembler compiler flags (defaults to CFLAGS)
+  CPP         C preprocessor
+  FI_PKG_CONFIG
+              path to pkg-config utility
+  FI_PKG_CONFIG_PATH
+              directories to add to pkg-config's search path
+  FI_PKG_CONFIG_LIBDIR
+              path overriding pkg-config's built-in search path
+  CRAY_GNI_HEADERS_CFLAGS
+              C compiler flags for CRAY_GNI_HEADERS, overriding pkg-config
+  CRAY_GNI_HEADERS_LIBS
+              linker flags for CRAY_GNI_HEADERS, overriding pkg-config
+  CRAY_UGNI_CFLAGS
+              C compiler flags for CRAY_UGNI, overriding pkg-config
+  CRAY_UGNI_LIBS
+              linker flags for CRAY_UGNI, overriding pkg-config
+  CRAY_UGNI_STATIC_LIBS
+              static linker flags for CRAY_UGNI, overriding pkg-config
+  CRAY_ALPS_LLI_CFLAGS
+              C compiler flags for CRAY_ALPS_LLI, overriding pkg-config
+  CRAY_ALPS_LLI_LIBS
+              linker flags for CRAY_ALPS_LLI, overriding pkg-config
+  CRAY_ALPS_LLI_STATIC_LIBS
+              static linker flags for CRAY_ALPS_LLI, overriding pkg-config
+  CRAY_ALPS_UTIL_CFLAGS
+              C compiler flags for CRAY_ALPS_UTIL, overriding pkg-config
+  CRAY_ALPS_UTIL_LIBS
+              linker flags for CRAY_ALPS_UTIL, overriding pkg-config
+  CRAY_UDREG_CFLAGS
+              C compiler flags for CRAY_UDREG, overriding pkg-config
+  CRAY_UDREG_LIBS
+              linker flags for CRAY_UDREG, overriding pkg-config
+  CRAY_PMI_CFLAGS
+              C compiler flags for CRAY_PMI, overriding pkg-config
+  CRAY_PMI_LIBS
+              linker flags for CRAY_PMI, overriding pkg-config
+  CRAY_KDREG_CFLAGS
+              C compiler flags for CRAY_KDREG, overriding pkg-config
+  CRAY_KDREG_LIBS
+              linker flags for CRAY_KDREG, overriding pkg-config
+
+Use these variables to override the choices made by `configure' or to help
+it to find libraries and programs with nonstandard names/locations.
+
+Report bugs to <ofiwg@lists.openfabrics.org>.
+[root@node1 libfabric]# 
+

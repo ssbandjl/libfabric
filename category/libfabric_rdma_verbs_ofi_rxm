@@ -1,0 +1,3 @@
+fi_getinfo(NA_OFI_VERSION, node, service, flags, hints, fi_info_p) -> int DEFAULT_SYMVER_PRE(fi_getinfo) -> libfabric/src/fabric.c
+
+

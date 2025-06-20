@@ -153,12 +153,12 @@ static int ofi_log_enabled(const struct fi_provider *prov,
 }
 
 static void ofi_log(const struct fi_provider *prov, enum fi_log_level level,
-		    enum fi_log_subsys subsys, const char *func, int line,
+		    enum fi_log_subsys subsys, const char *func, const char *file, int line,
 		    const char *msg)
 {
-	fprintf(stderr, "%s:%d:%ld:%s:%s:%s:%s():%d<%s> %s",
+	fprintf(stderr, "%s:%d:%ld:%s:%s:%s, %s() %s:%d, <%s> %s",
 		PACKAGE, pid, (unsigned long) time(NULL), log_prefix,
-		prov->name, log_subsys[subsys], func, line,
+		prov->name, log_subsys[subsys], func, file, line,
 		log_levels[level], msg);
 }
 
@@ -350,7 +350,7 @@ DEFAULT_SYMVER(fi_log_ready_, fi_log_ready, FABRIC_1.6);
 
 __attribute__((visibility ("default"),EXTERNALLY_VISIBLE))
 void DEFAULT_SYMVER_PRE(fi_log)(const struct fi_provider *prov, enum fi_log_level level,
-		enum fi_log_subsys subsys, const char *func, int line,
+		enum fi_log_subsys subsys, const char *func, const char *file, int line,
 		const char *fmt, ...)
 {
 	char msg[1024];
@@ -361,6 +361,6 @@ void DEFAULT_SYMVER_PRE(fi_log)(const struct fi_provider *prov, enum fi_log_leve
 	vsnprintf(msg + size, sizeof(msg) - size, fmt, vargs);
 	va_end(vargs);
 
-	log_fid.ops->log(prov, level, subsys, func, line, msg);
+	log_fid.ops->log(prov, level, subsys, func, file, line, msg);
 }
 DEFAULT_SYMVER(fi_log_, fi_log, FABRIC_1.0);

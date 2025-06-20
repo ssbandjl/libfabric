@@ -1,0 +1,8 @@
+{
+  "files.associations": {
+    "shared.h": "c",
+    "*.tcc": "c",
+    "cstdlib": "c",
+    "merucry_bulk_libfabric": "c"
+  }
+}

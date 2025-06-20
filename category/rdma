@@ -1,0 +1,102 @@
+server:
+rdma_create_event_channel <- vrb_eq_open <- fi_eq_open
+rdma_create_id <- vrb_create_ep <- vrb_open_ep <- fi_endpoint
+rdma_listen -> fi_listen -> .listen = vrb_pep_listen -> vrb_pep_listen -> rdma_listen
+
+client:
+rdma_create_event_channel
+rdma_create_id
+rdma_resolve_addr -> RDMA_CM_EVENT_ADDRESS_RESOLVED ->  rxm_open_conn -> fi_endpoint (vrb_open_ep) -> rdma_resolve_addr
+rdma_resolve_route -> RDMA_CM_EVENT_ROUTE_RESOLVED -> rxm_send_connect -> fi_connect -> vrb_msg_ep_connect -> rdma_resolve_route
+------------------ 
+分配RDMA结构
+ibv_query_device <- fi_getinfo -> vrb_getinfo -> ibv_query_device
+ibv_alloc_pd <- fi_domain -> rxm_domain_open -> ibv_alloc_pd
+ibv_create_comp_channel -> na_ofi_eq_open -> fi_cq_open -> vrb_cq_open -> ibv_create_comp_channel
+ibv_create_cq -> na_ofi_eq_open -> fi_cq_open -> vrb_cq_open -> ibv_create_cq
+ibv_req_notify_cq -> na_ofi_poll_try_wait -> fi_trywait -> vrb_trywait -> vrb_cq_trywait
+rdma_create_qp -> na_ofi_context_create -> fi_enable -> rdma_create_qp
+ibv_reg_mr -> NA_Mem_register -> na_ofi_mem_register -> fi_mr_regv -> ibv_reg_mr
+------------------
+ibv_poll_cq -> na_ofi_msg_send_unexpected -> fi_senddata -> fi_send -> vrb_flush_cq -> ibv_poll_cq
+ibv_post_recv -> rxm_open_conn -> ibv_post_recv | na_ofi_tag_recv, na_ofi_msg_multi_recv -> fi_trecv -> ibv_post_recv
+rdma_connect -> server -> RDMA_CM_EVENT_CONNECT_REQUEST, -> fi_senddata -> rxm_get_conn -> rdma_connect
+
+server:
+case RDMA_CM_EVENT_CONNECT_REQUEST
+------------------ 
+分配RDMA结构
+ibv_query_device
+ibv_alloc_pd
+ibv_create_comp_channel
+ibv_create_cq
+ibv_req_notify_cq
+rdma_create_qp
+ibv_reg_mr
+------------------
+ibv_post_recv
+rdma_accept
+RDMA_CM_EVENT_ESTABLISHED
+ibv_post_send
+
+clinet:
+RDMA_CM_EVENT_ESTABLISHED
+ibv_post_send -> na_ofi_msg_send_unexpected -> ibv_post_send
+
+
+server:
+rdma_disconnect
+
+ibv_dereg_mr
+ibv_destroy_cq
+ibv_destroy_comp_channel
+rdma_destroy_qp
+
+rdma_destroy_id
+rdma_destroy_event_channel
+
+client:
+rdma_disconnect
+
+ibv_dereg_mr
+ibv_destroy_cq
+ibv_destroy_comp_channel
+rdma_destroy_qp
+
+rdma_destroy_id
+rdma_destroy_event_channel
+
+
+fi_send
+    ep->msg->send -> rxm_send
+        connect
+            ...
+            vrb_ep_prepare_rdma_cm_param -> 准备建连参数
+                conn_param->responder_resources = RDMA_MAX_RESP_RES -> 255个响应
+                conn_param->initiator_depth = RDMA_MAX_INIT_DEPTH -> 初始深度:255
+                conn_param->flow_control = 1 -> 开启流控
+                conn_param->rnr_retry_count = 7 -> 无限重试
+            ep->conn_param.retry_count = 15
+            if (ep->srx) -> 开启共享接收队列 -> vrb_srq_context <- fi_srx_context
+		        ep->conn_param.srq = 1;
+            rdma_resolve_route(ep->id, VERBS_RESOLVE_TIMEOUT) -> 解析路由(超时为2秒)
+        rxm_send_common
+            rxm_mr_desc_to_hmem_iface_dev
+            rxm_send_eager
+                ...
+                vrb_msg_ep_send
+                    ibv_post_send
+            or rxm_send_sar -> 分割与重组IO
+
+
+排序:
+FI_ORDER_SAS
+int efa_rdm_ep_open -> 打开弹性RDMA端点
+    efa_rdm_ep_set_use_zcpy_rx(efa_rdm_ep)
+        efa_rdm_ep_need_sas(ep)
+            return ep->msg_order & FI_ORDER_SAS -> 检查是否带有排序标签
+
+
+            
+
+

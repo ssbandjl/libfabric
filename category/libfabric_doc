@@ -1,0 +1,6 @@
+fabtests: libfabric/fabtests/man/fabtests.7.md
+
+参数:
+-c, 指示用于检查已完成操作的处理类型。 有效值为 spin、sread 和 fd。 默认设置是忙等待（旋转），直到所需的操作完成。 sread 选项指示应用程序将调用 libfabric 中的阻塞读取调用，例如 fi_cq_sread。 fd 指示应用程序将检索本机操作系统等待对象（文件描述符）并使用 poll() 或 select() 进行阻塞，直到 fd 收到信号为止，然后再检查完成情况
+
+

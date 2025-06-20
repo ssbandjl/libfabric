@@ -1,0 +1,1402 @@
+https://github.com/ssbandjl/libfabric.git
+git remote add upstream https://github.com/ofiwg/libfabric.git
+git fetch upstream
+git merge upstream/main
+git pull upstream main
+
+订阅: https://www.openfabrics.org/subscriptions-at-ofa/
+归档的历史讨论: https://lists.openfabrics.org/pipermail/ofiwg/
+程序员手册: https://ofiwg.github.io/libfabric/
+开发指南手册: https://github.com/ofiwg/ofi-guide/blob/master/OFIGuide.md
+设计要点:
+允许立即重用数据缓冲区, send() 将应用程序的数据复制到内部缓冲区中。然后从该缓冲区发出数据传输，这允许在失败的情况下重试操作。在这种情况下，send() 调用不会被阻塞，但是所有通过网络的数据都会导致内存复制到本地缓冲区，即使没有任何错误, 为了避免发送方的内存复制，我们需要将应用程序数据直接放到网络上。如果我们还想避免阻塞发送应用程序，我们需要一些方法让网络层在缓冲区可以安全重用时与应用程序通信。这将允许在需要重新传输数据的情况下重新使用缓冲区。这导致我们设计了一个异步行为的网络接口。应用程序需要发出请求，然后在请求完成时收到某种通知
+
+Libfabric 将等待对象与队列分开
+
+fi_trywait 实现负责处理可能导致应用程序丢失事件或挂起的潜在竞争条件
+
+
+
+
+https://ofiwg.github.io/libfabric/v1.10.1/man/fabtests.7.html
+fabtests 测试, fabtests/README, fabtests/README.md
+使用 --with-libfabric=<directory> 选项告诉 Fabtests 在哪里可以找到已安装的 Libfabric 的头文件和库文件
+编译:
+./autogen.sh
+./configure --with-libfabric=/opt/libfabric --prefix=/opt/fabtests && make -j 32 && sudo make install   #or
+./configure --prefix=/opt/fabtests && make -j 32 && sudo make install
+./configure --with-libfabric=/home/xb/project/net/libfabric/libfabric/build/libfabric --prefix=/home/xb/project/net/libfabric/libfabric/build/fabtests --enable-debug && make -j 32 && sudo make install
+
+server
+#原生网卡名
+fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged -d mlx5_0 -v -I 2
+
+client
+fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged 175.16.53.73 -v -I 2
+
+server
+gdb --args ./build/fabtests/bin/fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged -d mlx5_0 -v -I 2
+fi_pingpong源码: util/pingpong.c
+main -> int main(int argc, char **argv)
+ct.hints = fi_allocinfo()
+ct.hints->ep_attr->type = FI_EP_DGRAM 数据报端点
+ofi_osd_init -> null
+getopt -> static void pp_parse_opts 解析参数
+  case 'e' Endpoint -> ct->hints->ep_attr->type = FI_EP_RDM
+  case 'p' Provider -> ct->hints->fabric_attr->prov_name = strdup(optarg) verbs;ofi_rxm
+  case 'm' ct->hints->caps &= ~FI_MSG -> ct->hints->caps |= FI_TAGGED 去掉和增加标记
+  case 'd' Domain -> ct->hints->domain_attr->name = strdup(optarg)
+  case 'I' Iterations 迭代/重复 -> ct->opts.options |= PP_OPT_ITER
+ct.opts.dst_addr -> 
+pp_banner_options -> static void pp_banner_options 打印横幅banner
+  opts.transfer_size 64
+  PP_DEBUG(" * PingPong options:\n")
+switch (ct.hints->ep_attr->type) -> case FI_EP_RDM -> ret = run_pingpong_rdm(&ct) -> static int run_pingpong_rdm
+  pp_init_fabric -> static int pp_init_fabric
+    pp_ctrl_init -> static int pp_ctrl_init
+      default_ctrl = 47592 默认服务端口
+      pp_ctrl_init_server -> static int pp_ctrl_init_server
+        listenfd = ofi_socket(pp_ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0) -> static inline SOCKET ofi_socket(int domain, int type, int protocol) -> socket(domain, type, protocol)
+        setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR
+        struct sockaddr_in ctrl_addr = {0}
+        ctrl_addr.sin_port = htons(ct->opts.src_port) 47592
+        ctrl_addr.sin_addr.s_addr = htonl(INADDR_ANY)
+        ret = bind(listenfd
+        listen(listenfd, 10)
+        ct->ctrl_connfd = accept(listenfd, NULL, NULL) 等待客户端调用connect触发服务端accept
+        ofi_close_socket(listenfd)
+      setsockopt(ct->ctrl_connfd
+  run_suite_pingpong
+  pp_finalize
+pp_free_res
+
+
+client:
+gdb --args ./build/fabtests/bin/fi_pingpong -e rdm -p "verbs;ofi_rxm" -m tagged 175.16.53.73 -v -I 2
+ct.hints = fi_allocinfo
+ct.opts.dst_addr 175.16.53.73
+run_pingpong_rdm -> static int run_pingpong_rdm
+pp_init_fabric -> pp_ctrl_init_client
+  connect(ct->ctrl_connfd, rp->ai_addr, (socklen_t) rp->ai_addrlen) 连接服务端, 服务端执行accept
+setsockopt(ct->ctrl_connfd
+pp_ctrl_init
+if (ct->opts.dst_addr)
+pp_recv_name
+pp_getinfo
+pp_open_fabric_res
+pp_alloc_active_res
+pp_init_ep
+pp_send_name
+pp_av_insert
+
+run_suite_pingpong
+pp_finalize
+
+编译:
+make util/fi_pingpong -> util/fi_pingpong$(EXEEXT)
+
+端点类型:
+enum fi_ep_type {
+    FI_EP_UNSPEC,
+    FI_EP_MSG,
+    FI_EP_DGRAM,
+    FI_EP_RDM,
+    FI_EP_SOCK_STREAM,
+    FI_EP_SOCK_DGRAM,
+};
+
+new:
+enum fi_ep_type {
+	FI_EP_UNSPEC,
+	FI_EP_MSG,
+	FI_EP_DGRAM,
+	FI_EP_RDM,
+	/* FI_EP_SOCK_STREAM, */
+	/* FI_EP_SOCK_DGRAM, */
+};
+
+
+
+
+
+
+dos2unix autogen.sh
+./autogen.sh
+./configure --prefix="" --disable-efa --disable-psm3 --without-gdrcopy --enable-debug --disable-psm2 --disable-psm3
+make && make install
+
+
+fi_pingpong -p sockets
+fi_pingpong -p sockets "localhost" -v
+
+server:
+fi_pingpong -p sockets
+
+
+makeword是将两个byte型合并成一个word型，一个在高8位(b)，一个在低8位(a)
+MAKEWORD(2,2)就是调用2.2版
+
+client:
+fi_pingpong -p sockets "192.168.1.6" -v
+
+export PATH=/root/github/storage/daos/libfabric/util:/home/xb/project/libfabric/libfabric/build/fabtests/bin:$PATH
+s63: export PATH=/home/xb/project/libfabric/libfabric/build/fabtests/bin:$PATH
+util/pingpong.c
+
+server:
+main -> ofi_osd_init -> MAKEWORD -> WSAStartup -> pp_parse_opts 解析参数 -> pp_banner_options 打印横幅 -> FI_EP_RDM -> run_pingpong_rdm -> pp_init_fabric -> run_suite_pingpong -> pp_finalize
+
+pp_init_fabric -> 
+
+client:
+
+run_pingpong_rdm -> PP_POST -> 
+
+fi_pingpong.1.md
+
+WRITE:写
+vrb_msg_ep_rma_write -> IBV_WR_RDMA_WRITE -> ibv_post_send
+
+debug:
+FI_WARN(&core_prov, FI_LOG_CORE, "iov:%p\n", iov);
+
+
+tcpx_tx_queue_insert -> 
+
+fi_tsend -> 
+    rxm_ep_tsend -> rxm_get_conn -> 
+    rxm_send_common -> 
+        rxm_send_eager -> rxm_msg_tsend -> tcpx_tx_queue_insert -> rxm_cq_write 发完后写完成队列 -> ofi_cq_write
+send, 发送:
+fi_tsend -> 
+    rxm_ep_tsend -> 
+        rxm_get_conn -> 
+            rxm_send_common ->
+                data_len = ofi_total_iov_len(iov, count)
+                rxm_mr_desc_to_hmem_iface_dev
+                rxm_send_eager -> 小于16KB的走紧急消息
+                    rxm_msg_tsend -> 
+                        tcpx_tx_queue_insert -> 
+                            rxm_cq_write 发完后写完成队列 -> 
+                                ofi_cq_write
+                rxm_send_sar -> 大于 128 Kb
+                    rxm_mr_desc_to_hmem_iface_dev
+                    rxm_init_segment
+                    ofi_copy_from_hmem_iov
+                    fi_send
+                    for (i = 1; i < segs_cnt; i++)
+                        rxm_send_segment
+                            rxm_init_segment
+                            ofi_copy_from_hmem_iov
+                    remain_len -= rxm_buffer_size
+
+
+
+断点: rxm_ep_tsend
+
+获取连接:
+rxm_get_conn
+  ofi_av_addr_context
+    ofi_av_get_addr
+      ofi_bufpool_get_ibuf ->缓存池
+        pool->region_table[(size_t)(index / pool->attr.chunk_cnt)]->mem_region + (index % pool->attr.chunk_cnt) * pool->entry_size
+  rxm_add_conn
+    ofi_idm_lookup
+    rxm_alloc_conn
+      rxm_av_alloc_conn
+        ofi_buf_alloc(av->conn_pool)
+          ofi_bufpool_grow
+  rxm_ep_do_progress
+  rxm_connect
+    rxm_send_connect 空闲状态则建立连接(RXM_CM_IDLE)
+      rxm_open_conn
+        fi_endpoint
+        fi_ep_bind
+        fi_enable
+        rxm_prepost_recv
+      rxm_init_connect_data 将被动端点做连接请求发送到服务器
+      fi_connect
+        tcpx_ep_connect
+          ofi_wait_add_fd epoll
+  rxm_conn_progress
+    fi_eq_read 循环读取,从事件队列读取事件
+    rxm_handle_event
+    rxm_handle_error
+
+
+rxm_ep_do_progress
+  do
+    fi_cq_read
+    handle_comp_error rxm_handle_comp_error
+      fi_cq_readerr
+      ofi_cq_write_error
+
+
+
+1. fi_tsend
+/lib/libfabric.so.1(+0xf8b83) [0x7fbe1c660b83]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0xf494) [0x7fbe1c744494]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0xf875) [0x7fbe1c744875]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0xee1a) [0x7fbe1c99fe1a]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Core_forward+0x140) [0x7fbe1c9a8550]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Forward+0xc8) [0x7fbe1c999f98]
+2.  na_ofi_progress
+/root/github/storage/daos/mercury/build/bin/libna.so.2(+0x139ac) [0x7fbe1c7489ac]
+/root/github/storage/daos/mercury/build/bin/libna.so.2(NA_Progress+0x24b) [0x7fbe1c73d77b]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0xffbb) [0x7fbe1c9a0fbb]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(+0x12169) [0x7fbe1c9a3169]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Core_progress+0x10) [0x7fbe1c9a8920]
+/root/github/storage/daos/mercury/build/bin/libmercury.so.2(HG_Progress+0x18) [0x7fbe1c99a378]
+
+
+recv_list
+
+
+HG_Progress
+  NA_Progress
+    na_ofi_progress
+      ofi_cq_readfrom -> ofi_cq_progress -> rxm_ep_progress -> rxm_ep_do_progress -> rxm_handle_comp ->     rxm_finish_eager_send -> rxm_cq_write_tx_comp -> rxm_cq_write -> print_stacktrace  -> HG -> na_ofi_cq_read
+      ssize_t ofi_cq_readfrom(struct fid_cq *cq_fid, void *buf, size_t count, fi_addr_t *src_addr)  
+        cq->progress(cq) -> void ofi_cq_progress(struct util_cq *cq) -> fi_cq_read -> vrb_flush_cq
+          ibv_poll_cq -> cq转eq -> vrb_eq_read_event
+      return ofi_cq_read_entries(cq, buf, count, src_addr)
+server: NA_CB_RECV_UNEXPECTED CQ event 非预期接收
+
+
+地址向量:
+
+ip_av_insert_addr
+
+打印地址
+ofi_straddr_dbg(av->prov, FI_LOG_AV, "av_insert addr", addr)
+
+HASH_ADD(hh, av->hash, data, av->addrlen, entry)
+
+ofi_av_write_event
+
+fi_eq_write
+
+
+
+
+
+
+fi_cq_open
+cq_open vrb_cq_open
+ibv_create_cq
+
+
+
+2013
+获取大页: 
+ofi_hugepage_enabled
+  ofi_get_hugepage_size
+  ofi_alloc_hugepage_buf
+  ofi_unmap_anon_pages
+
+check fork: ibv_is_fork_initialized
+
+注册内存:
+参考daos: C:\Users\s30893\project\stor\storage\daos\daos.drawio
+...
+na_ofi_initialize
+  na_ofi_class->send_pool = hg_mem_pool_create(pool_chunk_size ... na_ofi_mem_buf_register 注册初始内存池
+  na_ofi_class->recv_pool = hg_mem_pool_create -> hg_mem_pool_create(size_t chunk_size
+    struct hg_mem_pool_block *hg_mem_pool_block = hg_mem_pool_block_alloc register_func
+      int rc = register_func(mem_ptr, block_size, flags, &mr_handle, arg) -> na_ofi_mem_buf_register -> na_ofi_mem_buf_register(const void *buf
+        rc = fi_mr_reg(na_ofi_class->domain->fi_domain, buf, len, access,
+          .reg = vrb_mr_reg -> vrb_mr_reg(struct fid *fid, const void *buf, size_t len, uint64_t access -> vrb_mr_reg_iface
+          _domain->cache.add_region = vrb_mr_cache_add_region; -> int vrb_mr_reg_common -> md->mr = ibv_reg_mr(md->domain->pd, (void *) buf, len,
+          
+
+  
+
+
+立即数: wr.imm_data = htonl((uint32_t)data)
+
+
+
+rdma write, 单边写, 写bulk, 写消息
+NA_Put
+na_ofi_put
+na_ofi_rma fi_writemsg = fi_rma_op   .writemsg =    -> include/rdma/fi_rma.h -> fi_writemsg(struct fid_ep *ep, const struct fi_msg_rma *msg, uint64_t flags)
+ep->rma->writemsg(ep, msg, flags)
+.writemsg = vrb_msg_ep_rma_writemsg
+vrb_msg_ep_rma_writemsg -> prov/verbs/src/verbs_rma.c
+  struct ibv_send_wr wr
+  wr.opcode = IBV_WR_RDMA_WRITE | wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM 写|立即数写
+  vrb_send_iov(ep, &wr, msg->msg_iov, msg->desc -> ssize_t vrb_send_iov
+    wr->sg_list = alloca(sizeof(*wr->sg_list) * count)
+    wr->sg_list[i].addr = (uintptr_t) iov[i].iov_base
+    wr->sg_list[i].length = iov[i].iov_len;
+    wr->send_flags = IBV_SEND_INLINE ?IBV_SEND_FENCE
+    wr->sg_list[0]
+    wr->num_sge =
+    vrb_post_send(ep, wr, flags) -> prov/verbs/src/verbs_ep.c -> ssize_t vrb_post_send
+      ibv_post_send(ep->ibv_qp, wr, &bad_wr)
+
+所有标签(Flags), include/rdma/fabric.h -> #define FI_MSG			(1ULL << 1) ...
+
+
+
+iodepth:
+static int vrb_ep_enable
+vrb_msg_ep_get_qp_attr(ep, &attr);
+  attr->cap.max_send_wr = ep->info_attr.tx_size;
+  attr->cap.max_send_sge = ep->info_attr.tx_iov_limit;
+  attr->cap.max_recv_wr = ep->info_attr.rx_size;
+  attr->cap.max_recv_sge = ep->info_attr.rx_iov_limit;
+vrb_create_dgram_ep
+  ibv_create_qp
+
+
+测试安装成功: fi_info
+
+
+git: https://github.com/ssbandjl/libfabric.git
+example: https://github.com/ssbandjl/HOTI_Tutorial_Examples.git
+
+
+宏
+int DEFAULT_SYMVER_PRE(fi_getinfo)
+
+int DEFAULT_SYMVER_PRE(fi_fabric)
+
+
+fabric.c -> __attribute__ -> int DEFAULT_SYMVER_PRE(fi_fabric) ->
+
+
+AC_DEFINE_UNQUOTED([ENABLE_DEBUG],[$dbg],
+                   [defined to 1 if libfabric was configured with --enable-debug, 0 otherwise])
+#if ENABLE_DEBUG
+
+
+int DEFAULT_SYMVER_PRE(fi_log_enabled)
+fi_log
+
+
+LOGGING INTERFACE
+
+
+FI_LOG_LEVEL=Debug
+FFI_LOG_PROV="verbs"
+FI_LOG_SUBSYS="fabric"
+
+env
+fi_info -e
+
+
+fi_endpoint
+Fabric endpoint operations
+
+
+registering provider
+
+
+RD和UC类型，以及XRC（Extended Reliable Connection）扩展可信连接，SRD（Scalable Reliable Datagram）等更复杂的服务类型
+
+
+
+./autogen.sh
+autoreconf -ivf
+./configure --disable-efa --disable-psm3 --without-gdrcopy --enable-debug --disable-psm2 --disable-psm3
+make -j 1
+make install
+
+
+libdir
+prefix = /usr
+-rpath
+
+
+server:
+fi_listen -> .listen = vrb_pep_listen -> vrb_pep_listen -> rdma_listen
+
+
+fi_eq_read -> .read = vrb_eq_read -> vrb_eq_read -> vrb_eq_cm_process_event -> RDMA_CM_EVENT_CONNECT_REQUEST
+
+
+
+
+RDMA_CM_EVENT_ADDR_RESOLVED
+
+
+RDMA_CM_EVENT_ROUTE_RESOLVED
+
+
+ofi_epoll_wait
+client: fi_eq_sread fi_cq_sread
+.sread = vrb_eq_sread -> vrb_eq_sread -> vrb_eq_read -> vrb_eq_cm_process_event -> rdma_connect
+epoll_wait
+
+fi_fabric -> .fabric = rxm_fabric | vrb_fabric -> int ofi_fabric_init -> 
+
+vrb_fabric -> ofi_fabric_init 
+
+
+fi_tsend
+  rxm_tsend
+    
+
+fi_eq_open
+    vrb_eq_open
+        switch (attr->wait_obj)
+        ofi_rbmap_init(&_eq->xrc.sidr_conn_rbmap, vrb_sidr_conn_compare) -> struct ofi_rbmap	sidr_conn_rbmap -> 红黑树
+        ofi_epoll_create(&_eq->epollfd) -> *ep = epoll_create(4)
+        _eq->channel = rdma_create_event_channel() -> 创建事件通道
+        ret = fi_fd_nonblock(_eq->channel->fd) -> 非阻塞
+        ofi_epoll_add(_eq->epollfd, _eq->channel->fd, OFI_EPOLL_IN, NULL) -> 事件通道上的FD加入epoll_fd
+        _eq->eq_fid.fid.ops = &vrb_eq_fi_ops
+        _eq->eq_fid.ops = &vrb_eq_ops
+
+
+
+static struct fi_ops vrb_eq_fi_ops = {
+    .size = sizeof(struct fi_ops),
+    .close = vrb_eq_close,
+    .bind = fi_no_bind,
+    .control = vrb_eq_control,
+    .ops_open = fi_no_ops_open,
+};
+
+static struct fi_ops_eq vrb_eq_ops = {
+    .size = sizeof(struct fi_ops_eq),
+    .read = vrb_eq_read,
+    .readerr = vrb_eq_readerr,
+    .write = vrb_eq_write,
+    .sread = vrb_eq_sread,
+    .strerror = vrb_eq_strerror
+};
+
+
+
+
+
+
+fi_endpoint
+  vrb_open_ep
+    vrb_check_ep_attr
+        ofi_check_ep_attr
+            ofi_check_ep_type
+        ofi_check_tx_attr
+        vrb_check_rx_attr
+        vrb_alloc_init_ep
+            ofi_endpoint_init vrb_util_ep_progress_noop
+                ep->progress = progress
+                ofi_genlock_init(&ep->lock -> 支持不同的锁类型
+                util_coll_init_cid_mask(ep->coll_cid_mask)
+                    ofi_bitmask_create
+                    ofi_bitmask_set_all
+                    ofi_bitmask_unset
+    vrb_ep_save_info_attr(ep, info)
+    switch (info->ep_attr->type) -> 端点类型
+    ...                            
+    vrb_create_ep(ep, vrb_get_port_space(info->addr_format), &ep->id)
+        vrb_get_rdma_rai
+            vrb_get_rdmacm_rai
+                vrb_set_rai
+                rdma_getaddrinfo
+                    ucma_getaddrinfo
+                        ucma_convert_to_rai
+        rdma_create_id(NULL, id, NULL, ps))
+        rdma_resolve_addr
+    ep->util_ep.ep_fid.fid.ops = &vrb_ep_ops
+    ep->util_ep.ep_fid.ops = &vrb_ep_base_ops
+
+
+
+static struct fi_ops vrb_ep_ops = {
+    .size = sizeof(struct fi_ops),
+    .close = vrb_ep_close,
+        vrb_flush_sq
+    .bind = vrb_ep_bind,
+    .control = vrb_ep_control,
+    .ops_open = fi_no_ops_open,
+};
+
+
+static struct fi_ops_ep vrb_ep_base_ops = {
+    .size = sizeof(struct fi_ops_ep),
+    .cancel = fi_no_cancel,
+    .getopt = vrb_ep_getopt,
+    .setopt = vrb_ep_setopt,
+    .tx_ctx = fi_no_tx_ctx,
+    .rx_ctx = fi_no_rx_ctx,
+    .rx_size_left = fi_no_rx_size_left,
+    .tx_size_left = fi_no_tx_size_left,
+};
+
+
+
+fi_eq_read
+  vrb_eq_read
+    rdma_get_cm_event
+    vrb_eq_cm_process_event 处理事件
+
+
+fi_connect
+  vrb_msg_ep_connect
+    rdma_resolve_route
+
+
+最大发送工作请求数:
+info->tx_attr->size, max_send_wr, 
+
+
+test: fabtests, libfabric rdma dma
+fabtests/component/dmabuf-rdma/fi-rdmabw-xe.c
+
+
+test:
+HOTI_Tutorial_Examples/2023/example_msg.c -> main
+hints = fi_allocinfo()
+
+
+
+向客户端-服务器测试引入完成方法，允许客户端-服务器测试更改在检查完成时调用的调用。 当前的方法是旋转 fi_cq_read 直到找到正确的完成次数。 添加一个新方法来支持调用 fi_cq_sread。 后续补丁中可能会出现其他方法
+fabtests完成类型:
+enum ft_comp_method {
+    FT_COMP_SPIN = 0,
+    FT_COMP_SREAD, // 同步读
+    FT_COMP_WAITSET,
+    FT_COMP_WAIT_FD, // 添加轮询 fd 等待对象的完成方法，某些应用程序（例如 rsockets、ES-API）依赖于在与完成队列关联的底层 fd 上调用 poll/select 的能力。 添加新的完成机制来测试提供者是否正确支持这一点。 这也显示了如何进行 fd 处理，以确保与 fd 相关的信号在收到信号后正确重置
+    FT_COMP_YIELD,
+};
+
+
+
+header:
+远程内存访问: include/rdma/fi_rma.h
+文档: man/fi_rma.3.md
+fi_rma_bw, 带宽测试
+
+def test_rma_bw
+fabtests/common：添加 HMEM 选项解析支持，此提交负责为 ubertest 添加 HMEM 选项支持。 创建了一个单独的函数 ft_parse_hmem_opts() 将 HMEM 选项与其他选项分开，以便于处理
+server: fi_rma_bw -e msg -o write -I 5
+client: fi_rma_bw -e msg -o write -I 5 any_ip
+
+推荐端点类型选择连接更少的可靠数据报类型
+server: fi_rma_bw -e rdm -o write -I 5 -p verbs
+client: fi_rma_bw -e rdm -o write -I 5 -p verbs 172.17.29.63
+
+gdb --args ./fi_rma_bw -e rdm -o write -I 5 -p verbs
+server: fabtests/benchmarks/rma_bw.c -> main
+opts.options |= FT_OPT_BW
+fi_allocinfo
+hints->ep_attr->type = FI_EP_RDM
+hints->domain_attr->mr_mode = opts.mr_mode
+hints->tx_attr->tclass = FI_TC_BULK_DATA
+ret = run() -> static int run(void)
+  ret = ft_init_fabric()
+    ft_init_oob() -> fabtests：仅允许更改 OOB 地址 如果提供程序使用带有 -F 标志的 FI_ADDR_STR，则它可能不是 IP 地址，因此它不能用于与套接字的带外通信。 这会添加一个“-O”标志来选择带外地址，使其兼容
+    ft_open_fabric_res
+      fi_eq_open -> int ofi_eq_create(struct fid_fabric *fabric_fid, struct fi_eq_attr *attr, struct fid_eq **eq_fid, void *context)
+        eq = calloc(1, sizeof(*eq))
+        ret = ofi_eq_init(fabric_fid, attr, &eq->eq_fid, context)
+          util_verify_eq_attr
+            case FI_WAIT_YIELD -> 释放cpu
+          util_eq_init
+            ret = fi_wait_open(fabric, &wait_attr, &wait) -> int ofi_wait_fd_open
+              ...
+              wait->wait_obj = FI_WAIT_FD
+              pollset->poll_fid.fid.fclass = FI_CLASS_POLL -> 类型
+              pollset->poll_fid.fid.ops = &util_poll_fi_ops
+              pollset->poll_fid.ops = &util_poll_ops
+              ...
+              wait->util_wait.signal = util_wait_fd_signal;
+                wait->util_wait.wait_try = util_wait_fd_try;
+              ...
+              ret = socketpair(AF_UNIX, SOCK_STREAM, 0, signal->fd)
+              static inline int ofi_epoll_create -> *ep = epoll_create(4)
+              ret = ofi_epoll_add(wait_fd->epoll_fd, fd, ofi_poll_to_epoll(events), context)
+                static inline int ofi_epoll_add
+                  event.events = events
+                  ret = epoll_ctl(ep, EPOLL_CTL_ADD, fd, &event)
+              wait->util_wait.wait_fid.fid.ops = &util_wait_fd_fi_ops;
+                wait->util_wait.wait_fid.ops = &util_wait_fd_ops;
+            ret = fi_poll_add(&eq->wait->pollset->poll_fid -> 在添加到等待集之前，EQ 必须完全运行
+              fid_list_insert(&pollset->fid_list, &pollset->lock, event_fid)
+
+...
+ret = ft_init_av()
+  int ft_init_av_dst_addr
+    ret = ft_get_rx_comp(rx_seq)
+      ft_get_cq_comp(rxcq, &rx_cq_cntr, total, timeout)
+        ft_read_cq(cq, cur, total, timeout, ft_tag)
+          ft_spin_for_comp(cq, cur, total, timeout, tag)
+            do loop -> fi_cq_read(cq, &comp, 1) -> 读完成队列, 检查时间
+              ... ssize_t ofi_cq_readfrom ...
+    ret = ft_post_rx(ep, rx_size, &rx_ctx)  
+      FT_POST(fi_recv, ft_progress, rxcq, rx_seq, &rx_cq_cntr
+    ret = (int) ft_tx(ep, *remote_addr, 1, &tx_ctx)
+      ft_post_tx
+        FT_POST(fi_send, ft_progress, txcq, tx_seq -> 触发客户端 ret = ft_init_av() 收到消息, 继续执行, 交换key的逻辑: ft_exchange_keys(&remote)
+  ret = ft_exchange_keys(&remote)
+    ret = fi_mr_raw_attr(mr, &addr, NULL, &key_size, 0)
+    ret = ft_tx(ep, remote_fi_addr, len + ft_tx_prefix_size(), &tx_ctx)
+    ret = ft_get_rx_comp(rx_seq)
+  ft_post_rma_inject -> fabtests/benchmarks：修复注入大小设置 基准测试的“-j”选项允许用户指定注入大小的上限。 例如，可以通过将注入大小设置为 0 来禁用注入调用。该值通过提示传递给 fi_getinfo()。 但是，某些提供程序（例如 rxm）可能会报告比提示中要求的注入大小更高的注入大小。 当使用“-j”选项来尊重用户输入时，从提示中获取值
+  基准测试：将注入操作作为 pingpong 的一部分 允许在输入上指定注入大小，并让 pingpong 测试在消息符合条件时使用注入。 删除inject_pingpong 测试，因为它现在已集成为其他基准测试的一部分。 在hints结构中设置注入值，然后使用输出fi_info结构提供的值
+ft_free_res()
+
+提交接收后立即progress
+FT_POST(fi_recv, ft_progress, rxcq, rx_seq, &rx_cq_cntr
+
+
+client: gdb --args fi_rma_bw -e rdm -o write -I 5 -p verbs 172.17.29.63
+...
+ret = ft_init_av() -> av: 18446744073709551615
+  fi_av_insert -> static int rxm_av_insert
+    ofi_ip_av_insert(av_fid, addr, count, fi_addr, flags, context)
+      entry = ofi_ibuf_alloc(av->av_entry_pool)
+        ofi_bufpool_grow
+      HASH_ADD(hh, av->hash, data, av->addrlen, entry) -> 插入hash表
+    ret = rxm_av_add_peers(av, addr, count, fi_addr)
+        peer = util_get_peer(av, cur_addr)
+            node = ofi_rbmap_find(&av->addr_map, (void *) addr);
+                map->compare(map, key, node->data)
+            rxm_alloc_peer
+                ofi_ibuf_alloc
+                ofi_rbmap_insert(&av->addr_map, &peer->addr, peer, &peer->node)
+        ofi_av_lookup_fi_addr(&av->util_av, cur_addr);
+            ofi_av_lookup_fi_addr_unsafe
+                HASH_FIND(hh, av->hash, addr, av->addrlen, entry)
+        rxm_set_av_context
+        rxm_put_peer_addr
+            rxm_set_av_context(av, fi_addr, NULL)
+
+
+
+
+...
+init_test(&opts, test_name, sizeof(test_name))
+ret = bandwidth_rma(opts.rma_op, &remote)
+  ret = ft_post_rma_inject(FT_RMA_WRITE, tx_buf + offset -> 发送数据, static void rxm_init_infos(void), buffer_size, 从历史上看，“buffer_size”是为急切消息大小指定的名称。 保留名称以实现向后兼容性, prov/rxm：缓冲区、eager 和数据包大小的单独定义 rxm_buffer_size 和 rxm_eager_limit 在整个代码中使用，具有特定含义。 特别是， eager_limit 可以表示 eager 消息协议的最大大小或反弹缓冲区的大小（相对于用户）。 后者令人困惑，因为 buffer_size 具有类似的含义，但其值不合适。 buffer_size 等于 eager_limit + rxm_pkt 的大小。 将 buffer_size 更新为等于分配的缓冲区的大小。 Eager 大小将与 Eager 协议相关的大小相对应。 并添加一个新的 packet_size 变量来记录分配的数据包的完整大小。 更新代码以引用提供有关如何使用值的最佳含义的变量。 这将允许未来的补丁允许这些值有所不同。 例如， eager_limit 和 buffer_size 不需要匹配
+
+
+...
+ret = ft_post_rma(FT_RMA_WRITE, tx_buf + offset
+  static ssize_t rxm_ep_write
+    struct fi_rma_iov rma_iov
+    rxm_ep_generic_writemsg(ep_fid, &msg, rxm_ep->util_ep.tx_op_flags)
+      vrb_msg_ep_rma_writemsg
+        struct ibv_send_wr wr = {
+          .wr_id = (uintptr_t)msg->context,
+          .wr.rdma.remote_addr = msg->rma_iov->addr,
+          .wr.rdma.rkey = (uint32_t)msg->rma_iov->key,
+        };
+        wr.opcode = IBV_WR_RDMA_WRITE
+        ...
+        wr->sg_list = alloca(sizeof(*wr->sg_list) * count)
+        if (wr->send_flags & IBV_SEND_INLINE)
+        ret = ofi_copy_from_hmem_iov(bounce_buf, len, iface, device, iov, count, 0)
+          ofi_iov_bytes_to_copy
+        wr->sg_list[0] = vrb_init_sge(bounce_buf, len, NULL)
+        wr->num_sge = 1
+        wr->wr_id = VERBS_COMP_FLAGS(ep, flags, wr->wr_id)
+        if (flags & FI_FENCE) -> 设置 FENCE标签
+          wr->send_flags |= IBV_SEND_FENCE
+        ssize_t vrb_post_send
+        ...    
+fi_domain
+  rxm_domain_open -> vrb_domain
+    vrb_open_device_by_name
+      ev_list = rdma_get_devices(NULL) -> 获取所有的rdma设备
+      for (i = 0; dev_list[i] && ret; i++) -> 遍历设备列表
+        const char *rdma_name = ibv_get_device_name(dev_list[i]->device)
+    _domain->pd = ibv_alloc_pd(_domain->verbs)
+    vrb_odp_flag
+      ret = ibv_query_device_ex(verbs, &input, &attr)
+    _domain->util_domain.domain_fid.fid.ops = &vrb_fid_ops; -> 
+      _domain->util_domain.domain_fid.mr = &vrb_mr_ops; -> 注册内存
+    _domain->cache.add_region = vrb_mr_cache_add_region
+    _domain->cache.delete_region = vrb_mr_cache_delete_region
+    ret = ofi_mr_cache_init(&_domain->util_domain, memory_monitors, &_domain->cache)
+      ofi_rbmap_init
+      ofi_bufpool_create 内存池
+        pool->entry_size = ofi_get_aligned_size(entry_sz, pool->attr.alignment)
+    ret = vrb_init_progress(&_domain->progress, _domain->verbs)
+
+
+
+
+
+
+
+
+
+    lock, enum ofi_lock_type, 初始化锁: int ofi_genlock_init, 
+    core/lock：添加完全禁用同步锁的功能 同步锁支持无操作选项，该选项禁用锁定以支持单线程环境。 但是，它仍然在调试模式下使用互斥体来验证锁是否被正确使用。 此选项不适用于 tcp rdm 提供程序，因为使用更高级别的锁来避免进一步嵌套的锁定问题。 嵌套锁被转换为无操作，但可能会递归地“获取”（这就是它们被禁用的原因）。 更改 OFI_LOCK_NONE 选项以指示不需要锁定并且应禁用调试检查。 添加新的 OFI_LOCK_NOOP 来指示需要锁定，但应该是无操作
+
+    核心：添加通用锁实现抽象提供一个锁，可以根据调用者的需要在互斥锁或自旋锁（或无锁）之间进行转换。 此抽象将取代 CQ 使用的锁抽象，并可由其他 util 类使用
+
+
+
+RXM初始化, 
+#define DEFAULT_CONF_FILE_PATH "libfabric.conf" -> 默认配置文件
+定义参数:
+rxm_buffer_size 16KB
+RXM_INI
+{
+    fi_param_define(&rxm_prov, "buffer_size", FI_PARAM_SIZE_T,
+            "Defines the allocated buffer size used for bounce "
+            "buffers, including buffers posted at the receive side "
+            "to handle unexpected messages.  This value "
+            "corresponds to the rxm inject limit, and is also "
+            "typically used as the eager message size. "
+            "(default %zu)", rxm_buffer_size);
+    rxm_cm_progress_interval = 10000
+comp_per_progress: 每轮一个
+sar_limit: 分割与重组, prov/rxm：允许指定与缓冲区大小分开的急切大小 对于 rxm + tcp，急切大小和缓冲区大小可以不同。 Tcp 允许直接使用 tcp 发布用户缓冲区，从而避免发送端副本。 在接收端，只有在意外消息的情况下才需要缓冲区大小，我们可以单独处理。 （在后续补丁中）。 此更改将使我们能够避免在常见情况下不使用的缓冲区分配，从而减少通过 tcp 运行时的内存占用
+enable_passthru: 直通, 启用 passthru 优化。Passthru 允许 rxm 将所有数据传输调用直接传递到核心提供程序，从而消除 rxm 协议和相关开销。Passthru 是到 tcp 提供程序的优化路径，具体取决于 应用程序请求的功能,
+
+
+
+rdma发送标记:
+enum ibv_send_flags {
+    IBV_SEND_FENCE		= 1 << 0,
+    IBV_SEND_SIGNALED	= 1 << 1,
+    IBV_SEND_SOLICITED	= 1 << 2,
+    IBV_SEND_INLINE		= 1 << 3,
+    IBV_SEND_IP_CSUM	= 1 << 4
+};
+
+
+event_queue 事件队列
+struct vrb_eq
+    struct fid_eq		eq_fid
+    struct rdma_event_channel *channel;
+    ofi_epoll_t		epollfd
+
+
+
+端口协议:
+/* Endpoint protocol
+ * If two providers support the same protocol, then they shall interoperate
+ * when the protocol capabilities match.
+ */
+enum {
+    FI_PROTO_UNSPEC,
+    FI_PROTO_RDMA_CM_IB_RC,
+    FI_PROTO_IWARP,
+    FI_PROTO_IB_UD,
+    /*  PSMX provider is deprecated.
+     *  We will keep this value in order to save binary compatibility.
+     */
+    FI_PROTO_PSMX,
+    FI_PROTO_UDP,
+    FI_PROTO_SOCK_TCP,
+    /*  MXM provider is deprecated.
+     *  We will keep this value in order to save binary compatibility.
+     */
+    FI_PROTO_MXM,
+    FI_PROTO_IWARP_RDM,
+    FI_PROTO_IB_RDM,
+    FI_PROTO_GNI,
+    FI_PROTO_RXM,
+    FI_PROTO_RXD,
+    FI_PROTO_MLX,
+    FI_PROTO_NETWORKDIRECT,
+    FI_PROTO_PSMX2,
+    FI_PROTO_SHM,
+    FI_PROTO_MRAIL,
+    FI_PROTO_RSTREAM,
+    FI_PROTO_RDMA_CM_IB_XRC,
+    FI_PROTO_EFA,
+    FI_PROTO_PSMX3,
+    FI_PROTO_RXM_TCP,
+    FI_PROTO_OPX,
+    FI_PROTO_CXI,
+    FI_PROTO_XNET,
+    FI_PROTO_COLL,
+    FI_PROTO_UCX,
+    FI_PROTO_SM2,
+};
+
+
+异步向量IO
+FI_ASYNC_IOV
+
+
+模式转字符串:
+ofi_tostr_mode
+
+字符串转模式
+str2mode
+
+
+gpu:
+fabtests/component/dmabuf-rdma/fi-rdmabw-xe.c -> main
+zeMemAllocHost
+init_buf
+init_ofi
+init_nic
+    fi_domain
+        return fabric->ops->domain(fabric, info, domain, context) -> .domain
+    fi_endpoint
+    fi_cq_open
+    if (ep_type == FI_EP_RDM) -> 可靠数据报不需要建连, 通过地址向量管理通信地址
+        fi_av_open -> rxm_av_open
+            rxm_util_av_open -> 所有对等地址，无论是已插入 AV 还是端点与其有活动连接，都存储在 addr_map 中。 对等点是从缓冲池中分配的，并使用该池分配本地索引。 所有rxm端点都维护一个与peer_pool对齐的连接数组。 从技术上讲，我们只需要在 AV 本身中存储每个对等点的索引。 “util_av”基本上可以被 ofi_index_map 替换。 然而，太多现有代码依赖于现有的 util_av 并存储 AV 地址。 未来的清理工作是删除 util_av 的使用，并使 rxm_av 实现独立
+                ofi_bufpool_create(&av->peer_pool
+                ofi_bufpool_create(&av->conn_pool
+                ofi_rbmap_init(&av->addr_map, rxm_addr_compare)
+                ofi_av_init(domain, attr, &util_attr, &av->util_av, context)
+                    ofi_av_init_lightweight
+                        util_verify_av_attr
+                    util_av_init -> UDP：添加具有通用实现的 UDP 提供程序 这引入了 UDP 套接字提供程序以及实用程序“库”。 UDP 提供程序是基于 DGRAM 的提供程序，用于发送和接收 UDP 数据包。 它应该与 usnic 提供商兼容，但我还没有测试过。 UDP 提供程序是使用基本提供程序构建块（实用程序“库”）构建的。 引入 UDP 提供程序的原因是它提供了最低级别的功能，可以在该功能上构建其他功能并将其添加到实用程序库中。 该实用程序库有两个目的。 第一个是提供所有提供商都可以使用的通用构建块。 这将使我们能够集中精力优化任何提供商都可以使用的各种功能的单一实现。 例如，实用程序代码提供了 libfabric 对象的基本定义，以便处理引用计数、检查属性等。它还提供了 CQ、EQ、轮询集、AV 等的软件实现......我预计开发人员会迭代实用程序库 代码作为提供者更新以使用它。 该实用程序库基于套接字和 psm 提供商的现有代码。 性能是主要关注点，因此期望提供者特定的代码段。 例如，EP 和 CQ 代码几乎完全是特定于提供商的。 目的是扩展实用程序库以实现额外的 libfabric 功能（例如标记接口、多接收支持等），并构建一个可以自动升级现有提供程序的功能集的实用程序提供程序
+                        util_verify_av_util_attr
+                        roundup_power_of_two
+                        ofi_bufpool_create_attr
+            fi_av_open
+        fi_ep_bind
+    if (ep_type == FI_EP_MSG) -> 消息需要建连
+        fi_connect
+        fi_accept -> .accept = vrb_msg_ep_accept
+            fi_control(&ep->fid, FI_ENABLE, NULL)
+            vrb_msg_ep_prepare_cm_data
+            vrb_ep_prepare_rdma_cm_param
+                conn_param->responder_resources = RDMA_MAX_RESP_RES;
+                conn_param->initiator_depth = RDMA_MAX_INIT_DEPTH;
+                conn_param->flow_control = 1; -> 流控
+                conn_param->rnr_retry_count = 7; -> 重试次数
+            rdma_accept(_ep->id, &conn_param)
+        or wait_connected
+            fi_eq_sread
+                rdma_connect
+
+
+
+type - 端点类型, https://ofiwg.github.io/libfabric/v1.20.0/man/fi_endpoint.3.html
+如果指定，则指示所需的结构接口通信类型。支持的类型有：
+
+FI_EP_DGRAM
+支持无连接、不可靠的数据报通信。消息边界得到维护，但最大消息大小可能受限于结构 MTU。无法保证流量控制。
+FI_EP_MSG
+提供可靠、面向连接的数据传输服务，并具有维护消息边界的流控制。
+FI_EP_RDM
+可靠的数据报消息。提供可靠的无连接数据传输服务，并具有维护消息边界的流控制。
+FI_EP_SOCK_DGRAM
+具有类似 UDP 套接字语义的无连接、不可靠的数据报端点。FI_EP_SOCK_DGRAM 对于围绕使用 UDP 套接字设计的应用程序最有用。有关适用于数据报套接字端点的其他详细信息和限制，请参阅 SOCKET ENDPOINT 部分。
+FI_EP_SOCK_STREAM
+具有 TCP 套接字语义的数据流端点。提供可靠、面向连接的数据传输服务，不维护消息边界。FI_EP_SOCK_STREAM 对于围绕使用 TCP 套接字设计的应用程序最有用。有关适用于流端点的其他详细信息和限制，请参阅 SOCKET ENDPOINT 部分。
+FI_EP_UNSPEC
+未指定端点的类型。这通常作为输入提供，端点的其他属性或提供者选择类型。
+
+
+
+地址向量:
+struct rxm_av {
+    struct util_av util_av;
+    struct ofi_rbmap addr_map;
+    struct ofi_bufpool *peer_pool;
+    struct ofi_bufpool *conn_pool;
+    struct fid_peer_av peer_av;
+    struct fid_av *util_coll_av;
+    struct fid_av *offload_coll_av;
+};
+
+常用计算, math, libfabric/include/ofi.h
+
+向上取powerof2
+static inline uint64_t roundup_power_of_two(uint64_t n)
+{
+    if (!n || !(n & (n - 1)))
+        return n;
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    n |= n >> 32;
+    n++;
+    return n;
+}
+
+
+
+rxm,手动/自动推进, 
+FI_PROGRESS_MANUAL, FI_PROGRESS_AUTO
+domain_attr->control_progress = FI_PROGRESS_MANUAL
+cur->domain_attr->data_progress = FI_PROGRESS_MANUAL
+domain_attr->data_progress = FI_PROGRESS_MANUAL
+cur->domain_attr->threading = FI_THREAD_SAFE
+
+fi_control, 控制命令, 
+static int rxm_ep_ctrl(struct fid *fid, int command, void *arg)
+    switch (command)
+    case FI_ENABLE:
+        rxm_ep_msg_cq_open(ep) -> 确保原子进度线程此时未启动。 进度线程应仅在 MSG CQ 打开后启动，以保持简单（避免首先仅进行 MSG EQ，然后在打开 MSG EQ 和 MSG CQ 后同时进行 MSG EQ 和 MSG CQ）
+            cq_attr.wait_obj = rxm_get_wait_obj(rxm_ep)
+            fi_cq_open(domain->msg_domain, &cq_attr, &rxm_ep->msg_cq,rxm_ep)
+            rxm_ep_wait_fd_add(rxm_ep, cq_list[i]->wait) -> 完成列表, 需要等待FD(中断模式)
+                ofi_wait_add_fid
+                    ofi_wait_add_fid(wait, &rxm_ep->msg_cq->fid, POLLIN, rxm_ep_trywait_cq)
+                        fi_trywait(rxm_fabric->msg_fabric, fids, 1)
+                    ofi_wait_add_fid(wait, &rxm_ep->msg_eq->fid, POLLIN, rxm_ep_trywait_eq)
+                        fi_trywait(rxm_fabric->msg_fabric, fids, 1)
+            rxm_ep_wait_fd_add(rxm_ep, cntr_list[i]->wait) -> 控制列表
+        rxm_ep_txrx_res_open(ep) -> 在启用端点时，FI_OPT_BUFFERED_MIN、FI_OPT_BUFFERED_LIMIT应该已被冻结，以便我们可以创建具有正确大小的集合点协议消息池
+            prov/rxm：使用预分配的注入 TX 缓冲区进行非线程安全模式 该补丁通过在关键发送路径上保存 40 条指令来减少延迟 (1-2 ms) 和消息速率 (+ ~50k)。 该补丁提出了以下行为：如果未设置 FI_THREAD_SAFE 线程模式，EP 不会为 inejct 操作分配缓冲区池，EP 会为注入操作分配单个 TX 缓冲区，并在每个注入操作中使用它。 此外，补丁还通过仅存储指向池的指针而不是整个数组来减少 RxM EP 的大小
+            rxm_ep_create_pools -> 内存池
+            rxm_ep_rx_queue_init
+                rxm_recv_queue_init
+                    rxm_recv_fs_create
+                rxm_multi_recv_pool_init
+                    ofi_bufpool_create_attr
+        rxm_prepost_recv(ep, ep->msg_srx)
+            for (i = 0; i < ep->msg_info->rx_attr->size; i++)
+                rxm_rx_buf_alloc
+                rxm_post_recv(rx_buf)
+                    fi_recv
+                        .recv = rxm_recv -> rxm_recv_common
+                            if (op_flags & FI_MULTI_RECV)
+                                rxm_post_mrecv
+                                    rxm_recv_entry_get(ep, &cur_iov, desc, 1, FI_ADDR_UNSPEC, 0, 0, context, op_flags, &ep->recv_queue) -> 接收队列
+                                    rxm_get_unexp_msg
+                                    rxm_handle_rx_buf
+                                        case rxm_ctrl_eager
+                                            rx_buf->ep->eager_ops->handle_rx(rx_buf)
+                                        
+        ret = rxm_start_listen(ep)
+            fi_listen(ep->msg_pep)
+            fi_getname(&ep->msg_pep->fid, &ep->addr, &addr_len)
+            if (ep->util_ep.domain->data_progress == FI_PROGRESS_AUTO || force_auto_progress)
+                pthread_create(&ep->cm_thread, 0, ep->rxm_info->caps & FI_ATOMIC ? rxm_cm_atomic_progress : rxm_cm_progress, ep) -> 启动线程
+
+
+
+
+FI_OFI_RXM_CM_PROGRESS_INTERVAL
+
+共享接收队列: FI_OFI_RXM_USE_SRX
+cli_srx_set
+rxm_use_srx
+core_info->ep_attr->rx_ctx_cnt
+
+
+progress:
+ssize_t rxm_handle_comp
+    rxm_handle_recv_comp
+        
+
+
+ofi_check_rx_attr
+    int rm_enabled = (prov_info->domain_attr->resource_mgmt == FI_RM_ENABLED);
+
+
+vrb_eq_readerr
+
+
+FI_ECANCELED
+
+#define	FI_EIO		 	EIO		/* I/O error */
+
+
+
+如果是下刷错误,则返回取消, 如果是其他错误, 则返回EIO
+err_entry.err = (wc->status == IBV_WC_WR_FLUSH_ERR) ? FI_ECANCELED : FI_EIO;
+
+
+
+工作完成状态:
+enum ibv_wc_status {
+    IBV_WC_SUCCESS,
+    IBV_WC_LOC_LEN_ERR,
+    IBV_WC_LOC_QP_OP_ERR,
+    IBV_WC_LOC_EEC_OP_ERR,
+    IBV_WC_LOC_PROT_ERR,
+    IBV_WC_WR_FLUSH_ERR,
+    IBV_WC_MW_BIND_ERR,
+    IBV_WC_BAD_RESP_ERR,
+    IBV_WC_LOC_ACCESS_ERR,
+    IBV_WC_REM_INV_REQ_ERR,
+    IBV_WC_REM_ACCESS_ERR,
+    IBV_WC_REM_OP_ERR,
+    IBV_WC_RETRY_EXC_ERR,
+    IBV_WC_RNR_RETRY_EXC_ERR,
+    IBV_WC_LOC_RDD_VIOL_ERR,
+    IBV_WC_REM_INV_RD_REQ_ERR,
+    IBV_WC_REM_ABORT_ERR,
+    IBV_WC_INV_EECN_ERR,
+    IBV_WC_INV_EEC_STATE_ERR,
+    IBV_WC_FATAL_ERR,
+    IBV_WC_RESP_TIMEOUT_ERR,
+    IBV_WC_GENERAL_ERR,
+    IBV_WC_TM_ERR,
+    IBV_WC_TM_RNDV_INCOMPLETE,
+};
+
+
+
+vrb_msg_ep_sendmsg
+    
+
+
+GDR:
+dmabuf, commit:https://github.com/ssbandjl/libfabric/commit/bc6258069f2e9975a69257e921708a980399626a
+fabtests\component\dmabuf-rdma\rdmabw-xe.c
+dmabuf_reg_open
+xe_init
+    EXIT_ON_ERROR(init_libze_ops())
+        libze_handle = dlopen("libze_loader.so.1", RTLD_NOW)
+        libze_ops.zeInit = dlsym(libze_handle, "zeInit")
+        ...
+    libze_ops.zeInit
+    libze_ops.zeContextCreate
+    init_gpu(num_gpus, dev_num, subdev_num)
+init_buf
+init_ib
+    ibv_get_device_list
+    init_nic
+        ibv_open_device
+        ibv_alloc_pd
+        for (i = 0; i < num_gpus; i++)
+            reg_mr(pd, bufs[i].xe_buf.buf,
+				       bufs[i].xe_buf.size,
+				       bufs[i].xe_buf.base,
+				       bufs[i].xe_buf.location)
+                int odp_flag = use_odp ? IBV_ACCESS_ON_DEMAND : 0
+                if (where == MALLOC || use_dmabuf_reg)
+                    ibv_reg_mr(pd, buf, size, mr_access_flags | odp_flag)
+                else
+                    ibv_reg_dmabuf_mr(pd, (uint64_t)((char *)buf - (char *)base), size, (uint64_t)buf, /* iova */ xe_get_buf_fd(buf), mr_access_flags)
+        ibv_create_cq
+        qp_init_attr.qp_type = IBV_QPT_RC;
+        ibv_create_qp
+        ibv_modify_qp
+        ibv_query_gid
+    show_business_card(&me, "Me");
+    exchange_info
+    show_business_card(&peer, "Peer");
+    connect_ib
+        qp_attr.qp_state		= IBV_QPS_RTR;
+        ...
+        ibv_modify_qp
+        qp_attr.qp_state = IBV_QPS_RTS;
+        ibv_modify_qp
+run_rdma_test
+    post_proxy_write
+        .opcode = IBV_WR_RDMA_WRITE,
+    or post_rdma
+        .opcode = test_type == READ ? IBV_WR_RDMA_READ : IBV_WR_RDMA_WRITE
+    ibv_poll_cq
+    check_completions
+        ibv_wc_status_str
+sync_tcp
+sync_ib
+
+
+
+
+util/info.c -> main
+    hints = fi_allocinfo()
+    ret = run(use_hints ? hints : NULL, node, port, flags)
+        fi_getinfo(FI_VERSION(FI_MAJOR_VERSION, FI_MINOR_VERSION), node, port, flags, hints, &info) -> DEFAULT_SYMVER_PRE(fi_getinfo)
+            fi_ini
+                ofi_ordered_provs_init
+                fi_param_init();
+                fi_log_init();
+                ofi_dump_sysconfig();
+                ofi_osd_init();
+                ofi_mem_init();
+                ofi_pmem_init();
+                ofi_perf_init();
+                ofi_hook_init();
+                ofi_hmem_init();
+                ofi_monitors_init();
+                    initialize_monitor_list
+                    monitor_list[i]->init(monitor_list[i]) <- .monitor.init
+                        dlist_init(&monitor->list)
+                ofi_shm_p2p_init();
+                ...
+        prov->provider->getinfo -> static int fi_opx_getinfo -> vrb_getinfo
+            vrb_init_info
+            vrb_get_match_infos
+        ret = print_vars()
+        print_long_info
+        print_providers
+        print_short_info
+        
+
+
+VERBS_INI -> struct fi_provider* fi_verbs_ini(void)
+    ofi_mem_init
+        size_t *page_sizes = NULL;
+        size_t num_page_sizes = 0;
+        struct dirent **pglist = NULL
+        psize = ofi_get_page_size()
+        hpsize = ofi_get_hugepage_size() -> util_buf.c：添加对 Linux 上大页的支持，当初始 buf 池分配大于或等于系统默认大页大小时，在 Linux 上使用 mmap() 在大页中分配 buf 池内存区域。 如果确定大页面大小或 mmap 由于任何原因失败，则使用 ofi_memalign() 进行回退。 如果需要的话，为其他平台添加存根，以便将来为这些平台添加大页面支持
+            fd = fopen("/proc/meminfo", "r")
+            while (getline(&line, &len, fd) != -1)
+                if (sscanf(line, "Hugepagesize: %zi kB", &val) == 1)
+                return val * 1024
+        sscanf(pglist[n]->d_name, "hugepages-%zikB", &hpsize) == 1)
+            hpsize *= 1024
+            page_sizes[num_page_sizes++] = hpsize
+    ofi_hmem_init
+        ret = hmem_ops[iface].init()
+    ofi_monitors_init
+    vrb_os_ini
+
+
+struct ofi_hmem_ops hmem_ops[] = {
+	[FI_HMEM_SYSTEM] = {
+		.initialized = true,
+		.init = ofi_hmem_init_noop,
+		.cleanup = ofi_hmem_cleanup_noop,
+		.copy_to_hmem = ofi_memcpy,
+		.copy_from_hmem = ofi_memcpy,
+		.create_async_copy_event = ofi_no_create_async_copy_event,
+		.free_async_copy_event = ofi_no_free_async_copy_event,
+		.async_copy_to_hmem = ofi_no_async_memcpy,
+		.async_copy_from_hmem = ofi_no_async_memcpy,
+		.async_copy_query = ofi_no_async_copy_query,
+		.get_handle = ofi_hmem_no_get_handle,
+		.open_handle = ofi_hmem_no_open_handle,
+		.close_handle = ofi_hmem_no_close_handle,
+		.host_register = ofi_hmem_host_register_noop,
+		.host_unregister = ofi_hmem_host_unregister_noop,
+		.get_base_addr = ofi_hmem_system_base_addr,
+		.is_ipc_enabled = ofi_hmem_no_is_ipc_enabled,
+		.get_ipc_handle_size = ofi_hmem_no_get_ipc_handle_size,
+		.dev_register = ofi_hmem_system_dev_register,
+		.dev_unregister = ofi_hmem_system_dev_unregister,
+		.dev_reg_copy_to_hmem = ofi_hmem_system_dev_reg_copy,
+		.dev_reg_copy_from_hmem = ofi_hmem_system_dev_reg_copy,
+		.get_dmabuf_fd = ofi_hmem_no_get_dmabuf_fd,
+	},
+	[FI_HMEM_CUDA] = {
+		.initialized = false,
+		.init = cuda_hmem_init,
+		.cleanup = cuda_hmem_cleanup,
+		.copy_to_hmem = cuda_copy_to_dev,
+		.copy_from_hmem = cuda_copy_from_dev,
+		.create_async_copy_event = ofi_no_create_async_copy_event,
+		.free_async_copy_event = ofi_no_free_async_copy_event,
+		.async_copy_to_hmem = ofi_no_async_memcpy,
+		.async_copy_from_hmem = ofi_no_async_memcpy,
+		.async_copy_query = ofi_no_async_copy_query,
+		.is_addr_valid = cuda_is_addr_valid,
+		.get_handle = cuda_get_handle,
+		.open_handle = cuda_open_handle,
+		.close_handle = cuda_close_handle,
+		.host_register = cuda_host_register,
+		.host_unregister = cuda_host_unregister,
+		.get_base_addr = cuda_get_base_addr,
+		.is_ipc_enabled = cuda_is_ipc_enabled,
+		.get_ipc_handle_size = cuda_get_ipc_handle_size,
+		.dev_register = cuda_dev_register,
+		.dev_unregister = cuda_dev_unregister,
+		.dev_reg_copy_to_hmem = cuda_dev_reg_copy_to_hmem,
+		.dev_reg_copy_from_hmem = cuda_dev_reg_copy_from_hmem,
+		.get_dmabuf_fd = cuda_get_dmabuf_fd,
+	},
+	[FI_HMEM_ROCR] = {
+		.initialized = false,
+		.init = rocr_hmem_init,
+		.cleanup = rocr_hmem_cleanup,
+		.copy_to_hmem = rocr_copy_to_dev,
+		.copy_from_hmem = rocr_copy_from_dev,
+		.create_async_copy_event = rocr_create_async_copy_event,
+		.free_async_copy_event = rocr_free_async_copy_event,
+		.async_copy_to_hmem = rocr_async_copy_to_dev,
+		.async_copy_from_hmem = rocr_async_copy_from_dev,
+		.async_copy_query = rocr_async_copy_query,
+		.is_addr_valid = rocr_is_addr_valid,
+		.get_handle = rocr_get_handle,
+		.open_handle = rocr_open_handle,
+		.close_handle = rocr_close_handle,
+		.host_register = rocr_host_register,
+		.host_unregister = rocr_host_unregister,
+		.get_base_addr = rocr_get_base_addr,
+		.is_ipc_enabled = rocr_is_ipc_enabled,
+		.get_ipc_handle_size = rocr_get_ipc_handle_size,
+		.dev_register = rocr_dev_register,
+		.dev_unregister = rocr_dev_unregister,
+		.dev_reg_copy_to_hmem = rocr_dev_reg_copy_to_hmem,
+		.dev_reg_copy_from_hmem = rocr_dev_reg_copy_from_hmem,
+		.get_dmabuf_fd = rocr_hmem_get_dmabuf_fd,
+	},
+	[FI_HMEM_ZE] = {
+		.initialized = false,
+		.init = ze_hmem_init,
+		.cleanup = ze_hmem_cleanup,
+		.copy_to_hmem = ze_hmem_copy,
+		.copy_from_hmem = ze_hmem_copy,
+		.create_async_copy_event = ofi_no_create_async_copy_event,
+		.free_async_copy_event = ofi_no_free_async_copy_event,
+		.async_copy_to_hmem = ofi_no_async_memcpy,
+		.async_copy_from_hmem = ofi_no_async_memcpy,
+		.async_copy_query = ofi_no_async_copy_query,
+		.is_addr_valid = ze_hmem_is_addr_valid,
+		.get_handle = ze_hmem_get_handle,
+		.open_handle = ze_hmem_open_handle,
+		.close_handle = ze_hmem_close_handle,
+		.host_register = ze_hmem_host_register,
+		.host_unregister = ze_hmem_host_unregister,
+		.get_base_addr = ze_hmem_get_base_addr,
+		.is_ipc_enabled = ze_hmem_p2p_enabled,
+		.get_ipc_handle_size = ze_hmem_get_ipc_handle_size,
+		.dev_register = ze_dev_register,
+		.dev_unregister = ze_dev_unregister,
+		.dev_reg_copy_to_hmem = ze_dev_reg_copy_to_hmem,
+		.dev_reg_copy_from_hmem = ze_dev_reg_copy_from_hmem,
+		.get_dmabuf_fd = ze_hmem_get_dmabuf_fd,
+	},
+	[FI_HMEM_NEURON] = {
+		.initialized = false,
+		.init = neuron_hmem_init,
+		.cleanup = neuron_hmem_cleanup,
+		.copy_to_hmem = neuron_copy_to_dev,
+		.copy_from_hmem = neuron_copy_from_dev,
+		.create_async_copy_event = ofi_no_create_async_copy_event,
+		.free_async_copy_event = ofi_no_free_async_copy_event,
+		.async_copy_to_hmem = ofi_no_async_memcpy,
+		.async_copy_from_hmem = ofi_no_async_memcpy,
+		.async_copy_query = ofi_no_async_copy_query,
+		.get_handle = ofi_hmem_no_get_handle,
+		.open_handle = ofi_hmem_no_open_handle,
+		.close_handle = ofi_hmem_no_close_handle,
+		.host_register = neuron_host_register,
+		.host_unregister = neuron_host_unregister,
+		.get_base_addr = ofi_hmem_no_base_addr,
+		.is_ipc_enabled = ofi_hmem_no_is_ipc_enabled,
+		.get_ipc_handle_size = ofi_hmem_no_get_ipc_handle_size,
+		.dev_register = ofi_hmem_no_dev_register,
+		.dev_unregister = ofi_hmem_no_dev_unregister,
+		.dev_reg_copy_to_hmem = ofi_hmem_no_dev_reg_copy_to_hmem,
+		.dev_reg_copy_from_hmem = ofi_hmem_no_dev_reg_copy_from_hmem,
+		.get_dmabuf_fd = neuron_get_dmabuf_fd,
+	},
+	[FI_HMEM_SYNAPSEAI] = {
+		.initialized = false,
+		.init = synapseai_init,
+		.cleanup = synapseai_cleanup,
+		.copy_to_hmem = synapseai_copy_to_hmem,
+		.copy_from_hmem = synapseai_copy_from_hmem,
+		.create_async_copy_event = ofi_no_create_async_copy_event,
+		.free_async_copy_event = ofi_no_free_async_copy_event,
+		.async_copy_to_hmem = ofi_no_async_memcpy,
+		.async_copy_from_hmem = ofi_no_async_memcpy,
+		.async_copy_query = ofi_no_async_copy_query,
+		.get_handle = ofi_hmem_no_get_handle,
+		.open_handle = ofi_hmem_no_open_handle,
+		.close_handle = ofi_hmem_no_close_handle,
+		.host_register = synapseai_host_register,
+		.host_unregister = synapseai_host_unregister,
+		.get_base_addr = ofi_hmem_no_base_addr,
+		.is_ipc_enabled = ofi_hmem_no_is_ipc_enabled,
+		.get_ipc_handle_size = ofi_hmem_no_get_ipc_handle_size,
+		.dev_register = ofi_hmem_no_dev_register,
+		.dev_unregister = ofi_hmem_no_dev_unregister,
+		.dev_reg_copy_to_hmem = ofi_hmem_no_dev_reg_copy_to_hmem,
+		.dev_reg_copy_from_hmem = ofi_hmem_no_dev_reg_copy_from_hmem,
+		.get_dmabuf_fd = synapseai_get_dmabuf_fd,
+	},
+};
+
+
+enum fi_hmem_iface {
+	FI_HMEM_SYSTEM	= 0,
+	FI_HMEM_CUDA,   -> include/fabric、domain：添加 HMEM API 更改、为 GPU 感知应用程序添加 API 更改： - 为应用程序添加 FI_HMEM 功能以请求设备支持 - 添加 FI_MR_HMEM mr_mode 供提供商设置是否需要应用程序注册设备内存 - 添加 fi_mr_attr： :iface 在注册设备内存时将 hmem 接口传递给提供者 - 添加 fi_mr_attr 联合来传递特定于接口的设备标识符以指定内存驻留在哪个设备上这使得提供者可以轻松地知道哪个设备上有哪些缓冲区，而无需查询 设备
+	FI_HMEM_ROCR, -> rdma/fi_domain,ofi_mr.h：定义HMEM ROCR接口，ROCR是AMD的HSA实现，用于访问AMD GPU设备。 OFI_HMEM_MAX 更新为包含 FI_HMEM_ROCR
+	FI_HMEM_ZE,  -> intel gpu -> https://dgpu-docs.intel.com/driver/client/overview.html
+	FI_HMEM_NEURON, -> AWS
+	FI_HMEM_SYNAPSEAI,
+};
+
+
+
+include/rdma/fi_tagged.h
+
+
+
+
+
+vrb_poll_cq
+
+
+ucx:
+static struct fi_ops ucx_fabric_fi_ops = {
+	.size = sizeof(struct fi_ops),
+	.close = ucx_fabric_close,
+	.bind = fi_no_bind,
+	.control = fi_no_control,
+	.ops_open = fi_no_ops_open,
+};
+
+static struct fi_ops_fabric ucx_fabric_ops = {
+	.size = sizeof(struct fi_ops_fabric),
+	.domain = ucx_domain_open,
+		ofi_status = ofi_prov_check_info(&ucx_util_prov, fabric->api_version, info)
+		domain = calloc(1, sizeof(struct ucx_domain))
+		ofi_status = ofi_domain_init(fabric, info, &(domain->u_domain), context, 0)
+			ret = util_domain_init(domain, info, lock_type)
+			ret = ofi_mr_map_init(domain->prov, info->domain_attr->mr_mode, &domain->mr_map)
+				map->rbtree = ofi_rbmap_create(compare_mr_keys)
+					ofi_rbmap_init(map, compare)
+						map->compare = compare;
+						map->root = &map->sentinel;
+						map->sentinel.left = &map->sentinel;
+						map->sentinel.right = &map->sentinel;
+						map->sentinel.parent = NULL;
+						map->sentinel.color = BLACK;
+						map->sentinel.data = NULL;
+			dlist_insert_tail(&domain->list_entry, &fabric->domain_list)
+		*fid = &(domain->u_domain.domain_fid)
+	.passive_ep = fi_no_passive_ep,
+	.eq_open = ofi_eq_create,
+	.wait_open = ofi_wait_fd_open,
+	.trywait = fi_no_trywait,
+};
+
+struct fi_ops_domain ucx_domain_ops = {
+	.size = sizeof(struct fi_ops_domain),
+	.av_open = ucx_av_open,
+	.cq_open = ucx_cq_open,
+	.endpoint = ucx_ep_open,
+		ofi_status = ofi_endpoint_init(domain, &ucx_util_prov, info, &ep->ep, context, ucx_ep_progress)
+		status = ucp_worker_create(u_domain->context, &worker_params, &(ep->worker))
+
+	.scalable_ep = fi_no_scalable_ep,
+	.cntr_open = ucx_cntr_open,
+	.poll_open = fi_poll_create,
+	.stx_ctx = fi_no_stx_context,
+	.srx_ctx = fi_no_srx_context,
+	.query_atomic = fi_no_query_atomic,
+};
+
+
+struct fi_ops_rma ucx_rma_ops = {
+	.size = sizeof(struct fi_ops_rma),
+	.read = ucx_read,
+	.readv = ucx_readv,
+	.readmsg = ucx_readmsg,
+	.write = ucx_write,
+	.writev = ucx_writev,
+	.writemsg = ucx_writemsg,
+		status = ucp_put_nb(dst_ep, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len, msg->rma_iov[0].addr, rkey->rkey, ucx_rma_callback)
+	.inject = ucx_inject_write,
+	.writedata = fi_no_rma_writedata,
+	.injectdata = fi_no_rma_injectdata,
+};
+
+
+
+
+struct fi_ops_rma vrb_msg_ep_rma_ops = {
+	.size = sizeof(struct fi_ops_rma),
+	.read = vrb_msg_ep_rma_read,
+	.readv = vrb_msg_ep_rma_readv,
+	.readmsg = vrb_msg_ep_rma_readmsg,
+	.write = vrb_msg_ep_rma_write,
+	.writev = vrb_msg_ep_rma_writev,
+	.writemsg = vrb_msg_ep_rma_writemsg,
+	.inject = vrb_rma_write_fast,
+	.writedata = vrb_msg_ep_rma_writedata,
+	.injectdata = vrb_msg_ep_rma_inject_writedata_fast,
+};
+
+

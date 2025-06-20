@@ -42,7 +42,7 @@
 // dummy definitions
 struct fi_provider *fi_opx_provider = NULL;
 
-void fi_log(const struct fi_provider *prov, enum fi_log_level level, enum fi_log_subsys subsys, const char *func,
+void fi_log(const struct fi_provider *prov, enum fi_log_level level, enum fi_log_subsys subsys, const char *func, const char *file,
 	    int line, const char *fmt, ...)
 {
 	va_list ap;

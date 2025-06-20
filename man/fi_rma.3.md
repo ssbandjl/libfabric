@@ -275,6 +275,18 @@ fi_writemsg.
   operation (inclusive) to the posting of a subsequent fenced operation
   (exclusive) is controlled by the endpoint's ordering semantics.
 
+fi_readmsg 和 fi_writemsg 调用允许用户指定可以更改默认数据传输操作的标志。 使用 fi_readmsg / fi_writemsg 指定的标志会覆盖之前使用端点配置的大多数标志，除非另有说明（请参阅 fi_endpoint.3）。 以下标志列表可与 fi_readmsg 和/或 fi_writemsg 一起使用。
+FI_REMOTE_CQ_DATA ：适用于 fi_writemsg 和 fi_writedata。 指示远程 CQ 数据可用并且应作为请求的一部分发送。 有关 FI_REMOTE_CQ_DATA 的其他详细信息，请参阅 fi_getinfo。
+FI_COMPLETION ：指示应为指定操作生成完成条目。 端点必须绑定到具有与指定操作相对应的 FI_SELECTIVE_COMPLETION 的完成队列，否则该标志将被忽略。
+FI_MORE ：表示用户有其他请求，这些请求将在当前调用返回后立即发布。 使用此标志可以使提供商能够优化其对结构硬件的访问，从而提高性能。
+FI_INJECT ：适用于 fi_writemsg。 指示出站数据缓冲区应在写入调用返回后立即返回给用户，即使该操作是异步处理的。 这可能需要底层提供程序实现将数据复制到本地缓冲区并从该缓冲区传输出去。 该标志只能用于小于inject_size 的消息。
+FI_INJECT_COMPLETE ：适用于 fi_writemsg。 指示当可以重用源缓冲区时应生成完成。
+FI_TRANSMIT_COMPLETE ：适用于 fi_writemsg。 指示在操作已成功传输且提供程序不再跟踪之前不应生成完成。
+FI_DELIVERY_COMPLETE ：适用于 fi_writemsg。 指示当目标处理操作时应生成完成。
+FI_COMMIT_COMPLETE ：适用于针对持久内存区域的 fi_writemsg。 指示只有在操作结果持久后才应生成完成。
+FI_FENCE ：适用于传输。 指示请求的操作（也称为受防护操作）以及受防护操作之后发布的任何操作将被推迟，直到针对同一对等端点的所有先前操作完成为止。 隔离后发布的操作将查看和/或替换隔离操作之前启动的任何操作的结果。从发布受防护操作（包括）开始到发布后续受防护操作（不包括）的操作顺序由端点的排序语义控制
+
+
 # RETURN VALUE
 
 Returns 0 on success. On error, a negative value corresponding to fabric

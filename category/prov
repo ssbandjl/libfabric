@@ -1,0 +1,26 @@
+ordered_prov_names
+
+static void ofi_ordered_provs_init(void)
+{
+	char *ordered_prov_names[] = {
+		"efa", "psm2", "opx", "usnic", "gni", "bgq", "verbs",
+		"netdir", "psm3", "ucx", "ofi_rxm", "ofi_rxd", "shm",
+
+		/* Initialize the socket based providers last of the
+		 * standard providers.  This will result in them being
+		 * the least preferred providers.
+		 */
+
+		/* Before you add ANYTHING here, read the comment above!!! */
+		"udp", "tcp", "sockets", "net", /* NOTHING GOES HERE! */
+		/* Seriously, read it! */
+
+		/* These are hooking providers only.  Their order
+		 * doesn't matter
+		 */
+		"ofi_hook_perf", "ofi_hook_trace", "ofi_hook_profile", "ofi_hook_debug",
+		"ofi_hook_noop", "ofi_hook_hmem", "ofi_hook_dmabuf_peer_mem",
+
+		/* So do the offload providers. */
+		"off_coll",
+	};

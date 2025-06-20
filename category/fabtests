@@ -1,0 +1,20 @@
+设置头文件(*.h)和库文件(lib)路径: --with-libfabric=<directory>
+设置安装目录: --prefix=<directory>, 默认安装到/usr/bin/*
+
+
+编译和安装(依赖build.sh脚本):
+./configure --with-libfabric=/home/xb/project/libfabric/libfabric/build --prefix=/home/xb/project/libfabric/libfabric/build/fabtests
+make
+make install
+
+添加文件:
+修改: fabtests/Makefile.am, functional/fi_dgram, functional_fi_dgram_SOURCES
+
+
+
+example_msg.c -> main
+hints = fi_allocinfo() -> struct fi_info *DEFAULT_SYMVER_PRE(fi_dupinfo)(const struct fi_info *info)
+  return ofi_allocinfo_internal()
+    info = calloc(1, sizeof(*info))
+hints->ep_attr->type = FI_EP_MSG
+    
