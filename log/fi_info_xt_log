@@ -1,0 +1,458 @@
+root@s96:~/project/net/libfabric# ./build/bin/fi_info 
+provider: tcp
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_XNET
+provider: tcp
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_XNET
+provider: tcp
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_XNET
+provider: tcp
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_XNET
+provider: tcp
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_XNET
+provider: tcp
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_XNET
+provider: tcp;ofi_rxm
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: tcp;ofi_rxm
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXM
+provider: udp;ofi_rxd
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXD
+provider: udp;ofi_rxd
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXD
+provider: udp;ofi_rxd
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXD
+provider: udp;ofi_rxd
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXD
+provider: udp;ofi_rxd
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXD
+provider: udp;ofi_rxd
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_RXD
+provider: shm
+    fabric: shm
+    domain: shm
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SHM
+provider: shm
+    fabric: shm
+    domain: shm
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SHM
+provider: udp
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_UDP
+provider: udp
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_UDP
+provider: udp
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_UDP
+provider: udp
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_UDP
+provider: udp
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_UDP
+provider: udp
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_UDP
+provider: tcp
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: tcp
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_DGRAM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 10.20.10.0/24
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: fe80::/64
+    domain: enp5s0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 192.168.1.0/24
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: fe80::/64
+    domain: ens4f0
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: 127.0.0.1/32
+    domain: lo
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: sockets
+    fabric: ::1/128
+    domain: lo
+    version: 201.0
+    type: FI_EP_MSG
+    protocol: FI_PROTO_SOCK_TCP
+provider: sm2
+    fabric: sm2
+    domain: sm2
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SM2
+provider: sm2
+    fabric: sm2
+    domain: sm2
+    version: 201.0
+    type: FI_EP_RDM
+    protocol: FI_PROTO_SM2
+root@s96:~/project/net/libfabric# 
