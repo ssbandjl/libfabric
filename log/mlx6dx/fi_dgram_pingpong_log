@@ -1,0 +1,15 @@
+root@s96:~/project/net/libfabric/build/bin# ./fi_dgram_pingpong -d mlx5_0 -S all 
+
+efa_device_construct, efa_device_list_initialize(), prov/efa/src/efa_device.c:201
+tid:14606, vrb_have_device(), prov/verbs/src/verbs_info.c:705, idx:0, Open dev_name:mlx5_0
+tid:14606, vrb_get_sib(), prov/verbs/src/verbs_info.c:1065, Ready to open device, num_devices:2
+tid:14606, vrb_get_sib(), prov/verbs/src/verbs_info.c:1069, Open dev_name:mlx5_0
+tid:14606, vrb_get_sib(), prov/verbs/src/verbs_info.c:1069, Open dev_name:mlx5_1
+fi_getinfo(): common/shared.c:1072, ret=-61 (No data available)
+root@s96:~/project/net/libfabric/build/bin# 
+root@s96:~/project/net/libfabric/build/bin# 
+
+
+root@s95:~/project/net/libfabric/build/bin# ./fi_dgram_pingpong 192.168.1.11 -S all -d mlx5_0
+ft_sock_recv(): common/shared.c:4275, ret=-107 (Transport endpoint is not connected)
+root@s95:~/project/net/libfabric/build/bin# 
