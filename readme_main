@@ -915,6 +915,10 @@ static inline uint64_t roundup_power_of_two(uint64_t n)
 }
 
 
+mercury_new_api: hg_core_progress_wait
+...
+trywait(
+
 
 rxm,手动/自动推进, 
 FI_PROGRESS_MANUAL, FI_PROGRESS_AUTO
@@ -936,6 +940,12 @@ static int rxm_ep_ctrl(struct fid *fid, int command, void *arg)
                         fi_trywait(rxm_fabric->msg_fabric, fids, 1)
                     ofi_wait_add_fid(wait, &rxm_ep->msg_eq->fid, POLLIN, rxm_ep_trywait_eq)
                         fi_trywait(rxm_fabric->msg_fabric, fids, 1)
+							return fabric->ops->trywait(fabric, fids, count) -> .trywait = -> static struct fi_ops_fabric rxm_fabric_ops -> .trywait = ofi_trywait
+								ret = wait->wait_try(wait) -> util_wait_fd_try
+									... -> vrb_trywait
+										vrb_cq_trywait
+											ibv_get_cq_event
+											ibv_req_notify_cq
             rxm_ep_wait_fd_add(rxm_ep, cntr_list[i]->wait) -> 控制列表
         rxm_ep_txrx_res_open(ep) -> 在启用端点时，FI_OPT_BUFFERED_MIN、FI_OPT_BUFFERED_LIMIT应该已被冻结，以便我们可以创建具有正确大小的集合点协议消息池
             prov/rxm：使用预分配的注入 TX 缓冲区进行非线程安全模式 该补丁通过在关键发送路径上保存 40 条指令来减少延迟 (1-2 ms) 和消息速率 (+ ~50k)。 该补丁提出了以下行为：如果未设置 FI_THREAD_SAFE 线程模式，EP 不会为 inejct 操作分配缓冲区池，EP 会为注入操作分配单个 TX 缓冲区，并在每个注入操作中使用它。 此外，补丁还通过仅存储指向池的指针而不是整个数组来减少 RxM EP 的大小
